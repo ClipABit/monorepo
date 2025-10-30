@@ -1,0 +1,1 @@
+run `modal serve main.py` to start modal app 
