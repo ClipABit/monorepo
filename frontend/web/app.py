@@ -21,7 +21,7 @@ st.caption("Upload a video file and send it to your Modal backend for processing
 
 api_url = st.text_input(
     "Backend API URL",
-    value="https://clipabit01--example-basic-web-webapp-upload-dev.modal.run",
+    value="https://clipabit01--clipabit-server-upload-dev.modal.run",
     help="Full URL of the Modal backend endpoint that accepts multipart file uploads.",
 )
 
