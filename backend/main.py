@@ -4,13 +4,7 @@ import modal
 # import all necessary modules in the image
 image = (
             modal.Image.debian_slim(python_version="3.12")
-            .pip_install(
-                "fastapi[standard]",
-                "python-multipart", 
-                "ffmpeg-python", 
-                "opencv-python-headless", 
-                "numpy"
-            )
+            .uv_sync()
             .add_local_python_source(
                 "preprocessing"
             )
