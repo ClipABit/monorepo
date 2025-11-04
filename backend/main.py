@@ -1,12 +1,14 @@
 from fastapi import UploadFile, HTTPException
 import modal
 
-# import all necessary modules in the image
+# Configure Modal app and image
+# dependencies found in pyproject.toml
 image = (
             modal.Image.debian_slim(python_version="3.12")
             .uv_sync()
-            .add_local_python_source(
-                "preprocessing"
+            .add_local_python_source(  # add all local modules here
+                "preprocessing",
+                "embeddings",
             )
         )
 app = modal.App(name="ClipABit", image=image)
