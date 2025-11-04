@@ -1,15 +1,36 @@
 # ClipABit Backend
 
-## Setup
+Video processing backend that runs on Modal. Accepts video uploads via FastAPI and processes them in serverless containers.
+
+## Quick Start
 
 ```bash
-# 1. Install dependencies with uv
+# Install dependencies (creates .venv automatically)
 uv sync
 
-# 2. Authenticate with Modal
+# Authenticate with Modal (first time only - opens browser)
 uv run modal token new
-# Browser will open for verification
 
-# 3. Start development server
+# Start dev server (hot-reloads on file changes)
 uv run modal serve main.py
+```
+
+Note: `uv run` automatically uses the virtual environment - no need to activate it manually.
+
+## How It Works
+
+- `main.py` defines a Modal App with a `Server` class
+- `/upload` endpoint accepts video files and spawns background processing jobs
+- Each job runs `process_video()` in its own isolated container
+- The Modal image includes the local `preprocessing/` module via `.add_local_python_source()`
+
+**Important**: If you add imports to files in `preprocessing/`, make sure those libraries are also imported at the top of `main.py` so they're included in the Modal image.
+
+## Managing Dependencies
+
+```bash
+uv add package-name              # Add new dependency
+uv add --dev package-name        # Add dev dependency
+uv remove package-name           # Remove dependency
+uv sync --upgrade                # Update all packages
 ```
