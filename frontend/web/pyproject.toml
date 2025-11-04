@@ -1,0 +1,12 @@
+[project]
+name = "clipabit-frontend"
+version = "0.0.1"
+requires-python = ">=3.12"
+dependencies = [
+    "requests",
+    "streamlit>=1.28.0",
+    "python-multipart",
+    "watchdog",
+]
+
+

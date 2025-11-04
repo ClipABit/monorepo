@@ -212,7 +212,7 @@ wheels = [
 [[package]]
 name = "clipabit-backend"
 version = "0.0.1"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
     { name = "ffmpeg-python" },
