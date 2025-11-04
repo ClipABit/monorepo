@@ -82,4 +82,16 @@ async def search(self, payload: dict = Body(...)):
 - Pinecone index metric is `cosine`.
 - Results include the metadata fields your UI expects (timestamps, modality, etc.).
 
+### Modal integration and run commands
+- Backend (Terminal 1):
+  - `cd backend`
+  - `uv sync`
+  - `uv run modal serve main.py`
+- Frontend (Terminal 2):
+  - `cd frontend/web`
+  - `uv sync`
+  - `uv run streamlit run app.py`
+
+Once the Modal server is live, add a `/search` endpoint (as above) in `backend/main.py` and call it from Streamlit. For your current scale, perform one query at a time with small `top_k`.
+
 

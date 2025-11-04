@@ -7,9 +7,14 @@ Goal: ensure there is data in Pinecone to compare against a query. This step cov
 - Install: `pip install pinecone-client torch transformers numpy python-dotenv`
 - CLIP embeddings from your pipeline or from `embeddings.py` (e.g., `generate_clip_embedding`, `generate_clip_text_embedding`).
 
+### Single-chunk mode (your scale)
+- We will handle one chunk at a time end-to-end. Batch size can be `1` safely.
+- No per-frame vectors are stored; only the averaged per-chunk vector plus optional face cluster representatives.
+- Keep `top_k` small during testing (≤ 25) to minimize read units.
+
 ### Index design
 - `clip-chunks-v1`: dim=512, metric=cosine (CLIP text/image)
-- `faces-v1`: dim=<face_dim>, metric=cosine (face model dependent)
+- Faces are written into the same index with `modality="face"` using 512-d face embeddings (ArcFace/Facenet512 recommended) to keep one index only.
 
 ### ID and metadata schema
 - id formats:
@@ -17,7 +22,7 @@ Goal: ensure there is data in Pinecone to compare against a query. This step cov
   - face: `face:{video_id}:{cluster_id}`
 - common metadata: `video_id`, `chunk_id`, `start_ts`, `end_ts`, `modality`, `source_uri`
 - visual: `frame_count`, `preview_frame_uri?`
-- audio: `transcript_snippet`, `language?`
+- audio: `transcript_snippet`, `language?` (embed transcripts with CLIP text to keep 512-d; MiniLM can be used offline for re-ranking, but not stored in Pinecone)
 - faces: `cluster_id`, `face_count`, `thumbnail_uri?`
 
 ### Create/connect indices
