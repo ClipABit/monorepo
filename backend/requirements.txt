@@ -1,7 +1,0 @@
-modal
-fastapi[standard]
-pinecone
-deepface
-numpy
-tensorflow
-python-dotenv
