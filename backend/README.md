@@ -21,10 +21,8 @@ Note: `uv run` automatically uses the virtual environment - no need to activate 
 
 - `main.py` defines a Modal App with a `Server` class
 - `/upload` endpoint accepts video files and spawns background processing jobs
-- Each job runs `process_video()` in its own isolated container
-- The Modal image includes the local `preprocessing/` module via `.add_local_python_source()`
 
-**Important**: If you add imports to files in `preprocessing/`, make sure those libraries are also imported at the top of `main.py` so they're included in the Modal image.
+[...]
 
 ## Managing Dependencies
 
