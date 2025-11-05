@@ -1,1 +1,3 @@
-# Make preprocessing a proper Python package
+from .chunker import Chunker
+
+__all__ = ['Chunker']
