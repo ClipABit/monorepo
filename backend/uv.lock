@@ -226,7 +226,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", extras = ["standard"] },
     { name = "ffmpeg-python" },
-    { name = "modal", specifier = ">=1.2.1" },
+    { name = "modal" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
     { name = "python-multipart" },
