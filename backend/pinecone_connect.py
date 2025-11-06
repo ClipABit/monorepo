@@ -2,7 +2,6 @@ import os
 import numpy as np
 from typing import List, Tuple, Dict, Any, Optional
 from pinecone import Pinecone, ServerlessSpec
-from deepface import DeepFace
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
