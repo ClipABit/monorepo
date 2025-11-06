@@ -3,7 +3,7 @@ venv/
 
 __pycache__
 
-# Environment secrets (e.g., Pinecone API key)
+# Environment secrets
 .env
 .env.*
 backend/.env
