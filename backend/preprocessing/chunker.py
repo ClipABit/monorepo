@@ -31,7 +31,7 @@ class Chunker:
         Returns:
             List of VideoChunk objects
         """
-        logger.info(f"Starting basic chunking for {video_path}")
+        logger.info("Chunking video: path=%s, video_id=%s", video_path, video_id)
         
         # Get video duration
         cap = cv2.VideoCapture(video_path)
@@ -40,7 +40,8 @@ class Chunker:
         duration = frame_count / fps if fps > 0 else 0
         cap.release()
         
-        logger.info(f"Video duration: {duration:.1f}s, FPS: {fps}")
+        logger.info("Video metadata: duration=%.1fs, fps=%.1f, frames=%d",
+                    duration, fps, frame_count)
         
         # Create chunks
         chunks = []
@@ -58,11 +59,11 @@ class Chunker:
             )
             chunks.append(chunk)
             
-            logger.info(f"Created {chunk}")
+            logger.debug("Created chunk: %s (%.1fs-%.1fs)", chunk_id, chunk_start, chunk_end)
             
             chunk_start = chunk_end
             chunk_idx += 1
         
-        logger.info(f"Created {len(chunks)} chunks")
+        logger.info("Created %d chunks from video", len(chunks))
         return chunks
 

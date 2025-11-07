@@ -32,7 +32,8 @@ class FrameExtractor:
         Returns:
             (frames_array, actual_fps_used)
         """
-        logger.info(f"Extracting frames from {chunk.chunk_id}")
+        logger.debug("Extracting frames: chunk_id=%s, time_range=%.1f-%.1fs",
+                     chunk.chunk_id, chunk.start_time, chunk.end_time)
         
         cap = cv2.VideoCapture(video_path)
         video_fps = cap.get(cv2.CAP_PROP_FPS)
@@ -60,7 +61,7 @@ class FrameExtractor:
         cap.release()
         
         actual_fps = len(frames) / chunk.duration if chunk.duration > 0 else 0
-        logger.info(f"Extracted {len(frames)} frames at {actual_fps:.2f} fps")
+        logger.debug("Extracted %d frames at %.2f fps", len(frames), actual_fps)
         
         return np.array(frames) if frames else np.array([]), actual_fps
     

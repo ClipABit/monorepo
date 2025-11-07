@@ -6,10 +6,13 @@ dependencies = [
     "fastapi[standard]",
     "python-multipart",
     "ffmpeg-python",
-    "opencv-python",
     "opencv-python-headless",
     "numpy",
     "modal",
     "scenedetect",
 ]
 
+[dependency-groups]
+dev = [
+    "opencv-python", 
+]

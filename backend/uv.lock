@@ -218,10 +218,14 @@ dependencies = [
     { name = "ffmpeg-python" },
     { name = "modal" },
     { name = "numpy" },
-    { name = "opencv-python" },
     { name = "opencv-python-headless" },
     { name = "python-multipart" },
     { name = "scenedetect" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "opencv-python" },
 ]
 
 [package.metadata]
@@ -230,11 +234,13 @@ requires-dist = [
     { name = "ffmpeg-python" },
     { name = "modal" },
     { name = "numpy" },
-    { name = "opencv-python" },
     { name = "opencv-python-headless" },
     { name = "python-multipart" },
     { name = "scenedetect" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "opencv-python" }]
 
 [[package]]
 name = "colorama"

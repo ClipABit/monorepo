@@ -59,14 +59,15 @@ class Compressor:
         Returns:
             Array of compressed frames
         """
-        logger.info(f"Compressing {len(frames)} frames to {self.target_width}x{self.target_height}")
+        logger.debug("Compressing %d frames to %dx%d",
+                     len(frames), self.target_width, self.target_height)
         
         compressed = []
         for frame in frames:
             compressed.append(self.compress_frame(frame))
         
         result = np.array(compressed)
-        logger.info(f"Compressed frames shape: {result.shape}")
+        logger.debug("Compression complete: output_shape=%s", result.shape)
         
         return result
     
