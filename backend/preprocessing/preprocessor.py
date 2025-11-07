@@ -241,14 +241,14 @@ class Preprocessor:
         try:
             logger.debug("Processing chunk: %s", chunk.chunk_id)
 
-            # Step 2: Extract frames
-            frames, sampling_fps = self.extractor.extract_frames(video_path, chunk)
+            # Step 2: Extract frames with complexity calculation
+            frames, sampling_fps, complexity_score = self.extractor.extract_frames(video_path, chunk)
 
             if len(frames) == 0:
                 logger.warning("No frames extracted for chunk %s, skipping", chunk.chunk_id)
                 return None
 
-            logger.debug("Extracted %d frames at %.2f fps", len(frames), sampling_fps)
+            logger.debug("Extracted %d frames at %.2f fps, complexity=%.3f", len(frames), sampling_fps, complexity_score)
 
             # Step 3: Compress frames
             compressed_frames = self.compressor.compress_frames(frames)
@@ -273,7 +273,7 @@ class Preprocessor:
                 s3_url=s3_url,
                 frame_count=len(compressed_frames),
                 sampling_fps=sampling_fps,
-                complexity_score=0.5  # TODO: Add complexity calculation
+                complexity_score=complexity_score
             )
 
             # Package chunk data
