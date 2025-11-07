@@ -24,7 +24,7 @@ class Chunker:
         self,
         min_duration: float = 5.0,
         max_duration: float = 20.0,
-        scene_threshold: float = 27.0
+        scene_threshold: float = 13.0
     ):
         """
         Args:

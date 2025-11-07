@@ -28,7 +28,7 @@ class Preprocessor:
         self,
         min_chunk_duration: float = 5.0,
         max_chunk_duration: float = 20.0,
-        scene_threshold: float = 27.0,
+        scene_threshold: float = 13.0,
         sampling_fps: float = 1.0,
         target_width: int = 640,
         target_height: int = 480
