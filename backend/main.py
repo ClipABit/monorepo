@@ -31,9 +31,12 @@ class Server:
         
         self.start_time = datetime.now(timezone.utc)
 
-        # Instantiate classes
-        self.preprocessor = Preprocessor()
-        
+        self.preprocessor = Preprocessor(
+            min_chunk_duration=1.0,
+            max_chunk_duration=10.0,
+            scene_threshold=13.0,
+        )
+
         print("✅ Preprocessor initialized and ready!")
 
     @modal.method()
