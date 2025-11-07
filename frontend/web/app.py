@@ -64,15 +64,43 @@ if uploaded is not None:
                         st.success("✅ Upload successful!")
                         try:
                             data = resp.json()
-                            st.json(data)
-                            
-                            # Display thumbnail if backend returns one
-                            if isinstance(data, dict) and "thumbnail_base64" in data:
-                                try:
-                                    thumb_b = base64.b64decode(data["thumbnail_base64"])
-                                    st.image(io.BytesIO(thumb_b), caption="Thumbnail from backend")
-                                except Exception:
-                                    pass
+
+                            # Display processing summary
+                            if isinstance(data, dict):
+                                st.subheader("Processing Summary")
+
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Status", data.get("status", "unknown"))
+                                with col2:
+                                    st.metric("Chunks", data.get("chunks", 0))
+                                with col3:
+                                    st.metric("Total Frames", data.get("total_frames", 0))
+                                with col4:
+                                    st.metric("Memory", f"{data.get('total_memory_mb', 0):.1f} MB")
+
+                                # Show job ID
+                                st.code(f"Job ID: {data.get('job_id', 'N/A')}", language=None)
+
+                                # Show raw JSON in expander
+                                with st.expander("View raw response"):
+                                    st.json(data)
+
+                                # Display chunk details if available
+                                if "chunk_details" in data and data["chunk_details"]:
+                                    st.subheader("Chunk Details")
+                                    for i, chunk in enumerate(data["chunk_details"], 1):
+                                        with st.expander(f"Chunk {i}: {chunk.get('chunk_id', 'unknown')}"):
+                                            meta = chunk.get('metadata', {})
+                                            time_range = meta.get('timestamp_range', [0, 0])
+
+                                            st.write(f"**Time Range:** {time_range[0]:.1f}s - {time_range[1]:.1f}s")
+                                            st.write(f"**Duration:** {meta.get('duration', 0):.1f}s")
+                                            st.write(f"**Frames:** {meta.get('frame_count', 0)} at {meta.get('sampling_fps', 0):.2f} fps")
+                                            st.write(f"**Memory:** {chunk.get('memory_mb', 0):.2f} MB")
+                                            st.write(f"**Complexity:** {meta.get('complexity_score', 0):.3f}")
+                            else:
+                                st.json(data)
                         except ValueError:
                             st.text(resp.text)
                     else:
