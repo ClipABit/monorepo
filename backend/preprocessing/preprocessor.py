@@ -16,31 +16,35 @@ logger = logging.getLogger(__name__)
 class Preprocessor:
     """
     Main preprocessing pipeline that coordinates all components.
-    
+
     Flow:
     1. Chunk video using scene detection with duration constraints
-    2. Extract frames at fixed rate per chunk
+    2. Extract frames adaptively based on motion/complexity
     3. Compress frames to target resolution
     4. Package with metadata
     """
-    
+
     def __init__(
         self,
         min_chunk_duration: float = 5.0,
         max_chunk_duration: float = 20.0,
         scene_threshold: float = 13.0,
-        sampling_fps: float = 1.0,
+        min_sampling_fps: float = 0.5,
+        max_sampling_fps: float = 2.0,
+        motion_threshold: float = 25.0,
         target_width: int = 640,
         target_height: int = 480
     ):
         """
         Initialize all components.
-        
+
         Args:
             min_chunk_duration: Minimum chunk duration in seconds
             max_chunk_duration: Maximum chunk duration in seconds
             scene_threshold: Scene detection sensitivity (lower = more sensitive)
-            sampling_fps: Frames per second to extract
+            min_sampling_fps: Minimum frames per second for static scenes
+            max_sampling_fps: Maximum frames per second for high-motion scenes
+            motion_threshold: Motion detection threshold (higher = less sensitive)
             target_width: Target width for compressed frames
             target_height: Target height for compressed frames
         """
@@ -49,15 +53,19 @@ class Preprocessor:
             max_duration=max_chunk_duration,
             scene_threshold=scene_threshold
         )
-        self.extractor = FrameExtractor(sampling_fps=sampling_fps)
+        self.extractor = FrameExtractor(
+            min_fps=min_sampling_fps,
+            max_fps=max_sampling_fps,
+            motion_threshold=motion_threshold
+        )
         self.compressor = Compressor(
             target_width=target_width,
             target_height=target_height
         )
-        
+
         logger.info(
-            "Preprocessor initialized: chunk_range=%.1fs-%.1fs, scene_threshold=%.1f, sampling_fps=%s, resolution=%dx%d",
-            min_chunk_duration, max_chunk_duration, scene_threshold, sampling_fps, target_width, target_height
+            "Preprocessor initialized: chunk_range=%.1fs-%.1fs, scene_threshold=%.1f, adaptive_fps=%.1f-%.1f, motion_threshold=%.1f, resolution=%dx%d",
+            min_chunk_duration, max_chunk_duration, scene_threshold, min_sampling_fps, max_sampling_fps, motion_threshold, target_width, target_height
         )
     
     def process_video_from_bytes(
