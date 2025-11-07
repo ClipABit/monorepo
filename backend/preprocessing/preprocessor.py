@@ -18,7 +18,7 @@ class Preprocessor:
     Main preprocessing pipeline that coordinates all components.
     
     Flow:
-    1. Chunk video using fixed intervals
+    1. Chunk video using scene detection with duration constraints
     2. Extract frames at fixed rate per chunk
     3. Compress frames to target resolution
     4. Package with metadata
@@ -26,7 +26,9 @@ class Preprocessor:
     
     def __init__(
         self,
-        chunk_duration: float = 10.0,
+        min_chunk_duration: float = 5.0,
+        max_chunk_duration: float = 20.0,
+        scene_threshold: float = 27.0,
         sampling_fps: float = 1.0,
         target_width: int = 640,
         target_height: int = 480
@@ -35,12 +37,18 @@ class Preprocessor:
         Initialize all components.
         
         Args:
-            chunk_duration: Target duration for each chunk in seconds
+            min_chunk_duration: Minimum chunk duration in seconds
+            max_chunk_duration: Maximum chunk duration in seconds
+            scene_threshold: Scene detection sensitivity (lower = more sensitive)
             sampling_fps: Frames per second to extract
             target_width: Target width for compressed frames
             target_height: Target height for compressed frames
         """
-        self.chunker = Chunker(chunk_duration=chunk_duration)
+        self.chunker = Chunker(
+            min_duration=min_chunk_duration,
+            max_duration=max_chunk_duration,
+            scene_threshold=scene_threshold
+        )
         self.extractor = FrameExtractor(sampling_fps=sampling_fps)
         self.compressor = Compressor(
             target_width=target_width,
@@ -48,8 +56,8 @@ class Preprocessor:
         )
         
         logger.info(
-            "Preprocessor initialized: chunk_duration=%ss, sampling_fps=%s, resolution=%sx%s",
-            chunk_duration, sampling_fps, target_width, target_height
+            "Preprocessor initialized: chunk_range=%.1fs-%.1fs, scene_threshold=%.1f, sampling_fps=%s, resolution=%dx%d",
+            min_chunk_duration, max_chunk_duration, scene_threshold, sampling_fps, target_width, target_height
         )
     
     def process_video_from_bytes(
