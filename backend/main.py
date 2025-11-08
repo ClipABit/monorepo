@@ -5,7 +5,7 @@ import modal
 # dependencies found in pyproject.toml
 image = (
             modal.Image.debian_slim(python_version="3.12")
-            .uv_sync(extra_options="--no-dev") 
+            .uv_sync(extra_options="--no-dev")  # exclude dev dependencies to avoid package conflicts
             .add_local_python_source(  # add all local modules here
                 "preprocessing",
                 "embeddings",
