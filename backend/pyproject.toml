@@ -5,11 +5,15 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]",
     "python-multipart",
+    "python-dotenv",
     "ffmpeg-python",
     "opencv-python-headless",
     "numpy",
     "modal",
     "pinecone",
+    "torch",
+    "pillow",
+    "transformers",
 ]
 
 [build-system]
