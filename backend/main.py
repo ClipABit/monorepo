@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 # dependencies found in pyproject.toml
 image = (
             modal.Image.debian_slim(python_version="3.12")
-            .uv_sync()
+            .uv_sync(extra_options="--no-dev")  # exclude dev dependencies to avoid package conflicts
             .add_local_python_source(  # add all local modules here
                 "preprocessing",
                 "embeddings",
-                "database",
+                "models",
             )
         )
 
@@ -28,6 +28,9 @@ secrets = modal.Secret.objects.list()
 
 # Create Modal app
 app = modal.App(name="ClipABit", image=image, secrets=secrets)
+
+# Shared storage for job results across containers
+job_store = modal.Dict.from_name("clipabit-jobs", create_if_missing=True)
 
 @app.cls()
 class Server:
@@ -57,32 +60,87 @@ class Server:
             raise ValueError("PINECONE_API_KEY not found in environment variables")
 
         # Instantiate classes
-        self.preprocessor = Preprocessor()
+        
+        logger.info("Container modules initialized and ready!")
+        self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY)
 
-        logger.info("Container modules initialized and ready!")
+        print(f"[Container] Started at {self.start_time.isoformat()}")
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str):
         """Background video processing task - runs in its own container."""
         import time
-        logger.info(f"[Job {job_id}] Starting processing for {filename}")
+        logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes)")
         
-        # TODO: Add actual video processing here
         try:
-            time.sleep(5)
+            # Process video through preprocessing pipeline
+            processed_chunks = self.preprocessor.process_video_from_bytes(
+                video_bytes=video_bytes,
+                video_id=job_id,
+                filename=filename,
+                s3_url=""  # TODO: Add S3 URL when storage is implemented
+            )
+            
+            # Calculate summary statistics
+            total_frames = sum(chunk['metadata']['frame_count'] for chunk in processed_chunks)
+            total_memory = sum(chunk['memory_mb'] for chunk in processed_chunks)
+            avg_complexity = sum(chunk['metadata']['complexity_score'] for chunk in processed_chunks) / len(processed_chunks) if processed_chunks else 0
+
+            print(f"[Job {job_id}] Complete: {len(processed_chunks)} chunks, {total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}")
+            
+            # TODO: Send chunks to embedding module
+            # TODO: Store results in database
+            # TODO: Upload processed data to S3
+
+            # Prepare chunk details for response (without frame arrays)
+            chunk_details = []
+            for chunk in processed_chunks:
+                chunk_details.append({
+                    "chunk_id": chunk['chunk_id'],
+                    "metadata": chunk['metadata'],
+                    "memory_mb": chunk['memory_mb']
+                })
+
+            result = {
+                "job_id": job_id,
+                "status": "completed",
+                "filename": filename,
+                "chunks": len(processed_chunks),
+                "total_frames": total_frames,
+                "total_memory_mb": total_memory,
+                "avg_complexity": avg_complexity,
+                "chunk_details": chunk_details
+            }
+            
+            logger.info(f"[Job {job_id}] Finished processing {filename}")
+            
+            # Store result for polling endpoint in shared storage
+            job_store[job_id] = result
+            return result
+
         except Exception as e:
             logger.error(f"[Job {job_id}] Processing failed: {e}")
-            return {"job_id": job_id, "status": "failed", "error": str(e)}
-        
-        logger.info(f"[Job {job_id}] Finished processing {filename}")
-        
-        return {
-            "job_id": job_id, 
-            "status": "completed", 
-            "filename": filename,
-            "preprocessing": "yay"
-        }
+            
+            import traceback
+            traceback.print_exc()  # Print full stack trace for debugging
+            error_result = {"job_id": job_id, "status": "failed", "error": str(e)}
+
+            # Store error result for polling endpoint in shared storage
+            job_store[job_id] = error_result
+            return error_result
+
+    @modal.fastapi_endpoint(method="GET")
+    async def status(self, job_id: str):
+        """Poll job status - returns processing status and results when complete."""
+        if job_id not in job_store:
+            return {
+                "job_id": job_id,
+                "status": "processing",
+                "message": "Job is still processing or not found"
+            }
+
+        return job_store[job_id]
 
     @modal.fastapi_endpoint(method="POST")
     async def upload(self, file: UploadFile = None):
@@ -98,12 +156,9 @@ class Server:
         # Generate unique job ID
         job_id = str(uuid.uuid4())
 
-        # log file details
-        logger.info(f"Received file: {file.filename}")
-        logger.info(f"Content-Type: {file.content_type}")
-        logger.info(f"Size: {file_size} bytes")
-        logger.info(f"Spawning background job: {job_id}")
-        
+        # Log upload details
+        logger.info(f"[Upload] {job_id}: {file.filename} ({file_size} bytes, {file.content_type})")
+
         # Spawn background processing (non-blocking - returns immediately)
         self.process_video.spawn(contents, file.filename, job_id)
 
