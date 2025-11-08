@@ -70,13 +70,13 @@ class ChunkMetadata:
         }
 
 
-@dataclass 
+@dataclass
 class ProcessedChunk:
     """
     Container for a fully processed chunk ready for embedding generation.
     """
     chunk_id: str
-    frames: np.ndarray      # Shape: (n_frames, height, width, 3)
+    frames: np.ndarray      # Shape: (n_frames, height, width, 3) - frames stored in BGR order (cv2 default)
     metadata: ChunkMetadata
     
     def __repr__(self):
