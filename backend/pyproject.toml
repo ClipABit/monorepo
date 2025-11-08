@@ -14,6 +14,7 @@ dependencies = [
     "torch",
     "pillow",
     "transformers",
+    "scenedetect",
 ]
 
 [build-system]
@@ -23,8 +24,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = [
     "embeddings", 
-    "preprocessing"
-    "scenedetect",
+    "preprocessing",
+    "models",
+    "database"
 ]
 
 [dependency-groups]

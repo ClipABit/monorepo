@@ -3,6 +3,9 @@ import logging
 from fastapi import UploadFile, HTTPException
 import modal
 
+#constants
+PINECONE_CHUNKS_INDEX = "chunks-index"
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -19,6 +22,7 @@ image = (
                 "preprocessing",
                 "embeddings",
                 "models",
+                "database",
             )
         )
 
@@ -63,7 +67,7 @@ class Server:
         
         logger.info("Container modules initialized and ready!")
         self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
-        self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY)
+        self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
 
         print(f"[Container] Started at {self.start_time.isoformat()}")
 
