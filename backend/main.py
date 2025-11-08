@@ -35,7 +35,10 @@ class Server:
         import os
         from datetime import datetime, timezone
 
+        # Import classes here
         from preprocessing.preprocessor import Preprocessor  
+        from database.pinecone_connector import PineconeConnector
+
 
         print("Container starting up!")
         self.start_time = datetime.now(timezone.utc)
@@ -47,6 +50,7 @@ class Server:
 
         # Instantiate classes
         self.preprocessor = Preprocessor()
+        self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY)
 
         print("Container modules initialized and ready!")
 
