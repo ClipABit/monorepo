@@ -1,12 +1,17 @@
+"""
+Video preprocessing pipeline coordinator.
+
+Orchestrates scene-based chunking, adaptive frame extraction, compression,
+and metadata generation with parallel processing.
+"""
 import logging
 import tempfile
-from typing import List, Dict, Any
-from pathlib import Path
+from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import cv2
 import numpy as np
 
-from models.metadata import VideoChunk, ChunkMetadata, ProcessedChunk
+from models.metadata import VideoChunk, ChunkMetadata
 from preprocessing.chunker import Chunker
 from preprocessing.frame_extractor import FrameExtractor
 from preprocessing.compressor import Compressor
@@ -17,14 +22,19 @@ logger = logging.getLogger(__name__)
 
 class Preprocessor:
     """
-    Main preprocessing pipeline that coordinates all components.
+    Video preprocessing pipeline coordinator.
 
-    Flow:
-    1. Chunk video using scene detection with duration constraints
-    2. Extract frames adaptively based on motion/complexity
-    3. Compress frames to target resolution
-    4. Package with metadata
+    Pipeline stages:
+        1. Scene-based chunking with duration constraints
+        2. Adaptive frame extraction with motion detection
+        3. Frame compression to target resolution
+        4. Metadata generation with complexity scoring
+
+    Chunks are processed in parallel using ThreadPoolExecutor.
     """
+
+    MAX_WORKERS = 4
+    DEFAULT_FPS = 30.0
 
     def __init__(
         self,
@@ -37,19 +47,6 @@ class Preprocessor:
         target_width: int = 640,
         target_height: int = 480
     ):
-        """
-        Initialize all components.
-
-        Args:
-            min_chunk_duration: Minimum chunk duration in seconds
-            max_chunk_duration: Maximum chunk duration in seconds
-            scene_threshold: Scene detection sensitivity (lower = more sensitive)
-            min_sampling_fps: Minimum frames per second for static scenes
-            max_sampling_fps: Maximum frames per second for high-motion scenes
-            motion_threshold: Motion detection threshold (higher = less sensitive)
-            target_width: Target width for compressed frames
-            target_height: Target height for compressed frames
-        """
         self.chunker = Chunker(
             min_duration=min_chunk_duration,
             max_duration=max_chunk_duration,
@@ -65,50 +62,46 @@ class Preprocessor:
             target_height=target_height
         )
 
-        # Video metadata cache to avoid re-opening files
-        self._video_metadata_cache = {}
+        self._video_metadata_cache: Dict[str, Dict[str, Any]] = {}
 
         logger.info(
-            "Preprocessor initialized: chunk_range=%.1fs-%.1fs, scene_threshold=%.1f, adaptive_fps=%.1f-%.1f, motion_threshold=%.1f, resolution=%dx%d",
-            min_chunk_duration, max_chunk_duration, scene_threshold, min_sampling_fps, max_sampling_fps, motion_threshold, target_width, target_height
+            "Preprocessor initialized: chunks=%.1f-%.1fs, scene_threshold=%.1f, "
+            "fps=%.1f-%.1f, motion_threshold=%.1f, resolution=%dx%d",
+            min_chunk_duration, max_chunk_duration, scene_threshold,
+            min_sampling_fps, max_sampling_fps, motion_threshold,
+            target_width, target_height
         )
 
     def _get_video_metadata(self, video_path: str) -> Dict[str, Any]:
-        """
-        Get video metadata with caching to avoid re-opening files.
+        """Get video metadata with caching to avoid redundant file opens."""
+        if video_path in self._video_metadata_cache:
+            return self._video_metadata_cache[video_path]
 
-        Args:
-            video_path: Path to video file
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
 
-        Returns:
-            Dictionary with fps, frame_count, duration
-        """
-        if video_path not in self._video_metadata_cache:
-            cap = cv2.VideoCapture(video_path)
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            cap.release()
+        # Validate and apply fallbacks
+        if fps <= 0 or fps != fps:  # Check for invalid/NaN
+            logger.warning("Invalid FPS %.2f for %s, using default %.1f", fps, video_path, self.DEFAULT_FPS)
+            fps = self.DEFAULT_FPS
 
-            # Validate metadata
-            if fps <= 0 or fps != fps:  # Check for 0, negative, NaN
-                logger.warning("Invalid FPS %.2f for %s, using default 30.0", fps, video_path)
-                fps = 30.0
+        if frame_count <= 0:
+            logger.warning("Invalid frame count %d for %s", frame_count, video_path)
+            frame_count = 0
 
-            if frame_count <= 0:
-                logger.warning("Invalid frame count %d for %s", frame_count, video_path)
-                frame_count = 0
+        duration = frame_count / fps if fps > 0 and frame_count > 0 else 0
 
-            duration = frame_count / fps if fps > 0 and frame_count > 0 else 0
+        metadata = {
+            'fps': fps,
+            'frame_count': frame_count,
+            'duration': duration
+        }
+        self._video_metadata_cache[video_path] = metadata
 
-            self._video_metadata_cache[video_path] = {
-                'fps': fps,
-                'frame_count': frame_count,
-                'duration': duration
-            }
-            logger.debug("Cached metadata for %s: fps=%.2f, frames=%d, duration=%.2fs",
-                        video_path, fps, frame_count, duration)
-
-        return self._video_metadata_cache[video_path]
+        logger.debug("Cached metadata: fps=%.2f, frames=%d, duration=%.2fs", fps, frame_count, duration)
+        return metadata
 
     def process_video_from_bytes(
         self,
@@ -117,38 +110,24 @@ class Preprocessor:
         filename: str,
         s3_url: str = ""
     ) -> List[Dict[str, Any]]:
-        """
-        Process video from bytes (uploaded file).
-        
-        Args:
-            video_bytes: Video file as bytes
-            video_id: Unique identifier for video
-            filename: Original filename
-            s3_url: S3 URL (optional)
-            
-        Returns:
-            List of processed chunk dictionaries
-        """
+        """Process video from uploaded bytes with automatic temp file cleanup."""
         logger.info("Starting preprocessing: video_id=%s, filename=%s", video_id, filename)
 
-        # Write bytes to temporary file with auto-cleanup
         with tempfile.NamedTemporaryFile(suffix='.mp4', delete=True) as temp_file:
             temp_file.write(video_bytes)
-            temp_file.flush()  # Ensure bytes are written to disk
+            temp_file.flush()
 
-            # Process the video (temp file auto-deleted when context exits)
             try:
-                result = self.process_video(
+                return self.process_video(
                     video_path=temp_file.name,
                     video_id=video_id,
                     filename=filename,
                     s3_url=s3_url
                 )
-                return result
             except Exception as e:
                 logger.error("Processing failed for video_id=%s: %s", video_id, e)
                 raise
-    
+
     def process_video(
         self,
         video_path: str,
@@ -157,36 +136,31 @@ class Preprocessor:
         s3_url: str = ""
     ) -> List[Dict[str, Any]]:
         """
-        Complete preprocessing pipeline.
-        
-        Args:
-            video_path: Local path to video file
-            video_id: Unique identifier for video
-            filename: Original filename
-            s3_url: S3 URL for metadata
-            
-        Returns:
-            List of processed chunk dictionaries
+        Run complete preprocessing pipeline with parallel chunk processing.
+
+        Returns list of processed chunks with frames, metadata, and complexity scores.
         """
         logger.info("Processing video: video_id=%s, path=%s", video_id, video_path)
 
-        # Cache video metadata to avoid re-opening file
+        # Cache metadata once for reuse
         self._get_video_metadata(video_path)
 
-        # Step 1: Chunk the video
-        logger.info("Step 1/4: Chunking video")
+        # Stage 1: Chunk video
+        logger.info("Stage 1/4: Chunking video")
         chunks = self.chunker.chunk_video(video_path, video_id)
         logger.info("Created %d chunks", len(chunks))
 
-        # Step 2-4: Process chunks in parallel
+        if not chunks:
+            logger.warning("No chunks created for video_id=%s", video_id)
+            return []
+
+        # Stage 2-4: Process chunks in parallel
+        max_workers = min(self.MAX_WORKERS, len(chunks))
+        logger.info("Processing %d chunks with %d workers", len(chunks), max_workers)
+
         processed_chunks = []
 
-        # Use ThreadPoolExecutor for parallel I/O-bound work
-        max_workers = min(4, len(chunks))  # Don't create more threads than chunks
-        logger.info("Processing chunks with %d parallel workers", max_workers)
-
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all chunk processing tasks
             future_to_chunk = {
                 executor.submit(
                     self._process_single_chunk,
@@ -195,7 +169,6 @@ class Preprocessor:
                 for chunk in chunks
             }
 
-            # Collect results as they complete
             for i, future in enumerate(as_completed(future_to_chunk), 1):
                 chunk = future_to_chunk[future]
                 try:
@@ -203,17 +176,18 @@ class Preprocessor:
                     if result:
                         processed_chunks.append(result)
                         logger.info(
-                            "Chunk %d/%d completed: %s (%d frames, %.2fMB)",
+                            "Chunk %d/%d: %s (%d frames, %.2fMB, complexity=%.3f)",
                             i, len(chunks), result['chunk_id'],
                             result['metadata']['frame_count'],
-                            result['memory_mb']
+                            result['memory_mb'],
+                            result['metadata']['complexity_score']
                         )
                 except Exception as e:
-                    logger.error("Failed to process chunk %s: %s", chunk.chunk_id, e)
+                    logger.error("Chunk %s failed: %s", chunk.chunk_id, e)
 
-        logger.info("Preprocessing complete: %d chunks, %d total frames",
-                    len(processed_chunks),
-                    sum(c['metadata']['frame_count'] for c in processed_chunks))
+        total_frames = sum(c['metadata']['frame_count'] for c in processed_chunks)
+        logger.info("Preprocessing complete: %d/%d chunks, %d total frames",
+                    len(processed_chunks), len(chunks), total_frames)
         return processed_chunks
 
     def _process_single_chunk(
@@ -223,49 +197,35 @@ class Preprocessor:
         video_id: str,
         filename: str,
         s3_url: str
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
         """
-        Process a single chunk (extract, compress, package).
-        Can be called from thread pool for parallel processing.
+        Process single chunk: extract → compress → package.
 
-        Args:
-            chunk: Video chunk to process
-            video_path: Path to video file
-            video_id: Video identifier
-            filename: Original filename
-            s3_url: S3 URL
-
-        Returns:
-            Processed chunk dictionary or None if failed
+        Thread-safe for parallel execution.
+        Returns None if processing fails.
         """
         try:
-            logger.debug("Processing chunk: %s", chunk.chunk_id)
-
-            # Step 2: Extract frames with complexity calculation
+            # Extract frames with complexity analysis
             frames, sampling_fps, complexity_score = self.extractor.extract_frames(video_path, chunk)
 
             if len(frames) == 0:
-                logger.warning("No frames extracted for chunk %s, skipping", chunk.chunk_id)
+                logger.warning("No frames extracted for %s, skipping", chunk.chunk_id)
                 return None
 
-            logger.debug("Extracted %d frames at %.2f fps, complexity=%.3f", len(frames), sampling_fps, complexity_score)
-
-            # Step 3: Compress frames
+            # Compress frames
             compressed_frames = self.compressor.compress_frames(frames)
 
-            # Calculate compression stats
-            original_size = frames.nbytes / (1024 * 1024)  # MB
-            compressed_size = compressed_frames.nbytes / (1024 * 1024)  # MB
-            compression_ratio = self.compressor.get_compression_ratio(
-                frames.shape, compressed_frames.shape
-            )
+            # Calculate sizes
+            original_mb = frames.nbytes / (1024 * 1024)
+            compressed_mb = compressed_frames.nbytes / (1024 * 1024)
+            ratio = self.compressor.get_compression_ratio(frames.shape, compressed_frames.shape)
 
             logger.debug(
-                "Compressed frames: %.2fMB -> %.2fMB (%.2fx reduction)",
-                original_size, compressed_size, compression_ratio
+                "%s: compressed %.2fMB → %.2fMB (%.1fx)",
+                chunk.chunk_id, original_mb, compressed_mb, ratio
             )
 
-            # Step 4: Create metadata
+            # Create metadata
             metadata = self._create_metadata(
                 chunk=chunk,
                 video_id=video_id,
@@ -276,18 +236,17 @@ class Preprocessor:
                 complexity_score=complexity_score
             )
 
-            # Package chunk data
             return {
                 'chunk_id': chunk.chunk_id,
-                'frames': compressed_frames,  # numpy array
+                'frames': compressed_frames,
                 'metadata': metadata.to_dict(),
-                'memory_mb': compressed_size
+                'memory_mb': compressed_mb
             }
 
         except Exception as e:
-            logger.error("Error processing chunk %s: %s", chunk.chunk_id, e)
+            logger.error("Error processing %s: %s", chunk.chunk_id, e)
             return None
-    
+
     def _create_metadata(
         self,
         chunk: VideoChunk,
@@ -298,11 +257,9 @@ class Preprocessor:
         sampling_fps: float,
         complexity_score: float
     ) -> ChunkMetadata:
-        """Create complete metadata object"""
-        
-        # Extract file type from filename
-        file_type = filename.split('.')[-1].lower() if '.' in filename else 'mp4'
-        
+        """Create metadata object from chunk processing results."""
+        file_type = filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'mp4'
+
         return ChunkMetadata(
             chunk_id=chunk.chunk_id,
             video_id=video_id,
@@ -316,29 +273,37 @@ class Preprocessor:
             file_type=file_type,
             original_s3_url=s3_url
         )
-    
+
     def get_stats(self, processed_chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Calculate statistics about the preprocessing.
-        Useful for monitoring and optimization.
-        """
-        total_frames = sum(chunk['metadata']['frame_count'] for chunk in processed_chunks)
-        total_duration = sum(chunk['metadata']['duration'] for chunk in processed_chunks)
-        total_memory = sum(chunk['memory_mb'] for chunk in processed_chunks)
-        
-        complexities = [chunk['metadata']['complexity_score'] for chunk in processed_chunks]
-        fps_values = [chunk['metadata']['sampling_fps'] for chunk in processed_chunks]
-        
+        """Calculate aggregate statistics from processed chunks."""
+        if not processed_chunks:
+            return {
+                'total_chunks': 0,
+                'total_frames': 0,
+                'total_duration': 0,
+                'total_memory_mb': 0,
+                'avg_chunk_duration': 0,
+                'avg_frames_per_chunk': 0,
+                'avg_complexity': 0,
+                'avg_sampling_fps': 0,
+                'complexity_range': (0, 0)
+            }
+
+        total_frames = sum(c['metadata']['frame_count'] for c in processed_chunks)
+        total_duration = sum(c['metadata']['duration'] for c in processed_chunks)
+        total_memory = sum(c['memory_mb'] for c in processed_chunks)
+
+        complexities = [c['metadata']['complexity_score'] for c in processed_chunks]
+        fps_values = [c['metadata']['sampling_fps'] for c in processed_chunks]
+
         return {
             'total_chunks': len(processed_chunks),
             'total_frames': total_frames,
             'total_duration': total_duration,
             'total_memory_mb': total_memory,
-            'avg_chunk_duration': total_duration / len(processed_chunks) if processed_chunks else 0,
-            'avg_frames_per_chunk': total_frames / len(processed_chunks) if processed_chunks else 0,
-            'avg_complexity': np.mean(complexities) if complexities else 0,
-            'avg_sampling_fps': np.mean(fps_values) if fps_values else 0,
-            'complexity_range': (min(complexities), max(complexities)) if complexities else (0, 0)
+            'avg_chunk_duration': total_duration / len(processed_chunks),
+            'avg_frames_per_chunk': total_frames / len(processed_chunks),
+            'avg_complexity': float(np.mean(complexities)),
+            'avg_sampling_fps': float(np.mean(fps_values)),
+            'complexity_range': (float(min(complexities)), float(max(complexities)))
         }
-        
-    
