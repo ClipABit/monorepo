@@ -1,9 +1,3 @@
-"""
-Video preprocessing pipeline coordinator.
-
-Orchestrates scene-based chunking, adaptive frame extraction, compression,
-and metadata generation with parallel processing.
-"""
 import logging
 import tempfile
 from typing import List, Dict, Any, Optional
