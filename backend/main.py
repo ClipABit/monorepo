@@ -14,9 +14,13 @@ image = (
         )
 app = modal.App(name="ClipABit", image=image)
 
+# Shared storage for job results across containers
+job_store = modal.Dict.from_name("clipabit-jobs", create_if_missing=True)
+
 
 @app.cls()
 class Server:
+
     @modal.enter()
     def startup(self):
         """
@@ -24,11 +28,9 @@ class Server:
             Here is where you would instantiate classes and load models that are
             reused across multiple requests to avoid reloading them each time.
         """
-        print("Container starting up!")
-
         from datetime import datetime, timezone
         from preprocessing.preprocessor import Preprocessor  # Import local module inside class
-        
+
         self.start_time = datetime.now(timezone.utc)
 
         self.preprocessor = Preprocessor(
@@ -37,13 +39,12 @@ class Server:
             scene_threshold=13.0,
         )
 
-        print("Preprocessor initialized and ready!")
+        print(f"[Container] Started at {self.start_time.isoformat()}")
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str):
         """Background video processing task - runs in its own container."""
-        import time
-        print(f"[Job {job_id}] Starting processing for {filename}")
+        print(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes)")
         
         try:
             # Process video through preprocessing pipeline
@@ -54,26 +55,12 @@ class Server:
                 s3_url=""  # TODO: Add S3 URL when storage is implemented
             )
             
-            print(f"[Job {job_id}] Preprocessing complete: {len(processed_chunks)} chunks")
-
-            # Log summary statistics
+            # Calculate summary statistics
             total_frames = sum(chunk['metadata']['frame_count'] for chunk in processed_chunks)
             total_memory = sum(chunk['memory_mb'] for chunk in processed_chunks)
             avg_complexity = sum(chunk['metadata']['complexity_score'] for chunk in processed_chunks) / len(processed_chunks) if processed_chunks else 0
 
-            print(f"[Job {job_id}] Statistics:")
-            print(f"  - Total frames: {total_frames}")
-            print(f"  - Total memory: {total_memory:.2f} MB")
-            print(f"  - Avg complexity: {avg_complexity:.3f}")
-
-            # Print detailed chunk information
-            print(f"\n[Job {job_id}] Chunk Details:")
-            for i, chunk in enumerate(processed_chunks, 1):
-                meta = chunk['metadata']
-                print(f"  {i}. {chunk['chunk_id']}")
-                print(f"     Time: {meta['timestamp_range'][0]:.1f}s - {meta['timestamp_range'][1]:.1f}s (duration: {meta['duration']:.1f}s)")
-                print(f"     Frames: {meta['frame_count']} at {meta['sampling_fps']:.2f} fps")
-                print(f"     Memory: {chunk['memory_mb']:.2f} MB")
+            print(f"[Job {job_id}] Complete: {len(processed_chunks)} chunks, {total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}")
             
             # TODO: Send chunks to embedding module
             # TODO: Store results in database
@@ -88,7 +75,7 @@ class Server:
                     "memory_mb": chunk['memory_mb']
                 })
 
-            return {
+            result = {
                 "job_id": job_id,
                 "status": "completed",
                 "filename": filename,
@@ -98,12 +85,32 @@ class Server:
                 "avg_complexity": avg_complexity,
                 "chunk_details": chunk_details
             }
-            
+
+            # Store result for polling endpoint in shared storage
+            job_store[job_id] = result
+            return result
+
         except Exception as e:
             print(f"[Job {job_id}] Processing failed: {e}")
             import traceback
             traceback.print_exc()  # Print full stack trace for debugging
-            return {"job_id": job_id, "status": "failed", "error": str(e)}
+            error_result = {"job_id": job_id, "status": "failed", "error": str(e)}
+
+            # Store error result for polling endpoint in shared storage
+            job_store[job_id] = error_result
+            return error_result
+
+    @modal.fastapi_endpoint(method="GET")
+    async def status(self, job_id: str):
+        """Poll job status - returns processing status and results when complete."""
+        if job_id not in job_store:
+            return {
+                "job_id": job_id,
+                "status": "processing",
+                "message": "Job is still processing or not found"
+            }
+
+        return job_store[job_id]
 
     @modal.fastapi_endpoint(method="POST")
     async def upload(self, file: UploadFile = None):
@@ -119,14 +126,18 @@ class Server:
         # Generate unique job ID
         job_id = str(uuid.uuid4())
 
-        # log file details
-        print(f"Received file: {file.filename}")
-        print(f"Content-Type: {file.content_type}")
-        print(f"Size: {file_size} bytes")
-        print(f"Processing job: {job_id}")
+        # Log upload details
+        print(f"[Upload] {job_id}: {file.filename} ({file_size} bytes, {file.content_type})")
 
-        # Process video synchronously (blocking - waits for completion)
-        result = await self.process_video.remote.aio(contents, file.filename, job_id)
+        # Spawn background processing (non-blocking - returns immediately)
+        self.process_video.spawn(contents, file.filename, job_id)
 
-        return result
+        return {
+            "job_id": job_id,
+            "filename": file.filename,
+            "content_type": file.content_type,
+            "size_bytes": file_size,
+            "status": "processing",
+            "message": "Video uploaded successfully, processing in background"
+        }
 

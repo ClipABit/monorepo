@@ -1,15 +1,5 @@
-"""Small Streamlit frontend for ClipABit.
-
-Usage: run `streamlit run app.py` in this directory. The app lets you upload a video file
-and sends it to your Modal backend API.
-
-The backend must accept multipart/form-data with a `file` field for uploads.
-
-This file is intentionally self-contained and uses only `requests` and `streamlit`.
-"""
-
-import base64
 import io
+import time
 import requests
 import streamlit as st
 
@@ -31,6 +21,29 @@ def upload_file_to_backend(api_url: str, file_bytes: bytes, filename: str, conte
     files = {"file": (filename, io.BytesIO(file_bytes), content_type or "application/octet-stream")}
     resp = requests.post(api_url, files=files, timeout=300)
     return resp
+
+
+def poll_job_status(status_url: str, job_id: str, max_wait: int = 120, poll_interval: int = 2):
+    """Poll job status until complete or timeout."""
+    start_time = time.time()
+
+    while time.time() - start_time < max_wait:
+        try:
+            resp = requests.get(f"{status_url}?job_id={job_id}", timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                status = data.get("status", "unknown")
+
+                # Job completed or failed
+                if status in ["completed", "failed"]:
+                    return data
+
+            time.sleep(poll_interval)
+        except requests.RequestException:
+            time.sleep(poll_interval)
+
+    # Timeout
+    return {"job_id": job_id, "status": "timeout", "message": "Job polling timed out"}
 
 
 # File uploader
@@ -58,12 +71,36 @@ if uploaded is not None:
             with st.spinner("Uploading video to backend..."):
                 try:
                     resp = upload_file_to_backend(api_url, uploaded_bytes, uploaded.name, uploaded.type)
-                    
+
                     # Handle response
                     if resp.status_code == 200:
-                        st.success("✅ Upload successful!")
                         try:
-                            data = resp.json()
+                            upload_data = resp.json()
+
+                            # Check if job was spawned
+                            if upload_data.get("status") == "processing":
+                                job_id = upload_data.get("job_id")
+                                st.info(f"Video uploaded successfully. Job ID: {job_id}")
+
+                                # Derive status URL from upload URL
+                                status_url = api_url.replace("-upload-", "-status-")
+
+                                # Poll for results
+                                with st.spinner("Processing video... This may take a minute."):
+                                    data = poll_job_status(status_url, job_id, max_wait=120, poll_interval=2)
+                            else:
+                                # Legacy: direct response (if not using spawn)
+                                data = upload_data
+
+                            # Display results
+                            if data.get("status") == "completed":
+                                st.success("Processing complete!")
+                            elif data.get("status") == "failed":
+                                st.error(f"Processing failed: {data.get('error', 'Unknown error')}")
+                            elif data.get("status") == "timeout":
+                                st.warning("Processing timed out. Job may still be running.")
+                            else:
+                                st.info(f"Status: {data.get('status', 'unknown')}")
 
                             # Display processing summary
                             if isinstance(data, dict):
@@ -106,9 +143,9 @@ if uploaded is not None:
                     else:
                         st.error(f"Upload failed with status {resp.status_code}")
                         st.text(resp.text)
-                        
+
                 except requests.RequestException as e:
-                    st.error(f"❌ Upload failed: {e}")
+                    st.error(f"Upload failed: {e}")
 
 
 st.markdown("---")
