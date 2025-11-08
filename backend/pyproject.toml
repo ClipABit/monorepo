@@ -9,5 +9,10 @@ dependencies = [
     "opencv-python-headless",
     "numpy",
     "modal",
+    "scenedetect",
 ]
 
+[dependency-groups]
+dev = [
+    "opencv-python", 
+]
