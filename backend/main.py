@@ -1,4 +1,3 @@
-import os
 import logging
 from fastapi import UploadFile, HTTPException
 import modal

@@ -29,7 +29,7 @@ from database.pinecone_connector import PineconeConnector
 # setup environment variables
 load_dotenv(os.path.join(BACKEND_DIR, ".env"))
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-print(f"PINECONE_API_KEY: {PINECONE_API_KEY}")
+print(f"PINECONE_API_KEY: {'set' if PINECONE_API_KEY else 'not set'}")
 
 
 _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"

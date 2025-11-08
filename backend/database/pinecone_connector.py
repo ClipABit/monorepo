@@ -1,4 +1,3 @@
-import os
 import logging
 import numpy as np
 
@@ -21,7 +20,7 @@ class PineconeConnector:
 
         Args:
             chunk_id: Unique identifier for the chunk
-            chunk_embedding: The chunk embedding (as list)
+            chunk_embedding: The chunk embedding
             namespace: The namespace to upsert the chunk into (default is "__default__")
             metadata: Optional metadata dictionary to store with the chunk
 
@@ -48,7 +47,7 @@ class PineconeConnector:
         Query the Pinecone index for similar chunks.
 
         Args:
-            query_embedding: The query embedding (as list)
+            query_embedding: The query embedding
             namespace: The namespace to query from (default is "__default__")
             top_k: Number of top similar chunks to retrieve
         

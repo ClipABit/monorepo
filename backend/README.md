@@ -11,7 +11,7 @@ uv sync
 # 2. Authenticate with Modal (first time only - opens browser)
 uv run modal token new
 
-# 3. Get Environment variables and popoulate .env (check docs or reach out to TPMs)
+# 3. Get Environment variables and populate .env (check docs or reach out to TPMs)
 
 # 4. Start dev server (hot-reloads on file changes)
 uv run modal serve main.py
