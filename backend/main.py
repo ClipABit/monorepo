@@ -1,6 +1,14 @@
 import os
+import logging
 from fastapi import UploadFile, HTTPException
 import modal
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Configure Modal app and image
 # dependencies found in pyproject.toml
@@ -40,7 +48,7 @@ class Server:
         from database.pinecone_connector import PineconeConnector
 
 
-        print("Container starting up!")
+        logger.info("Container starting up!")
         self.start_time = datetime.now(timezone.utc)
         
         # Get environment variables
@@ -52,22 +60,22 @@ class Server:
         self.preprocessor = Preprocessor()
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY)
 
-        print("Container modules initialized and ready!")
+        logger.info("Container modules initialized and ready!")
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str):
         """Background video processing task - runs in its own container."""
         import time
-        print(f"[Job {job_id}] Starting processing for {filename}")
+        logger.info(f"[Job {job_id}] Starting processing for {filename}")
         
         # TODO: Add actual video processing here
         try:
             time.sleep(5)
         except Exception as e:
-            print(f"[Job {job_id}] Processing failed: {e}")
+            logger.error(f"[Job {job_id}] Processing failed: {e}")
             return {"job_id": job_id, "status": "failed", "error": str(e)}
         
-        print(f"[Job {job_id}] Finished processing {filename}")
+        logger.info(f"[Job {job_id}] Finished processing {filename}")
         
         return {
             "job_id": job_id, 
@@ -91,10 +99,10 @@ class Server:
         job_id = str(uuid.uuid4())
 
         # log file details
-        print(f"Received file: {file.filename}")
-        print(f"Content-Type: {file.content_type}")
-        print(f"Size: {file_size} bytes")
-        print(f"Spawning background job: {job_id}")
+        logger.info(f"Received file: {file.filename}")
+        logger.info(f"Content-Type: {file.content_type}")
+        logger.info(f"Size: {file_size} bytes")
+        logger.info(f"Spawning background job: {job_id}")
         
         # Spawn background processing (non-blocking - returns immediately)
         self.process_video.spawn(contents, file.filename, job_id)
