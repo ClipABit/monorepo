@@ -1,3 +1,4 @@
+import os
 from fastapi import UploadFile, HTTPException
 import modal
 
@@ -9,13 +10,20 @@ image = (
             .add_local_python_source(  # add all local modules here
                 "preprocessing",
                 "embeddings",
+                "database",
             )
         )
-app = modal.App(name="ClipABit", image=image)
 
+# Load secrets from .env file
+modal.Secret.from_dotenv(filename=".env")
+secrets = modal.Secret.objects.list()
+
+# Create Modal app
+app = modal.App(name="ClipABit", image=image, secrets=secrets)
 
 @app.cls()
 class Server:
+
     @modal.enter()
     def startup(self):
         """
@@ -23,17 +31,24 @@ class Server:
             Here is where you would instantiate classes and load models that are
             reused across multiple requests to avoid reloading them each time.
         """
-        print("Container starting up!")
-
+        # Import local module inside class
+        import os
         from datetime import datetime, timezone
-        from preprocessing.preprocessor import Preprocessor  # Import local module inside class
-        
+
+        from preprocessing.preprocessor import Preprocessor  
+
+        print("Container starting up!")
         self.start_time = datetime.now(timezone.utc)
+        
+        # Get environment variables
+        PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+        if not PINECONE_API_KEY:
+            raise ValueError("PINECONE_API_KEY not found in environment variables")
 
         # Instantiate classes
         self.preprocessor = Preprocessor()
-        
-        print("✅ Preprocessor initialized and ready!")
+
+        print("Container modules initialized and ready!")
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str):

@@ -9,6 +9,7 @@ dependencies = [
     "opencv-python-headless",
     "numpy",
     "modal",
+    "pinecone",
 ]
 
 [build-system]
