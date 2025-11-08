@@ -102,7 +102,7 @@ class Server:
         except Exception as e:
             print(f"[Job {job_id}] Processing failed: {e}")
             import traceback
-            traceback.print_exc()
+            traceback.print_exc()  # Print full stack trace for debugging
             return {"job_id": job_id, "status": "failed", "error": str(e)}
 
     @modal.fastapi_endpoint(method="POST")
