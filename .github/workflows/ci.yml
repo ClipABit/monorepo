@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend:
+    name: backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v5
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      # TODO: tests
+      # - name: tests
+      #   working-directory: backend
+      #   run: uv run pytest -v
+
+  frontend:
+    name: frontend tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v5
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: install dependencies
+        working-directory: frontend/web
+        run: uv sync --frozen
+
+      # TODO: tests
+      # - name: tests
+      #   working-directory: frontend/web
+      #   run: uv run pytest -v
+
+  lint:
+    name: code quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v5
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: install ruff
+        run: uv tool install ruff
+
+      - name: lint backend
+        working-directory: backend
+        run: uv tool run ruff check . --exit-zero
+        continue-on-error: true
+
+      - name: lint frontend
+        working-directory: frontend/web
+        run: uv tool run ruff check . --exit-zero
+        continue-on-error: true
