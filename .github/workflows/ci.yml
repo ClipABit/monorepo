@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     name: backend tests
@@ -19,6 +23,7 @@ jobs:
         with:
           version: "latest"
           enable-cache: true
+          cache-suffix: "backend"
 
       - name: install dependencies
         working-directory: backend
@@ -41,6 +46,7 @@ jobs:
         with:
           version: "latest"
           enable-cache: true
+          cache-suffix: "frontend"
 
       - name: install dependencies
         working-directory: frontend/web
@@ -69,10 +75,8 @@ jobs:
 
       - name: lint backend
         working-directory: backend
-        run: uv tool run ruff check . --exit-zero
-        continue-on-error: true
+        run: uv tool run ruff check .
 
       - name: lint frontend
         working-directory: frontend/web
-        run: uv tool run ruff check . --exit-zero
-        continue-on-error: true
+        run: uv tool run ruff check .
