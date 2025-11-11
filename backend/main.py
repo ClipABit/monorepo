@@ -2,7 +2,7 @@ import logging
 from fastapi import UploadFile, HTTPException
 import modal
 
-#constants
+# Constants
 PINECONE_CHUNKS_INDEX = "chunks-index"
 
 # Configure logging
@@ -32,8 +32,6 @@ secrets = modal.Secret.objects.list()
 # Create Modal app
 app = modal.App(name="ClipABit", image=image, secrets=secrets)
 
-# Shared storage for job results across containers
-job_store = modal.Dict.from_name("clipabit-jobs", create_if_missing=True)
 
 @app.cls()
 class Server:
@@ -50,23 +48,25 @@ class Server:
         from datetime import datetime, timezone
 
         # Import classes here
-        from preprocessing.preprocessor import Preprocessor  
+        from preprocessing.preprocessor import Preprocessor
         from database.pinecone_connector import PineconeConnector
+        from database.job_store_connector import JobStoreConnector
 
 
         logger.info("Container starting up!")
         self.start_time = datetime.now(timezone.utc)
-        
+
         # Get environment variables
         PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
         if not PINECONE_API_KEY:
             raise ValueError("PINECONE_API_KEY not found in environment variables")
 
         # Instantiate classes
-        
+
         logger.info("Container modules initialized and ready!")
         self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
+        self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
 
         print(f"[Container] Started at {self.start_time.isoformat()}")
 
@@ -117,33 +117,34 @@ class Server:
             }
             
             logger.info(f"[Job {job_id}] Finished processing {filename}")
-            
+
             # Store result for polling endpoint in shared storage
-            job_store[job_id] = result
+            self.job_store.set_job_completed(job_id, result)
             return result
 
         except Exception as e:
             logger.error(f"[Job {job_id}] Processing failed: {e}")
-            
+
             import traceback
             traceback.print_exc()  # Print full stack trace for debugging
-            error_result = {"job_id": job_id, "status": "failed", "error": str(e)}
 
             # Store error result for polling endpoint in shared storage
-            job_store[job_id] = error_result
-            return error_result
+            self.job_store.set_job_failed(job_id, str(e))
+            return {"job_id": job_id, "status": "failed", "error": str(e)}
 
     @modal.fastapi_endpoint(method="GET")
     async def status(self, job_id: str):
         """Poll job status - returns processing status and results when complete."""
-        if job_id not in job_store:
+        job_data = self.job_store.get_job(job_id)
+
+        if job_data is None:
             return {
                 "job_id": job_id,
                 "status": "processing",
                 "message": "Job is still processing or not found"
             }
 
-        return job_store[job_id]
+        return job_data
 
     @modal.fastapi_endpoint(method="POST")
     async def upload(self, file: UploadFile = None):
