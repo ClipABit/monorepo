@@ -1,9 +1,7 @@
 import logging
-from typing import Optional
 import cv2
 import numpy as np
 
-from models.metadata import VideoChunk
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

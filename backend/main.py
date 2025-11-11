@@ -73,7 +73,6 @@ class Server:
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str):
         """Background video processing task - runs in its own container."""
-        import time
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes)")
         
         try:

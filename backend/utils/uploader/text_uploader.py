@@ -19,14 +19,13 @@ from dotenv import load_dotenv
 from functools import cache
 from transformers import CLIPProcessor, CLIPModel
 
+from database.pinecone_connector import PineconeConnector
+
 # Setup paths to backend directory
 BACKEND_DIR = os.path.join(os.path.dirname(__file__), "../..")
 sys.path.insert(0, BACKEND_DIR)
 
-from database.pinecone_connector import PineconeConnector
-
-
-# setup environment variables
+# Setup environment variables
 load_dotenv(os.path.join(BACKEND_DIR, ".env"))
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 print(f"PINECONE_API_KEY: {'set' if PINECONE_API_KEY else 'not set'}")
