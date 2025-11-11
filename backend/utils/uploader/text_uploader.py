@@ -17,6 +17,7 @@ import torch
 
 from dotenv import load_dotenv
 from functools import cache
+from typing import List
 from transformers import CLIPProcessor, CLIPModel
 
 # Setup paths to backend directory
@@ -40,14 +41,29 @@ NAMESPACE = "" # NOTE: specify namespace as the branch you are working on
 
 @cache
 def load_clip_model():
+    """
+    Load CLIP model and processor from Hugging Face.
+    Returns:
+        model: CLIPModel
+        processor: CLIPProcessor
+    """
+
     model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(_DEVICE)
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
     print(f"Loaded CLIP model on {_DEVICE}")
     return model, processor
 
-
-def extract_text_lines(file_path: str) -> list[str]:
+def extract_text_lines(file_path: str) -> List[str]:
+    """
+    Extract text lines from the specified file.
+    
+    Args:
+        file_path: Path to the text file.
+        
+    Returns:
+        List of text lines.
+    """
     texts = []
     with open(file_path, "r") as f:
         sample_text = f.read()
@@ -58,17 +74,23 @@ def extract_text_lines(file_path: str) -> list[str]:
                 texts.append(line.strip())
     return texts
 
-
-def generate_clip_embeddings(texts: list[str], model: CLIPModel, processor: CLIPProcessor) -> torch.Tensor:
+def generate_clip_embeddings(texts: List[str], model: CLIPModel, processor: CLIPProcessor) -> torch.Tensor:
     """
     Generate CLIP embeddings for each text line. Creates 512 dimensional embeddings.
+
+    Args:
+        texts: List of text lines.
+        model: Preloaded CLIP model.
+        processor: Preloaded CLIP processor.
+
+    Returns:
+        Tensor of shape (num_texts, 512) containing CLIP embeddings.
     """
     inputs = processor(text=texts, return_tensors="pt", padding=True, truncation=True).to(_DEVICE)
     with torch.no_grad():
         text_features = model.get_text_features(**inputs)
         text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
     return text_features.cpu() # dimensions: (num_texts, embedding_dim=512)
-
 
 def main():
     model, processor = load_clip_model()
