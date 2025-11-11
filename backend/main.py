@@ -163,6 +163,15 @@ class Server:
         # Log upload details
         logger.info(f"[Upload] {job_id}: {file.filename} ({file_size} bytes, {file.content_type})")
 
+        # Create initial job entry in shared storage
+        self.job_store.create_job(job_id, {
+            "job_id": job_id,
+            "filename": file.filename,
+            "status": "processing",
+            "size_bytes": file_size,
+            "content_type": file.content_type
+        })
+
         # Spawn background processing (non-blocking - returns immediately)
         self.process_video.spawn(contents, file.filename, job_id)
 

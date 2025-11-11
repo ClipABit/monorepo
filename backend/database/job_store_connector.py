@@ -86,13 +86,12 @@ class JobStoreConnector:
     def set_job_completed(self, job_id: str, result_data: Dict[str, Any]) -> bool:
         """Mark job as completed with result data."""
         result_data["status"] = "completed"
-        return self.create_job(job_id, result_data)
+        return self.update_job(job_id, result_data)
 
     def set_job_failed(self, job_id: str, error: str) -> bool:
         """Mark job as failed with error message."""
         error_data = {
-            "job_id": job_id,
             "status": "failed",
             "error": error
         }
-        return self.create_job(job_id, error_data)
+        return self.update_job(job_id, error_data)
