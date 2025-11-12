@@ -148,6 +148,11 @@ class Server:
 
     @modal.fastapi_endpoint(method="POST")
     async def upload(self, file: UploadFile = None):
+        """
+        Video upload endpoint - accepts video file uploads and starts background processing.
+        Returns a job ID for polling status.
+        """
+        # TODO: Add error handling for file types and sizes
         import uuid
         
         if file is None:
@@ -184,3 +189,14 @@ class Server:
             "message": "Video uploaded successfully, processing in background"
         }
 
+    @modal.fastapi_endpoint(method="POST")
+    async def search(self, query: str):
+        """Search endpoint - accepts a text query and returns semantic search results."""
+        logger.info(f"[Search] Query: {query}")
+        
+        # TODO: Implement search and rerank logic and use class models here
+
+        return {
+            "query": query,
+            "status": "success"
+        }
