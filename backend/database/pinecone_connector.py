@@ -42,7 +42,7 @@ class PineconeConnector:
             logger.error(f"Error upserting chunk {chunk_id} into index {self.index_name}: {e}")
             return False
 
-    def query_chunks(self, query_embedding: np.ndarray, namespace: str = "__default__", top_k: int = 5) -> list:
+    def query_chunks(self, query_embedding: np.ndarray, namespace: str = "__default__", top_k: int = 5, metadata_filter: dict = None) -> list:
         """
         Query the Pinecone index for similar chunks.
 
@@ -50,6 +50,7 @@ class PineconeConnector:
             query_embedding: The query embedding
             namespace: The namespace to query from (default is "__default__")
             top_k: Number of top similar chunks to retrieve
+            metadata_filter: Optional metadata filter dict for Pinecone query
         
         Returns:
             list: List of top_k similar chunks with their metadata
@@ -58,7 +59,18 @@ class PineconeConnector:
         
         try:
             query_embedding = query_embedding.tolist()
-            response = index.query(vector=query_embedding, top_k=top_k, include_metadata=True, namespace=namespace)
+            query_args = {
+                "vector": query_embedding,
+                "top_k": top_k,
+                "include_metadata": True,
+                "namespace": namespace
+            }
+            
+            # Add filter if provided
+            if metadata_filter:
+                query_args["filter"] = metadata_filter
+            
+            response = index.query(**query_args)
 
             logger.info(f"Queried top {top_k} chunks from index {self.index_name} with namespace {namespace}")
             return response['matches']

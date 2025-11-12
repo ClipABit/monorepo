@@ -17,11 +17,10 @@ image = (
                 "python-dotenv"
             )
             # Package specific modules explicitly ("." is not a valid package name)
-            .add_local_python_source("pinecone_connect")
-            .add_local_python_source("embedding_service")
-            .add_local_python_source(
-                "preprocessing"
-            )
+            .add_local_python_source("preprocessing")
+            .add_local_python_source("search")      # Add search module
+            .add_local_python_source("database")    # Add database module
+            .add_local_python_source("models")      # Add models module
         )
 app = modal.App(name="ClipABit", image=image)
 
@@ -39,9 +38,9 @@ class Server:
 
         from datetime import datetime, timezone
         from dotenv import load_dotenv
-        import pinecone_connect as pc
-        import embedding_service as embedding_service  # preload on first use
-        from preprocessing.preprocessor import Preprocessor  # Import local module inside class
+        from preprocessing.preprocessor import Preprocessor
+        from search.searcher import Searcher
+        import os
         
         load_dotenv()
         self.start_time = datetime.now(timezone.utc)
@@ -50,18 +49,28 @@ class Server:
         self.namespace = f"session:{_uuid.uuid4().hex[:8]}"
         print(f"✅ Session namespace: {self.namespace}")
 
+        # Get Pinecone API key from environment
+        PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+        if not PINECONE_API_KEY:
+            raise ValueError("PINECONE_API_KEY not found in environment variables")
+
         # Instantiate classes
         self.preprocessor = Preprocessor()
-        # Ensure Pinecone index exists (auto-create if missing)
+        
+        # Initialize searcher with session namespace for isolation
+        self.searcher = Searcher(
+            api_key=PINECONE_API_KEY,
+            index_name="chunks-index",
+            namespace=self.namespace  # Use session namespace for isolation
+        )
+        print(f"✅ Searcher initialized (device: {self.searcher.device})")
+        
+        # TODO: Ensure Pinecone index exists (requires refactoring old pinecone_connect module)
+        # For now, assuming index already exists
+        
+        # Warm up CLIP model through searcher
         try:
-            client = pc.connect_to_pinecone()
-            pc.ensure_index(client)
-            print("✅ Pinecone index ensured")
-        except Exception as e:
-            print(f"⚠️ Pinecone ensure_index failed: {e}")
-        # Warm up CLIP text model to avoid first-request timeout
-        try:
-            _ = embedding_service.embed_text("warmup")
+            _ = self.searcher.embedder.embed_text("warmup")
             print("✅ CLIP text model warmed")
         except Exception as e:
             print(f"⚠️ CLIP warmup failed: {e}")
@@ -127,11 +136,10 @@ class Server:
         auto_ingest = {"ok": False}
         try:
             import numpy as _np
-            import embedding_service as embedding_service
             import pinecone_connect as pc
             client = pc.connect_to_pinecone()
             text_for_ingest = (file.filename or "uploaded media").rsplit(".", 1)[0]
-            qv = embedding_service.embed_text(text_for_ingest)
+            qv = self.searcher.embedder.embed_text(text_for_ingest)
             pc.upsert_audio_chunk(
                 client,
                 video_id=job_id,
@@ -211,61 +219,26 @@ class Server:
             filters = payload.get("filters")
             print(f"[search] start | top_k={top_k} | filters={filters}")
             events.append({"stage": "start", "desc": "Search received", "t_rel_s": 0.0})
+            
+            # Use the clean searcher module instead of raw calls
             t_embed0 = time.perf_counter()
-            import embedding_service as embedding_service
-            import pinecone_connect as pc
-
-            qv = embedding_service.embed_text(query)
-            t_embed1 = time.perf_counter()
-            print(f"[search] embed ok | secs={t_embed1 - t_embed0:.2f}")
-            events.append({
-                "stage": "embed",
-                "desc": "Computed CLIP text embedding",
-                "t_rel_s": round(t_embed1 - t_start, 3),
-                "dur_s": round(t_embed1 - t_embed0, 3),
-            })
-            t_query0 = time.perf_counter()
-            client = pc.connect_to_pinecone()
-            res = pc.query_vectors(
-                client,
-                qv,
+            results = self.searcher.search(
+                query=query,
                 top_k=top_k,
-                metadata_filter=filters,
-                include_metadata=True,
-                include_values=False,
-                namespace=self.namespace,
+                filters=filters
             )
-            t_query1 = time.perf_counter()
-            print(f"[search] pinecone query ok | secs={t_query1 - t_query0:.2f}")
-            events.append({
-                "stage": "pinecone",
-                "desc": "Queried Pinecone with dense vector",
-                "t_rel_s": round(t_query1 - t_start, 3),
-                "dur_s": round(t_query1 - t_query0, 3),
-            })
-
-            results = []
-            for m in getattr(res, "matches", []) or []:
-                md = m.metadata or {}
-                results.append({
-                    "id": m.id,
-                    "score": m.score,
-                    "video_id": md.get("video_id"),
-                    "chunk_id": md.get("chunk_id"),
-                    "modality": md.get("modality"),
-                    "start_ts": md.get("start_ts"),
-                    "end_ts": md.get("end_ts"),
-                    "transcript_snippet": md.get("transcript_snippet"),
-                    "preview_frame_uri": md.get("preview_frame_uri"),
-                })
             t_done = time.perf_counter()
-            print(f"[search] done | matches={len(results)} | total_secs={t_done - t_start:.2f}")
+            
+            # Add timing events
             events.append({
-                "stage": "format",
-                "desc": "Mapped Pinecone matches to response",
+                "stage": "search",
+                "desc": "Executed modular search (embed + query)",
                 "t_rel_s": round(t_done - t_start, 3),
-                "dur_s": round(t_done - t_query1, 3),
+                "dur_s": round(t_done - t_embed0, 3),
             })
+            
+            print(f"[search] done | matches={len(results)} | total_secs={t_done - t_start:.2f}")
+            
             timing = {
                 "total_s": round(t_done - t_start, 3),
                 "namespace": self.namespace,
@@ -306,11 +279,10 @@ class Server:
                 raise HTTPException(status_code=400, detail="Missing one of: video_id, chunk_id, start_ts, end_ts, text")
 
             import numpy as _np
-            import embedding_service as embedding_service
             import pinecone_connect as pc
             client = pc.connect_to_pinecone()
 
-            text_vec = embedding_service.embed_text(text)
+            text_vec = self.searcher.embedder.embed_text(text)
             pc.upsert_audio_chunk(
                 client,
                 video_id=video_id,
@@ -345,4 +317,5 @@ class Server:
             raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
 
