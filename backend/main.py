@@ -1,43 +1,33 @@
-import logging
 from fastapi import UploadFile, HTTPException
 import modal
 
-#constants
-PINECONE_CHUNKS_INDEX = "chunks-index"
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# Configure Modal app and image
-# dependencies found in pyproject.toml
+# import all necessary modules in the image
 image = (
             modal.Image.debian_slim(python_version="3.12")
-            .uv_sync(extra_options="--no-dev")  # exclude dev dependencies to avoid package conflicts
-            .add_local_python_source(  # add all local modules here
-                "preprocessing",
-                "embeddings",
-                "models",
-                "database",
+            .pip_install(
+                "fastapi[standard]",
+                "python-multipart", 
+                "ffmpeg-python", 
+                "opencv-python-headless", 
+                "numpy",
+                "torch",
+                "transformers",
+                "Pillow",
+                "pinecone",
+                "python-dotenv"
+            )
+            # Package specific modules explicitly ("." is not a valid package name)
+            .add_local_python_source("pinecone_connect")
+            .add_local_python_source("embedding_service")
+            .add_local_python_source(
+                "preprocessing"
             )
         )
+app = modal.App(name="ClipABit", image=image)
 
-# Load secrets from .env file
-modal.Secret.from_dotenv(filename=".env")
-secrets = modal.Secret.objects.list()
 
-# Create Modal app
-app = modal.App(name="ClipABit", image=image, secrets=secrets)
-
-# Shared storage for job results across containers
-job_store = modal.Dict.from_name("clipabit-jobs", create_if_missing=True)
-
-@app.cls()
+@app.cls(secrets=[modal.Secret.from_name("pinecone")])
 class Server:
-
     @modal.enter()
     def startup(self):
         """
@@ -45,105 +35,60 @@ class Server:
             Here is where you would instantiate classes and load models that are
             reused across multiple requests to avoid reloading them each time.
         """
-        # Import local module inside class
-        import os
+        print("Container starting up!")
+
         from datetime import datetime, timezone
-
-        # Import classes here
-        from preprocessing.preprocessor import Preprocessor  
-        from database.pinecone_connector import PineconeConnector
-
-
-        logger.info("Container starting up!")
-        self.start_time = datetime.now(timezone.utc)
+        from dotenv import load_dotenv
+        import pinecone_connect as pc
+        import embedding_service as embedding_service  # preload on first use
+        from preprocessing.preprocessor import Preprocessor  # Import local module inside class
         
-        # Get environment variables
-        PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-        if not PINECONE_API_KEY:
-            raise ValueError("PINECONE_API_KEY not found in environment variables")
+        load_dotenv()
+        self.start_time = datetime.now(timezone.utc)
+        # Isolate vectors per run using a unique namespace
+        import uuid as _uuid
+        self.namespace = f"session:{_uuid.uuid4().hex[:8]}"
+        print(f"✅ Session namespace: {self.namespace}")
 
         # Instantiate classes
+        self.preprocessor = Preprocessor()
+        # Ensure Pinecone index exists (auto-create if missing)
+        try:
+            client = pc.connect_to_pinecone()
+            pc.ensure_index(client)
+            print("✅ Pinecone index ensured")
+        except Exception as e:
+            print(f"⚠️ Pinecone ensure_index failed: {e}")
+        # Warm up CLIP text model to avoid first-request timeout
+        try:
+            _ = embedding_service.embed_text("warmup")
+            print("✅ CLIP text model warmed")
+        except Exception as e:
+            print(f"⚠️ CLIP warmup failed: {e}")
         
-        logger.info("Container modules initialized and ready!")
-        self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
-        self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
-
-        print(f"[Container] Started at {self.start_time.isoformat()}")
+        print("✅ Preprocessor initialized and ready!")
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str):
         """Background video processing task - runs in its own container."""
         import time
-        logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes)")
+        print(f"[Job {job_id}] Starting processing for {filename}")
         
+        # TODO: Add actual video processing here
         try:
-            # Process video through preprocessing pipeline
-            processed_chunks = self.preprocessor.process_video_from_bytes(
-                video_bytes=video_bytes,
-                video_id=job_id,
-                filename=filename,
-                s3_url=""  # TODO: Add S3 URL when storage is implemented
-            )
-            
-            # Calculate summary statistics
-            total_frames = sum(chunk['metadata']['frame_count'] for chunk in processed_chunks)
-            total_memory = sum(chunk['memory_mb'] for chunk in processed_chunks)
-            avg_complexity = sum(chunk['metadata']['complexity_score'] for chunk in processed_chunks) / len(processed_chunks) if processed_chunks else 0
-
-            print(f"[Job {job_id}] Complete: {len(processed_chunks)} chunks, {total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}")
-            
-            # TODO: Send chunks to embedding module
-            # TODO: Store results in database
-            # TODO: Upload processed data to S3
-
-            # Prepare chunk details for response (without frame arrays)
-            chunk_details = []
-            for chunk in processed_chunks:
-                chunk_details.append({
-                    "chunk_id": chunk['chunk_id'],
-                    "metadata": chunk['metadata'],
-                    "memory_mb": chunk['memory_mb']
-                })
-
-            result = {
-                "job_id": job_id,
-                "status": "completed",
-                "filename": filename,
-                "chunks": len(processed_chunks),
-                "total_frames": total_frames,
-                "total_memory_mb": total_memory,
-                "avg_complexity": avg_complexity,
-                "chunk_details": chunk_details
-            }
-            
-            logger.info(f"[Job {job_id}] Finished processing {filename}")
-            
-            # Store result for polling endpoint in shared storage
-            job_store[job_id] = result
-            return result
-
+            time.sleep(5)
         except Exception as e:
-            logger.error(f"[Job {job_id}] Processing failed: {e}")
-            
-            import traceback
-            traceback.print_exc()  # Print full stack trace for debugging
-            error_result = {"job_id": job_id, "status": "failed", "error": str(e)}
-
-            # Store error result for polling endpoint in shared storage
-            job_store[job_id] = error_result
-            return error_result
-
-    @modal.fastapi_endpoint(method="GET")
-    async def status(self, job_id: str):
-        """Poll job status - returns processing status and results when complete."""
-        if job_id not in job_store:
-            return {
-                "job_id": job_id,
-                "status": "processing",
-                "message": "Job is still processing or not found"
-            }
-
-        return job_store[job_id]
+            print(f"[Job {job_id}] Processing failed: {e}")
+            return {"job_id": job_id, "status": "failed", "error": str(e)}
+        
+        print(f"[Job {job_id}] Finished processing {filename}")
+        
+        return {
+            "job_id": job_id, 
+            "status": "completed", 
+            "filename": filename,
+            "preprocessing": "yay"
+        }
 
     @modal.fastapi_endpoint(method="POST")
     async def upload(self, file: UploadFile = None):
@@ -159,11 +104,87 @@ class Server:
         # Generate unique job ID
         job_id = str(uuid.uuid4())
 
-        # Log upload details
-        logger.info(f"[Upload] {job_id}: {file.filename} ({file_size} bytes, {file.content_type})")
-
+        # log file details
+        print(f"Received file: {file.filename}")
+        print(f"Content-Type: {file.content_type}")
+        print(f"Size: {file_size} bytes")
+        print(f"Spawning background job: {job_id}")
+        
+        # Clear prior vectors for this session so searches only see the next upload
+        try:
+            import pinecone_connect as pc
+            client = pc.connect_to_pinecone()
+            pc.delete_namespace(client, namespace=self.namespace)
+            print(f"[upload] cleared namespace {self.namespace}")
+        except Exception as e:
+            print(f"[upload] namespace clear failed: {e}")
+        
         # Spawn background processing (non-blocking - returns immediately)
         self.process_video.spawn(contents, file.filename, job_id)
+
+        # Auto-ingest a placeholder vector so search works immediately after upload.
+        # Uses filename (without extension) as a simple text snippet.
+        auto_ingest = {"ok": False}
+        try:
+            import numpy as _np
+            import embedding_service as embedding_service
+            import pinecone_connect as pc
+            client = pc.connect_to_pinecone()
+            text_for_ingest = (file.filename or "uploaded media").rsplit(".", 1)[0]
+            qv = embedding_service.embed_text(text_for_ingest)
+            pc.upsert_audio_chunk(
+                client,
+                video_id=job_id,
+                chunk_id="1",
+                start_ts=0.0,
+                end_ts=3.0,
+                text_vec_512=qv,
+                transcript_snippet=text_for_ingest,
+                language=None,
+                namespace=self.namespace,
+            )
+            new_id = f"chunk:{job_id}:1:audio"
+            # Fetch back to verify storage and report vector info
+            fetched = pc.fetch_by_id(client, new_id, namespace=self.namespace)
+            # pinecone fetch returns a dict-like; handle defensively
+            vectors = getattr(fetched, "vectors", None) or getattr(fetched, "to_dict", lambda: {})()
+            # Support both dict object and .vectors mapping
+            vec_entry = None
+            if isinstance(fetched, dict):
+                vec_entry = (fetched.get("vectors") or {}).get(new_id)
+            elif hasattr(fetched, "vectors"):
+                vec_entry = fetched.vectors.get(new_id)  # type: ignore
+            if not vec_entry:
+                # Fallback: report what we upserted
+                dim = int(qv.shape[0]) if hasattr(qv, "shape") else len(qv)
+                auto_ingest = {
+                    "ok": True,
+                    "id": new_id,
+                    "text": text_for_ingest,
+                    "namespace": self.namespace,
+                    "vector": {"dim": dim, "l2_norm": float(_np.linalg.norm(qv))},
+                    "verified": False,
+                }
+            else:
+                values = vec_entry.get("values") or []
+                dim = len(values)
+                l2 = float(_np.linalg.norm(_np.array(values))) if values else float(_np.linalg.norm(qv))
+                auto_ingest = {
+                    "ok": True,
+                    "id": new_id,
+                    "text": text_for_ingest,
+                    "namespace": self.namespace,
+                    "vector": {
+                        "dim": dim,
+                        "l2_norm": l2,
+                    },
+                    "metadata": vec_entry.get("metadata") or {},
+                    "verified": True,
+                }
+            print(f"[upload] auto-ingested placeholder for job {job_id} in {self.namespace}")
+        except Exception as e:
+            auto_ingest = {"ok": False, "error": str(e)}
+            print(f"[upload] auto-ingest failed: {e}")
 
         return {
             "job_id": job_id,
@@ -171,6 +192,157 @@ class Server:
             "content_type": file.content_type,
             "size_bytes": file_size,
             "status": "processing",
-            "message": "Video uploaded successfully, processing in background"
+            "message": "Media uploaded successfully; processing in background; auto-ingest added for quick search",
+            "auto_ingest": auto_ingest,
         }
+
+    @modal.fastapi_endpoint(method="POST")
+    async def search(self, payload: dict):
+        try:
+            import time
+            t_start = time.perf_counter()
+            events = []
+            query = payload.get("query", "").strip()
+            if not query:
+                raise HTTPException(status_code=400, detail="Missing 'query'")
+            top_k = int(payload.get("top_k", 1))
+            if top_k <= 0:
+                top_k = 1
+            filters = payload.get("filters")
+            print(f"[search] start | top_k={top_k} | filters={filters}")
+            events.append({"stage": "start", "desc": "Search received", "t_rel_s": 0.0})
+            t_embed0 = time.perf_counter()
+            import embedding_service as embedding_service
+            import pinecone_connect as pc
+
+            qv = embedding_service.embed_text(query)
+            t_embed1 = time.perf_counter()
+            print(f"[search] embed ok | secs={t_embed1 - t_embed0:.2f}")
+            events.append({
+                "stage": "embed",
+                "desc": "Computed CLIP text embedding",
+                "t_rel_s": round(t_embed1 - t_start, 3),
+                "dur_s": round(t_embed1 - t_embed0, 3),
+            })
+            t_query0 = time.perf_counter()
+            client = pc.connect_to_pinecone()
+            res = pc.query_vectors(
+                client,
+                qv,
+                top_k=top_k,
+                metadata_filter=filters,
+                include_metadata=True,
+                include_values=False,
+                namespace=self.namespace,
+            )
+            t_query1 = time.perf_counter()
+            print(f"[search] pinecone query ok | secs={t_query1 - t_query0:.2f}")
+            events.append({
+                "stage": "pinecone",
+                "desc": "Queried Pinecone with dense vector",
+                "t_rel_s": round(t_query1 - t_start, 3),
+                "dur_s": round(t_query1 - t_query0, 3),
+            })
+
+            results = []
+            for m in getattr(res, "matches", []) or []:
+                md = m.metadata or {}
+                results.append({
+                    "id": m.id,
+                    "score": m.score,
+                    "video_id": md.get("video_id"),
+                    "chunk_id": md.get("chunk_id"),
+                    "modality": md.get("modality"),
+                    "start_ts": md.get("start_ts"),
+                    "end_ts": md.get("end_ts"),
+                    "transcript_snippet": md.get("transcript_snippet"),
+                    "preview_frame_uri": md.get("preview_frame_uri"),
+                })
+            t_done = time.perf_counter()
+            print(f"[search] done | matches={len(results)} | total_secs={t_done - t_start:.2f}")
+            events.append({
+                "stage": "format",
+                "desc": "Mapped Pinecone matches to response",
+                "t_rel_s": round(t_done - t_start, 3),
+                "dur_s": round(t_done - t_query1, 3),
+            })
+            timing = {
+                "total_s": round(t_done - t_start, 3),
+                "namespace": self.namespace,
+                "stages": events,
+            }
+            return {"results": results, "timing": timing}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @modal.fastapi_endpoint(method="POST")
+    async def ingest_chunk(self, payload: dict):
+        """
+        Minimal ingest endpoint for demo:
+        - Embeds provided text with CLIP text encoder (512-d)
+        - Upserts as an audio chunk into Pinecone
+        Body:
+        {
+          "video_id": "vidA",
+          "chunk_id": "1",
+          "start_ts": 0.0,
+          "end_ts": 3.2,
+          "text": "hello world transcript",
+          "language": "en"
+        }
+        """
+        try:
+            video_id = payload.get("video_id")
+            chunk_id = payload.get("chunk_id")
+            start_ts = payload.get("start_ts")
+            end_ts = payload.get("end_ts")
+            text = (payload.get("text") or "").strip()
+            language = payload.get("language")
+
+            # Basic validation
+            if not video_id or not chunk_id or start_ts is None or end_ts is None or not text:
+                raise HTTPException(status_code=400, detail="Missing one of: video_id, chunk_id, start_ts, end_ts, text")
+
+            import numpy as _np
+            import embedding_service as embedding_service
+            import pinecone_connect as pc
+            client = pc.connect_to_pinecone()
+
+            text_vec = embedding_service.embed_text(text)
+            pc.upsert_audio_chunk(
+                client,
+                video_id=video_id,
+                chunk_id=chunk_id,
+                start_ts=float(start_ts),
+                end_ts=float(end_ts),
+                text_vec_512=text_vec,
+                transcript_snippet=text,
+                language=language,
+                namespace=self.namespace,
+            )
+            new_id = f"chunk:{video_id}:{chunk_id}:audio"
+            fetched = pc.fetch_by_id(client, new_id, namespace=self.namespace)
+            vectors = getattr(fetched, "vectors", None) or getattr(fetched, "to_dict", lambda: {})()
+            vec_entry = None
+            if isinstance(fetched, dict):
+                vec_entry = (fetched.get("vectors") or {}).get(new_id)
+            elif hasattr(fetched, "vectors"):
+                vec_entry = fetched.vectors.get(new_id)  # type: ignore
+            info = {"id": new_id, "namespace": self.namespace}
+            if vec_entry:
+                values = vec_entry.get("values") or []
+                info["vector"] = {"dim": len(values), "l2_norm": float(_np.linalg.norm(_np.array(values))) if values else None}
+                info["metadata"] = vec_entry.get("metadata") or {}
+                info["verified"] = True
+            else:
+                dim = int(text_vec.shape[0]) if hasattr(text_vec, "shape") else len(text_vec)
+                info["vector"] = {"dim": dim, "l2_norm": float(_np.linalg.norm(text_vec))}
+                info["verified"] = False
+            return {"ok": True, **info}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
