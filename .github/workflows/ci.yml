@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: checkout
+        uses: actions/checkout@v5
+
+      - name: setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-suffix: "backend"
+
+      - name: install dependencies
+        run: uv sync --frozen
+
+      # TODO: tests
+      # - name: run tests
+      #   run: uv run pytest -v
+
+  frontend:
+    name: frontend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend/web
+    steps:
+      - name: checkout
+        uses: actions/checkout@v5
+
+      - name: setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-suffix: "frontend"
+
+      - name: install dependencies
+        run: uv sync --frozen
+
+      # TODO: tests
+      # - name: run tests
+      #   run: uv run pytest -v
+
+  lint:
+    name: code quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        target:
+          - { name: backend, path: backend }
+          - { name: frontend, path: frontend/web }
+    steps:
+      - name: checkout
+        uses: actions/checkout@v5
+
+      - name: setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: install ruff
+        run: uv tool install ruff
+
+      - name: lint ${{ matrix.target.name }}
+        working-directory: ${{ matrix.target.path }}
+        run: uv tool run ruff check .
