@@ -22,6 +22,7 @@ image = (
                 "embeddings",
                 "models",
                 "database",
+                "search",
             )
         )
 
@@ -51,6 +52,7 @@ class Server:
         from preprocessing.preprocessor import Preprocessor
         from database.pinecone_connector import PineconeConnector
         from database.job_store_connector import JobStoreConnector
+        from search.searcher import Searcher
 
 
         logger.info("Container starting up!")
@@ -62,11 +64,26 @@ class Server:
             raise ValueError("PINECONE_API_KEY not found in environment variables")
 
         # Instantiate classes
-
-        logger.info("Container modules initialized and ready!")
         self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
+        
+        # Initialize semantic searcher
+        self.searcher = Searcher(
+            api_key=PINECONE_API_KEY,
+            index_name=PINECONE_CHUNKS_INDEX,
+            namespace=""  # Search all data by default
+        )
+        logger.info(f"Searcher initialized (device: {self.searcher.device})")
+        
+        # Warm up CLIP model
+        try:
+            _ = self.searcher.embedder.embed_text("warmup")
+            logger.info("CLIP text model warmed up")
+        except Exception as e:
+            logger.warning(f"CLIP warmup failed: {e}")
+
+        logger.info("Container modules initialized and ready!")
 
         print(f"[Container] Started at {self.start_time.isoformat()}")
 
@@ -189,13 +206,43 @@ class Server:
         }
 
     @modal.fastapi_endpoint(method="POST")
-    async def search(self, query: str):
+    async def search(self, payload: dict):
         """Search endpoint - accepts a text query and returns semantic search results."""
-        logger.info(f"[Search] Query: {query}")
-        
-        # TODO: Implement search and rerank logic and use class models here
-
-        return {
-            "query": query,
-            "status": "success"
-        }
+        try:
+            import time
+            t_start = time.perf_counter()
+            
+            # Parse request
+            query = payload.get("query", "").strip()
+            if not query:
+                raise HTTPException(status_code=400, detail="Missing 'query' in request body")
+            
+            top_k = int(payload.get("top_k", 5))
+            if top_k <= 0:
+                top_k = 5
+            
+            filters = payload.get("filters")
+            logger.info(f"[Search] Query: '{query}' | top_k={top_k} | filters={filters}")
+            
+            # Execute semantic search
+            results = self.searcher.search(
+                query=query,
+                top_k=top_k,
+                filters=filters
+            )
+            
+            t_done = time.perf_counter()
+            logger.info(f"[Search] Found {len(results)} results in {t_done - t_start:.3f}s")
+            
+            return {
+                "query": query,
+                "results": results,
+                "timing": {
+                    "total_s": round(t_done - t_start, 3)
+                }
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[Search] Error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
