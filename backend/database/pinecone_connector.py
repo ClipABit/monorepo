@@ -77,3 +77,30 @@ class PineconeConnector:
         except Exception as e:
             logger.error(f"Error querying chunks from index {self.index_name} with namespace {namespace}: {e}")
             return []
+    
+    def get_stats(self, namespace: str = "__default__") -> dict:
+        """Get statistics about the Pinecone index.
+        
+        Args:
+            namespace: The namespace to get stats for
+        
+        Returns:
+            dict: Statistics including vector count
+        """
+        try:
+            index = self.client.Index(self.index_name)
+            stats = index.describe_index_stats()
+            
+            # Get namespace-specific count if available
+            namespace_stats = stats.get('namespaces', {}).get(namespace, {})
+            vector_count = namespace_stats.get('vector_count', 0)
+            
+            return {
+                'total_vectors': stats.get('total_vector_count', 0),
+                'namespace_vectors': vector_count,
+                'dimension': stats.get('dimension', 0),
+                'index_fullness': stats.get('index_fullness', 0)
+            }
+        except Exception as e:
+            logger.error(f"Error getting stats from index {self.index_name}: {e}")
+            return {'total_vectors': 0, 'namespace_vectors': 0, 'dimension': 0, 'index_fullness': 0}
