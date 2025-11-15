@@ -1,5 +1,10 @@
-# Make embeddings a proper Python package
+"""
+Embeddings module for video and text semantic search.
 
-from .embedder import VideoEmbedder
+Exports:
+    FrameEmbedder: CLIP-based video frame embedder
+"""
 
-__all__ = ["VideoEmbedder"]
+from embeddings.frame_embedder import FrameEmbedder
+
+__all__ = ['FrameEmbedder']

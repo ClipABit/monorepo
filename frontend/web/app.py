@@ -26,7 +26,7 @@ STATUS_API_URL = "https://clipabit01--clipabit-server-status-dev.modal.run"
 def search_videos(query: str):
     """Send search query to backend."""
     try:
-        resp = requests.post(SEARCH_API_URL, json={"query": query}, timeout=30)
+        resp = requests.post(SEARCH_API_URL, json={"query": query, "top_k": 10}, timeout=30)
         if resp.status_code == 200:
             return resp.json()
         else:
@@ -40,6 +40,45 @@ def upload_file_to_backend(file_bytes: bytes, filename: str, content_type: str |
     files = {"file": (filename, io.BytesIO(file_bytes), content_type or "application/octet-stream")}
     resp = requests.post(UPLOAD_API_URL, files=files, timeout=300)
     return resp
+
+
+def poll_job_status(job_id: str, max_wait: int = 120, status_placeholder=None):
+    """Poll job status until complete or timeout."""
+    start_time = time.time()
+    poll_count = 0
+    
+    while time.time() - start_time < max_wait:
+        poll_count += 1
+        elapsed = int(time.time() - start_time)
+        
+        try:
+            resp = requests.get(f"{STATUS_API_URL}?job_id={job_id}", timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                status = data.get("status", "unknown")
+                
+                # Update status display
+                if status_placeholder:
+                    if status == "processing":
+                        status_placeholder.info(f"⏳ Processing... ({elapsed}s elapsed, poll #{poll_count})")
+                    elif status == "completed":
+                        status_placeholder.success(f"✓ Processing complete! (took {elapsed}s)")
+                    elif status == "failed":
+                        status_placeholder.error(f"✗ Processing failed after {elapsed}s")
+                
+                if status in ["completed", "failed"]:
+                    return data
+            else:
+                if status_placeholder:
+                    status_placeholder.warning(f"⚠ Checking status... ({elapsed}s elapsed)")
+            
+            time.sleep(2)
+        except requests.RequestException as e:
+            if status_placeholder:
+                status_placeholder.warning(f"⚠ Connection issue, retrying... ({elapsed}s elapsed)")
+            time.sleep(2)
+    
+    return {"job_id": job_id, "status": "timeout", "message": "Job polling timed out"}
 
 
 # Upload dialog
@@ -66,23 +105,65 @@ def upload_dialog():
         
         with col1:
             if st.button("Upload", type="primary", use_container_width=True):
-                with st.spinner("Uploading..."):
-                    try:
+                try:
+                    # Upload phase
+                    with st.spinner("📤 Uploading video to server..."):
                         resp = upload_file_to_backend(uploaded_bytes, uploaded.name, uploaded.type)
-                        
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            if data.get("status") == "processing":
-                                job_id = data.get("job_id")
-                                st.toast(f"✓ Video uploaded! Job ID: {job_id}", icon="✅")
-                                time.sleep(1)
-                                st.rerun()
+                    
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("status") == "processing":
+                            job_id = data.get("job_id")
+                            st.success(f"✓ Video uploaded! Job ID: `{job_id}`")
+                            
+                            st.markdown("---")
+                            st.subheader("Processing Status")
+                            st.caption("This may take a few minutes depending on video length...")
+                            
+                            # Create placeholder for live status updates
+                            status_placeholder = st.empty()
+                            status_placeholder.info("⏳ Starting video processing...")
+                            
+                            # Poll for completion with live updates
+                            result = poll_job_status(job_id, max_wait=120, status_placeholder=status_placeholder)
+                            
+                            st.markdown("---")
+                            
+                            if result.get("status") == "completed":
+                                st.success("🎉 Video processing complete!")
+                                
+                                # Display results
+                                st.subheader("Processing Results")
+                                col_a, col_b, col_c = st.columns(3)
+                                with col_a:
+                                    st.metric("Video Chunks", result.get("chunks", 0))
+                                with col_b:
+                                    st.metric("Frames Embedded", result.get("total_frames", 0))
+                                with col_c:
+                                    st.metric("Memory Used", f"{result.get('total_memory_mb', 0):.1f} MB")
+                                
+                                st.info("✨ Video frames are now searchable! Close this dialog and try searching for content.")
+                                
+                                with st.expander("📊 View detailed processing info"):
+                                    st.json(result)
+                                
+                            elif result.get("status") == "failed":
+                                st.error(f"❌ Processing failed: {result.get('error', 'Unknown error')}")
+                                with st.expander("View error details"):
+                                    st.json(result)
+                            elif result.get("status") == "timeout":
+                                st.warning("⏰ Processing timed out (120s limit reached). The job may still be running in the background.")
+                                st.info(f"You can manually check status at: {STATUS_API_URL}?job_id={job_id}")
                             else:
-                                st.error("Upload failed")
+                                st.warning(f"⚠ Unknown status: {result.get('status', 'unknown')}")
+                                st.json(result)
                         else:
-                            st.error(f"Upload failed with status {resp.status_code}")
-                    except requests.RequestException as e:
-                        st.error(f"Upload failed: {e}")
+                            st.error("❌ Upload failed - unexpected response")
+                            st.json(data)
+                    else:
+                        st.error(f"Upload failed with status {resp.status_code}")
+                except requests.RequestException as e:
+                    st.error(f"Upload failed: {e}")
         
         with col2:
             if st.button("Cancel", use_container_width=True):
@@ -90,8 +171,15 @@ def upload_dialog():
 
 
 # Main UI
-st.title("🎬 ClipABit")
-st.subheader("Semantic Video Search")
+col_title, col_stats = st.columns([3, 1])
+with col_title:
+    st.title("🎬 ClipABit")
+    st.subheader("Semantic Video Search")
+with col_stats:
+    # Show database stats if we have search results
+    if st.session_state.search_results and 'stats' in st.session_state.search_results:
+        stats = st.session_state.search_results['stats']
+        st.metric("Vectors in DB", f"{stats.get('namespace_vectors', 0):,}")
 
 # Header with search and upload button
 col1, col2 = st.columns([5, 1])
