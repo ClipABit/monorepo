@@ -23,10 +23,12 @@ class R2Connector:
         Initialize R2 connector with bucket credentials.
         
         Args:
+            bucket_name: Name of the R2 bucket (e.g., "clipabit-dev")
             account_id: Cloudflare account ID
             access_key_id: R2 access key ID
             secret_access_key: R2 secret access key
             environment: Environment name (dev/test/prod)
+            account_id: Cloudflare account ID
         """
         self.bucket_name = environment
         self.endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
@@ -77,8 +79,8 @@ class R2Connector:
             # Construct the R2 URL
             r2_url = f"{self.endpoint_url}/{self.bucket_name}/{object_key}"
             
-            logger.info(f"Uploaded {filename} to R2 at {r2_url}")
-            return True, r2_url
+            logger.info(f"Uploaded video to R2: {object_key}")
+            return r2_url
             
         except ClientError as e:
             logger.error(f"Error uploading video to R2: {e}")
