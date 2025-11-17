@@ -208,7 +208,13 @@ if st.button("🔍 Search", type="primary", use_container_width=False):
 # Display results
 if st.session_state.search_results:
     st.markdown("---")
-    st.subheader("Search Results")
+    
+    # Header with toggle
+    col_header, col_toggle = st.columns([3, 1])
+    with col_header:
+        st.subheader("Search Results")
+    with col_toggle:
+        show_frames = st.checkbox("Show frames", value=True, help="Fetch and display frame images (for testing/debugging)")
     
     results = st.session_state.search_results
     
@@ -233,27 +239,37 @@ if st.session_state.search_results:
                     st.markdown(f"### Result {i} - Score: {score:.3f}")
                     
                     if result_type == 'video_frame':
-                        # Display frame image
-                        col1, col2 = st.columns([1, 2])
-                        
-                        with col1:
-                            try:
-                                frame_url = f"{GET_FRAME_API_URL}?frame_id={result_id}"
-                                response = requests.get(frame_url, timeout=10)
-                                if response.status_code == 200:
-                                    st.image(response.content, caption=f"Frame at {metadata.get('timestamp', 0):.2f}s", use_container_width=True)
-                                else:
-                                    st.warning(f"Frame image not available (status {response.status_code})")
-                            except Exception as e:
-                                st.error(f"Failed to load frame: {e}")
-                        
-                        with col2:
-                            st.write("**Frame Details:**")
+                        # Show frame image if toggle enabled
+                        if show_frames:
+                            col1, col2 = st.columns([1, 2])
+                            
+                            with col1:
+                                try:
+                                    frame_url = f"{GET_FRAME_API_URL}?frame_id={result_id}"
+                                    response = requests.get(frame_url, timeout=10)
+                                    if response.status_code == 200:
+                                        st.image(response.content, caption=f"Frame at {metadata.get('timestamp', 0):.2f}s", use_container_width=True)
+                                    else:
+                                        st.warning(f"Frame image not available (status {response.status_code})")
+                                except Exception as e:
+                                    st.error(f"Failed to load frame: {e}")
+                            
+                            with col2:
+                                st.write("**Frame Details:**")
+                                st.write(f"- Video ID: `{metadata.get('video_id', 'N/A')}`")
+                                st.write(f"- Timestamp: {metadata.get('timestamp', 0):.3f}s")
+                                st.write(f"- Chunk: {metadata.get('chunk_id', 'N/A')}")
+                                st.write(f"- Frame Index: {metadata.get('frame_index', 'N/A')}")
+                                st.write(f"- Complexity: {metadata.get('complexity', 0):.3f}")
+                        else:
+                            # Metadata-only mode (production)
+                            st.write("**Frame Details (metadata only):**")
                             st.write(f"- Video ID: `{metadata.get('video_id', 'N/A')}`")
-                            st.write(f"- Timestamp: {metadata.get('timestamp', 0):.3f}s")
+                            st.write(f"- Timestamp: **{metadata.get('timestamp', 0):.3f}s**")
                             st.write(f"- Chunk: {metadata.get('chunk_id', 'N/A')}")
                             st.write(f"- Frame Index: {metadata.get('frame_index', 'N/A')}")
                             st.write(f"- Complexity: {metadata.get('complexity', 0):.3f}")
+                            st.caption("💡 Enable 'Show frames' to see frame images")
                     else:
                         # Text chunk result
                         st.write("**Text Chunk:**")
