@@ -146,7 +146,7 @@ class R2Connector:
 
     def generate_presigned_urls_batch(self, r2_urls: list[str], expiration: int = 3600) -> dict[str, Optional[str]]:
         """
-        Generate presigned URLs for multiple videos.
+        Generate presigned URLs for multiple videos. These can then used upstream to access videos directly without authentication.
         
         Args:
             r2_urls: List of R2 URLs
