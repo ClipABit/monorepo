@@ -20,5 +20,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "opencv-python", 
+    "opencv-python",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "pytest-mock",
 ]
