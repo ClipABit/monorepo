@@ -1,6 +1,7 @@
 import logging
 from fastapi import UploadFile, HTTPException
 import modal
+import cv2
 
 # Constants
 PINECONE_CHUNKS_INDEX = "chunks-index"
@@ -87,6 +88,9 @@ class Server:
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
         
+        # Frame storage for testing/debugging (stores PIL Images as base64)
+        self.frame_store = modal.Dict.from_name("clipabit-frames", create_if_missing=True)
+        
         # Initialize semantic searcher
         self.searcher = Searcher(
             api_key=PINECONE_API_KEY,
@@ -169,8 +173,9 @@ class Server:
                 
                 # Embed each frame and store in Pinecone
                 for frame_idx, frame_array in enumerate(frames):
-                    # Convert numpy to PIL Image
-                    pil_frame = Image.fromarray(frame_array)
+                    # Convert BGR to RGB (OpenCV reads as BGR, PIL expects RGB)
+                    frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_BGR2RGB)
+                    pil_frame = Image.fromarray(frame_rgb)
                     
                     # Generate embedding
                     embedding = self.frame_embedder.embed_single(pil_frame)
@@ -180,6 +185,14 @@ class Server:
                     
                     # Create frame ID
                     frame_id = f"{chunk_id}_frame_{frame_idx}"
+                    
+                    # Store frame image as base64 for testing/debugging
+                    import io
+                    import base64
+                    buffer = io.BytesIO()
+                    pil_frame.save(buffer, format='JPEG', quality=85)
+                    frame_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                    self.frame_store[frame_id] = frame_base64
                     
                     # Store in Pinecone with minimal metadata
                     frame_metadata = {
@@ -335,18 +348,26 @@ class Server:
         }
 
     @modal.fastapi_endpoint(method="GET")
-    async def search(self, query: str):
-        """Search endpoint - accepts a text query and returns semantic search results."""
-        logger.info(f"[Search] Query: {query}")
-        
-        # TODO: Implement search and rerank logic and use class models here
-        # signed_url = self.r2_connector.generate_presigned_url(identifier=)
-
-        return {
-            "query": query,
-            "status": "success",
-            # "signed_url": signed_url
-        }
+    async def get_frame(self, frame_id: str):
+        """Retrieve frame image by ID (for testing/debugging)."""
+        try:
+            import base64
+            from fastapi.responses import Response
+            
+            frame_base64 = self.frame_store.get(frame_id)
+            if frame_base64 is None:
+                raise HTTPException(status_code=404, detail=f"Frame {frame_id} not found")
+            
+            # Decode base64 to bytes
+            frame_bytes = base64.b64decode(frame_base64)
+            
+            return Response(content=frame_bytes, media_type="image/jpeg")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[GetFrame] Error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
     @modal.fastapi_endpoint(method="POST")
     async def search(self, payload: dict):
         """Search endpoint - accepts a text query and returns semantic search results."""
