@@ -23,8 +23,10 @@ class R2Connector:
         Initialize R2 connector with bucket credentials.
         
         Args:
-            environment: Environment name (dev/test/prod)
             account_id: Cloudflare account ID
+            access_key_id: R2 access key ID
+            secret_access_key: R2 secret access key
+            environment: Environment name (dev/test/prod)
         """
         self.bucket_name = environment
         self.endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
@@ -75,7 +77,7 @@ class R2Connector:
             # Construct the R2 URL
             r2_url = f"{self.endpoint_url}/{self.bucket_name}/{object_key}"
             
-            logger.info(f"Uploaded video to R2: {object_key}")
+            logger.info(f"Uploaded {filename} to R2 at {r2_url}")
             return True, r2_url
             
         except ClientError as e:
@@ -112,7 +114,7 @@ class R2Connector:
             logger.error(f"Error fetching video from R2: {e}")
             return None
     
-    def generate_presigned_url(self, r2_url: str, expiration: int = 3600) -> Optional[str]:
+    def _generate_presigned_url(self, r2_url: str, expiration: int = 3600) -> Optional[str]:
         """
         Generate a presigned URL for temporary access to a video.
         
@@ -155,7 +157,7 @@ class R2Connector:
         """
         results = {}
         for url in r2_urls:
-            presigned = self.generate_presigned_url(url, expiration)
+            presigned = self._generate_presigned_url(url, expiration)
             results[url] = presigned
         
         logger.info(f"Generated {len(results)} presigned URLs")
