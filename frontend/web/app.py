@@ -21,6 +21,7 @@ if 'show_upload' not in st.session_state:
 SEARCH_API_URL = "https://clipabit01--clipabit-server-search-dev.modal.run"
 UPLOAD_API_URL = "https://clipabit01--clipabit-server-upload-dev.modal.run"
 STATUS_API_URL = "https://clipabit01--clipabit-server-status-dev.modal.run"
+GET_FRAME_API_URL = "https://clipabit01--clipabit-server-get-frame-dev.modal.run"
 
 
 def search_videos(query: str):
@@ -218,8 +219,53 @@ if st.session_state.search_results:
         if "query" in results:
             st.info(f"Query: {results['query']}")
         
-        # Display full JSON response
-        with st.expander("View raw JSON response", expanded=True):
+        # Display results with frame images
+        search_results = results.get('results', [])
+        
+        if search_results:
+            for i, result in enumerate(search_results, 1):
+                metadata = result.get('metadata', {})
+                score = result.get('score', 0)
+                result_id = result.get('id', '')
+                result_type = metadata.get('type', 'text_chunk')
+                
+                with st.container():
+                    st.markdown(f"### Result {i} - Score: {score:.3f}")
+                    
+                    if result_type == 'video_frame':
+                        # Display frame image
+                        col1, col2 = st.columns([1, 2])
+                        
+                        with col1:
+                            try:
+                                frame_url = f"{GET_FRAME_API_URL}?frame_id={result_id}"
+                                response = requests.get(frame_url, timeout=10)
+                                if response.status_code == 200:
+                                    st.image(response.content, caption=f"Frame at {metadata.get('timestamp', 0):.2f}s", use_container_width=True)
+                                else:
+                                    st.warning(f"Frame image not available (status {response.status_code})")
+                            except Exception as e:
+                                st.error(f"Failed to load frame: {e}")
+                        
+                        with col2:
+                            st.write("**Frame Details:**")
+                            st.write(f"- Video ID: `{metadata.get('video_id', 'N/A')}`")
+                            st.write(f"- Timestamp: {metadata.get('timestamp', 0):.3f}s")
+                            st.write(f"- Chunk: {metadata.get('chunk_id', 'N/A')}")
+                            st.write(f"- Frame Index: {metadata.get('frame_index', 'N/A')}")
+                            st.write(f"- Complexity: {metadata.get('complexity', 0):.3f}")
+                    else:
+                        # Text chunk result
+                        st.write("**Text Chunk:**")
+                        st.write(metadata.get('text', 'No text available'))
+                        st.caption(f"Source: {metadata.get('source', 'N/A')}")
+                    
+                    st.markdown("---")
+        else:
+            st.info("No results found")
+        
+        # Display full JSON response in expander
+        with st.expander("View raw JSON response"):
             st.json(results)
 
 # Footer
