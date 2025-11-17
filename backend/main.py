@@ -26,11 +26,10 @@ image = (
         )
 
 # Load secrets from .env file
-local_secrets = modal.Secret.from_dotenv(filename=".env")
-secrets = modal.Secret.objects.list()
+secrets = modal.Secret.from_dotenv(filename=".env")
 
 # Create Modal app
-app = modal.App(name="ClipABit", image=image, secrets=[local_secrets])
+app = modal.App(name="ClipABit", image=image, secrets=[secrets])
 
 
 @app.cls()
@@ -52,15 +51,31 @@ class Server:
         from embeddings.embedder import VideoEmbedder
         from database.pinecone_connector import PineconeConnector
         from database.job_store_connector import JobStoreConnector
+        from database.r2_connector import R2Connector
 
 
         logger.info("Container starting up!")
         self.start_time = datetime.now(timezone.utc)
 
-        # Get environment variables
+        # Get environment variables (TODO: abstract to config module)
         PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
         if not PINECONE_API_KEY:
             raise ValueError("PINECONE_API_KEY not found in environment variables")
+
+        R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
+        if not R2_ACCOUNT_ID:
+            raise ValueError("R2_ACCOUNT_ID not found in environment variables")
+        
+        R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+        if not R2_ACCESS_KEY_ID:
+            raise ValueError("R2_ACCESS_KEY_ID not found in environment variables")
+        
+        R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+        if not R2_SECRET_ACCESS_KEY:
+            raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
+        
+        ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
+        logger.info(f"Running in environment: {ENVIRONMENT}")
 
         # Instantiate classes
 
@@ -69,6 +84,10 @@ class Server:
         self.video_embedder = VideoEmbedder()
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
+        self.r2_connector = R2Connector(account_id=R2_ACCOUNT_ID,
+                                        access_key_id=R2_ACCESS_KEY_ID,
+                                        secret_access_key=R2_SECRET_ACCESS_KEY, 
+                                        environment=ENVIRONMENT)
 
         print(f"[Container] Started at {self.start_time.isoformat()}")
 
@@ -78,12 +97,23 @@ class Server:
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes)")
         
         try:
+            # Upload processed data to R2 bucket
+            # TODO: do this in parallel with processing and provide url once done
+            success, r2_url = self.r2_connector.upload_video(
+                video_data=video_bytes,
+                filename=filename,
+                user_id="user1"
+            )
+            if not success:
+                raise Exception("Failed to upload video to R2 storage")
+            
+
             # Process video through preprocessing pipeline
             processed_chunks = self.preprocessor.process_video_from_bytes(
                 video_bytes=video_bytes,
                 video_id=job_id,
                 filename=filename,
-                s3_url=""  # TODO: Add S3 URL when storage is implemented
+                s3_url=r2_url
             )
             
             # Calculate summary statistics
@@ -92,7 +122,12 @@ class Server:
             avg_complexity = sum(chunk['metadata']['complexity_score'] for chunk in processed_chunks) / len(processed_chunks) if processed_chunks else 0
 
             print(f"[Job {job_id}] Complete: {len(processed_chunks)} chunks, {total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}")
-                        
+            
+            # TODO: Send chunks to embedding module
+            # TODO: Store results in database
+
+
+            # Prepare chunk details for response (without frame arrays)
             chunk_details = []
             for chunk in processed_chunks:
                 embedding = self.video_embedder._generate_clip_embedding(chunk["frames"], num_frames=8)

@@ -1,7 +1,7 @@
 import logging
 import boto3
 from botocore.exceptions import ClientError
-from typing import Optional
+from typing import Optional, Tuple
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,7 +14,6 @@ class R2Connector:
     
     def __init__(
         self,
-        bucket_name: str,
         account_id: str,
         access_key_id: str,
         secret_access_key: str,
@@ -24,34 +23,30 @@ class R2Connector:
         Initialize R2 connector with bucket credentials.
         
         Args:
-            bucket_name: Name of the R2 bucket (e.g., "clipabit-dev")
-            account_id: Cloudflare account ID
-            access_key_id: R2 access key ID
-            secret_access_key: R2 secret access key
             environment: Environment name (dev/test/prod)
+            account_id: Cloudflare account ID
         """
-        self.bucket_name = bucket_name
-        self.environment = environment
+        self.bucket_name = environment
         self.endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
         
         # Initialize S3 client (R2 is S3-compatible)
         self.s3_client = boto3.client(
             's3',
-            endpoint_url=self.endpoint_url,
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
+            endpoint_url=self.endpoint_url,
             region_name='auto'  # R2 uses 'auto' for region
         )
         
-        logger.info(f"Initialized R2Connector for bucket: {bucket_name} (environment: {environment})")
+        logger.info(f"Initialized R2Connector for bucket: {self.bucket_name}")
     
     def upload_video(
         self,
         video_data: bytes,
         filename: str,
-        folder_name: str,
+        user_id: str,
         content_type: str = "video/mp4"
-    ) -> Optional[str]:
+    ) -> Tuple[bool, str]:
         """
         Upload a video to R2 storage in a specified folder.
         Creates the folder if it doesn't exist (folders are virtual in S3/R2).
@@ -59,15 +54,15 @@ class R2Connector:
         Args:
             video_data: The video file as bytes
             filename: Name of the video file
-            folder_name: Folder/prefix to organize videos (e.g., "user-uploads")
+            user_id: User ID to organize videos
             content_type: MIME type of the video
         
         Returns:
-            str: The R2 URL of the uploaded video, or None if upload failed
+            Tuple[bool, str]: (Success flag, R2 URL of the uploaded video or error message)
         """
         try:
             # Construct the object key (folder/filename)
-            object_key = f"{folder_name}/{filename}"
+            object_key = f"{user_id}/{filename}"
             
             # Upload the video
             self.s3_client.put_object(
@@ -81,11 +76,11 @@ class R2Connector:
             r2_url = f"{self.endpoint_url}/{self.bucket_name}/{object_key}"
             
             logger.info(f"Uploaded video to R2: {object_key}")
-            return r2_url
+            return True, r2_url
             
         except ClientError as e:
             logger.error(f"Error uploading video to R2: {e}")
-            return None
+            return False, ""
     
     def fetch_video(self, r2_url: str) -> Optional[bytes]:
         """
@@ -165,66 +160,3 @@ class R2Connector:
         
         logger.info(f"Generated {len(results)} presigned URLs")
         return results
-    
-    def delete_video(self, r2_url: str) -> bool:
-        """
-        Delete a video from R2 storage.
-        
-        Args:
-            r2_url: The full R2 URL of the video
-        
-        Returns:
-            bool: True if deletion was successful, False otherwise
-        """
-        try:
-            # Extract object key from URL
-            url_parts = r2_url.replace(f"{self.endpoint_url}/{self.bucket_name}/", "")
-            object_key = url_parts
-            
-            # Delete the object
-            self.s3_client.delete_object(
-                Bucket=self.bucket_name,
-                Key=object_key
-            )
-            
-            logger.info(f"Deleted video from R2: {object_key}")
-            return True
-            
-        except ClientError as e:
-            logger.error(f"Error deleting video from R2: {e}")
-            return False
-    
-    def list_videos(self, folder_name: str, max_keys: int = 100) -> list[dict]:
-        """
-        List videos in a specific folder.
-        
-        Args:
-            folder_name: The folder/prefix to list videos from
-            max_keys: Maximum number of results to return
-        
-        Returns:
-            list: List of video objects with keys and metadata
-        """
-        try:
-            response = self.s3_client.list_objects_v2(
-                Bucket=self.bucket_name,
-                Prefix=f"{folder_name}/",
-                MaxKeys=max_keys
-            )
-            
-            videos = []
-            if 'Contents' in response:
-                for obj in response['Contents']:
-                    videos.append({
-                        'key': obj['Key'],
-                        'size': obj['Size'],
-                        'last_modified': obj['LastModified'],
-                        'url': f"{self.endpoint_url}/{self.bucket_name}/{obj['Key']}"
-                    })
-            
-            logger.info(f"Listed {len(videos)} videos from folder: {folder_name}")
-            return videos
-            
-        except ClientError as e:
-            logger.error(f"Error listing videos from R2: {e}")
-            return []
