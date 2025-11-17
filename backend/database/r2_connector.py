@@ -75,7 +75,7 @@ class R2Connector:
             # Construct the R2 URL
             r2_url = f"{self.endpoint_url}/{self.bucket_name}/{object_key}"
             
-            logger.info(f"Uploaded video to R2: {object_key}")
+            logger.info(f"Uploaded {filename} to R2 with URL: {r2_url}")
             return True, r2_url
             
         except ClientError as e:
