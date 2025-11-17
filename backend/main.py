@@ -104,8 +104,6 @@ class Server:
             )
             if not success:
                 raise Exception("Failed to upload video to R2 storage")
-            
-            logger.info(f"[Job {job_id}] Uploaded video to R2: {r2_url}")
 
             # Process video through preprocessing pipeline
             processed_chunks = self.preprocessor.process_video_from_bytes(
