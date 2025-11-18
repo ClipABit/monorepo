@@ -97,10 +97,10 @@ class Server:
         try:
             # Upload processed data to R2 bucket
             # TODO: do this in parallel with processing and provide url once done
-            success, r2_url = self.r2_connector.upload_video(
+            success, hashed_identifier = self.r2_connector.upload_video(
                 video_data=video_bytes,
                 filename=filename,
-                user_id="user1"
+                # user_id="user1" # Specify user ID once we have user management
             )
             if not success:
                 raise Exception("Failed to upload video to R2 storage")
@@ -110,7 +110,7 @@ class Server:
                 video_bytes=video_bytes,
                 video_id=job_id,
                 filename=filename,
-                s3_url=r2_url
+                hashed_identifier=hashed_identifier
             )
             
             # Calculate summary statistics
@@ -136,7 +136,7 @@ class Server:
             result = {
                 "job_id": job_id,
                 "status": "completed",
-                "r2_url": r2_url,
+                "hashed_identifier": hashed_identifier,
                 "filename": filename,
                 "chunks": len(processed_chunks),
                 "total_frames": total_frames,

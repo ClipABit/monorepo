@@ -1,7 +1,9 @@
+import os
 import logging
 import boto3
 from botocore.exceptions import ClientError
 from typing import Optional, Tuple
+import base64
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -9,7 +11,7 @@ logger = logging.getLogger(__name__)
 class R2Connector:
     """
     R2 Connector Class for managing Cloudflare R2 storage interactions.
-    Supports uploading videos to folders and retrieving them by URL.
+    Supports uploading videos to folders and retrieving them by hashed identifiers.
     """
     
     def __init__(
@@ -23,8 +25,10 @@ class R2Connector:
         Initialize R2 connector with bucket credentials.
         
         Args:
-            environment: Environment name (dev/test/prod)
             account_id: Cloudflare account ID
+            access_key_id: R2 access key ID
+            secret_access_key: R2 secret access key
+            environment: Environment name (dev/test/prod) which maps directly to bucket name
         """
         self.bucket_name = environment
         self.endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
@@ -40,30 +44,139 @@ class R2Connector:
         
         logger.info(f"Initialized R2Connector for bucket: {self.bucket_name}")
     
+    def sanitize_filename(self, filename: str) -> str:
+        """
+        Sanitize filename to prevent directory traversal attacks.
+        
+        Args:
+            filename: Original filename
+        
+        Returns:
+            str: Sanitized filename
+        """
+        filename = os.path.basename(filename)  # Remove any path traversal components
+        filename = filename.replace(" ", "_")  # Replace spaces with underscores
+        return filename
+
+    def _encode_path(self, bucket_name: str, user_id: str, filename: str) -> str:
+        """
+        Encode bucket name, user ID, and filename into a URL-safe identifier.
+        
+        Args:
+            bucket_name: Name of the R2 bucket
+            user_id: User identifier
+            filename: Name of the video file
+        
+        Returns:
+            str: URL-safe base64-encoded identifier
+        """
+        # Create the full path string
+        path = f"{bucket_name}/{user_id}/{filename}"
+        
+        # Convert to base64 for URL-safe representation
+        encoded = base64.urlsafe_b64encode(path.encode('utf-8')).decode('utf-8').rstrip('=')
+        return encoded
+    
+    def _decode_path(self, identifier: str) -> Tuple[str, str, str]:
+        """
+        Decode the URL-safe identifier back into bucket name, user ID, and filename.
+        
+        Args:
+            identifier: The base64-encoded identifier
+        Returns:
+            Tuple[str, str, str]: (bucket_name, user_id, filename)
+        """
+        # Add padding if necessary
+        padding = '=' * (-len(identifier) % 4)
+        decoded_bytes = base64.urlsafe_b64decode(identifier + padding)
+        decoded_str = decoded_bytes.decode('utf-8')
+        
+        # Split into components
+        parts = decoded_str.split('/', 2)
+        if len(parts) != 3:
+            raise ValueError("Invalid identifier format")
+        
+        bucket_name, user_id, filename = parts
+        return bucket_name, user_id, filename
+    
+    def _get_object_key_from_identifier(self, identifier: str) -> Optional[str]:
+        """
+        Decode identifier and validate bucket name matches, then return object key.
+        
+        Args:
+            identifier: The base64-encoded identifier
+        
+        Returns:
+            str: The object key if valid, None otherwise
+        """
+        try:
+            # Decode the identifier
+            bucket_name, user_id, filename = self._decode_path(identifier)
+            
+            # Validate bucket name matches
+            if bucket_name != self.bucket_name:
+                logger.warning(f"Bucket mismatch: expected {self.bucket_name}, got {bucket_name}")
+                return None
+            
+            # Construct object key
+            object_key = f"{user_id}/{filename}"
+            logger.info(f"Decoded identifier to object key: {object_key}")
+            return object_key
+            
+        except (ValueError, Exception) as e:
+            logger.error(f"Error decoding identifier {identifier}: {e}")
+            return None
+        
+    def _determine_content_type(self, filename: str) -> str:
+        """
+        Determine the MIME type of a file based on its extension.
+        
+        Args:
+            filename: Name of the file
+        
+        Returns:
+            str: MIME type string
+        """
+        ext = os.path.splitext(filename)[1].lower()
+        mime_types = {
+            '.mp4': 'video/mp4',
+            '.mov': 'video/quicktime',
+            '.avi': 'video/x-msvideo',
+            '.mkv': 'video/x-matroska',
+            '.webm': 'video/webm'
+        }
+        return mime_types.get(ext, 'application/octet-stream')
+    
     def upload_video(
         self,
         video_data: bytes,
         filename: str,
-        user_id: str,
-        content_type: str = "video/mp4"
+        user_id: str = "__default__"
     ) -> Tuple[bool, str]:
         """
-        Upload a video to R2 storage in a specified folder.
-        Creates the folder if it doesn't exist (folders are virtual in S3/R2).
+        Upload a video to R2 storage and return a hashed identifier.
         
         Args:
             video_data: The video file as bytes
             filename: Name of the video file
-            user_id: User ID to organize videos
-            content_type: MIME type of the video
+            user_id: User ID to organize videos (default: "__default__")
         
         Returns:
-            Tuple[bool, str]: (Success flag, R2 URL of the uploaded video or error message)
+            Tuple[bool, str]: (Success flag, hashed identifier or error message)
         """
         try:
-            # Construct the object key (folder/filename)
+            # sanitize filename to prevent directory traversal attacks
+            filename = self.sanitize_filename(filename)
+
+            # Construct the object key (user_id/filename)
             object_key = f"{user_id}/{filename}"
             
+            # Create encoded identifier
+            identifier = self._encode_path(self.bucket_name, user_id, filename)
+            
+            # Determine file MIME type
+            content_type = self._determine_content_type(filename)
+
             # Upload the video
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
@@ -72,31 +185,28 @@ class R2Connector:
                 ContentType=content_type
             )
             
-            # Construct the R2 URL
-            r2_url = f"{self.endpoint_url}/{self.bucket_name}/{object_key}"
-            
-            logger.info(f"Uploaded {filename} to R2 with URL: {r2_url}")
-            return True, r2_url
+            logger.info(f"Uploaded {filename} to R2 with identifier: {identifier}")
+            return True, identifier
             
         except ClientError as e:
             logger.error(f"Error uploading video to R2: {e}")
-            return False, ""
+            return False, str(e)
     
-    def fetch_video(self, r2_url: str) -> Optional[bytes]:
+    def fetch_video(self, identifier: str) -> Optional[bytes]:
         """
-        Fetch a video from R2 storage using its URL.
+        Fetch a video from R2 storage using its identifier.
         
         Args:
-            r2_url: The full R2 URL of the video
+            identifier: The base64-encoded identifier of the video
         
         Returns:
             bytes: The video file as bytes, or None if fetch failed
         """
         try:
-            # Extract object key from URL
-            # URL format: https://{account_id}.r2.cloudflarestorage.com/{bucket_name}/{object_key}
-            url_parts = r2_url.replace(f"{self.endpoint_url}/{self.bucket_name}/", "")
-            object_key = url_parts
+            # Get object key from identifier
+            object_key = self._get_object_key_from_identifier(identifier)
+            if not object_key:
+                return None
             
             # Fetch the object
             response = self.s3_client.get_object(
@@ -105,28 +215,31 @@ class R2Connector:
             )
             
             video_data = response['Body'].read()
-            logger.info(f"Fetched video from R2: {object_key} ({len(video_data)} bytes)")
+            logger.info(f"Fetched video with identifier {identifier}: ({len(video_data)} bytes)")
             return video_data
             
         except ClientError as e:
             logger.error(f"Error fetching video from R2: {e}")
             return None
     
-    def _generate_presigned_url(self, r2_url: str, expiration: int = 3600) -> Optional[str]:
+    def generate_presigned_url(self, identifier: str, expiration: int = 3600) -> Optional[str]:
         """
-        Generate a presigned URL for temporary access to a video.
+        Generate a presigned URL for temporary access to a video using its identifier.
+        Validates that the bucket name in the identifier matches the connector's bucket.
         
         Args:
-            r2_url: The R2 URL of the video
+            identifier: The base64-encoded identifier of the video
             expiration: URL expiration time in seconds (default: 1 hour)
         
         Returns:
-            str: Presigned URL that can be used to access the video directly
+            str: Presigned URL that can be used to access the video directly, or None if failed
         """
         try:
-            # Extract object key from URL
-            url_parts = r2_url.replace(f"{self.endpoint_url}/{self.bucket_name}/", "")
-            object_key = url_parts
+            # Get object key from identifier
+            object_key = self._get_object_key_from_identifier(identifier)
+            if not object_key:
+                logger.warning(f"Cannot generate presigned URL: invalid identifier {identifier}")
+                return None
             
             # Generate presigned URL
             presigned_url = self.s3_client.generate_presigned_url(
@@ -135,28 +248,30 @@ class R2Connector:
                 ExpiresIn=expiration
             )
             
-            logger.info(f"Generated presigned URL for: {object_key}")
+            logger.info(f"Generated presigned URL for identifier: {identifier}")
             return presigned_url
             
         except ClientError as e:
             logger.error(f"Error generating presigned URL: {e}")
             return None
 
-    def generate_presigned_urls_batch(self, r2_urls: list[str], expiration: int = 3600) -> dict[str, Optional[str]]:
+    def generate_presigned_urls_batch(self, identifiers: list[str], expiration: int = 3600) -> dict[str, Optional[str]]:
         """
-        Generate presigned URLs for multiple videos. These can then used upstream to access videos directly without authentication.
+        Generate presigned URLs for multiple videos using their identifiers.
+        These can then be used to access videos directly without authentication.
         
         Args:
-            r2_urls: List of R2 URLs
-            expiration: URL expiration time in seconds
+            identifiers: List of base64-encoded identifiers
+            expiration: URL expiration time in seconds (default: 1 hour)
         
         Returns:
-            dict: Mapping of original URL to presigned URL
+            dict: Mapping of identifier to presigned URL (None if generation failed)
         """
         results = {}
-        for url in r2_urls:
-            presigned = self._generate_presigned_url(url, expiration)
-            results[url] = presigned
+        for identifier in identifiers:
+            presigned = self.generate_presigned_url(identifier, expiration)
+            results[identifier] = presigned
         
-        logger.info(f"Generated {len(results)} presigned URLs")
+        successful = sum(1 for url in results.values() if url is not None)
+        logger.info(f"Generated {successful}/{len(identifiers)} presigned URLs")
         return results
