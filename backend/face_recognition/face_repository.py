@@ -1,24 +1,22 @@
 """Face repository: detection, embedding and incremental clustering utilities.
 
 This module provides the FaceRepository class which wraps face detection
-and embedding (via DeepFace) and incremental clustering (via IncrementalDBSCAN).
+and embedding (via DeepFace) and clustring (via Nearest-Neighbor + Threshold).
 
 Responsibilities:
-- Detect faces in images and compute embeddings.
-- Maintain a global list of embeddings and an incremental clustering model.
-- Map clip IDs to the clusters (face identities) observed in that clip.
-- Provide utilities to retrieve example face crops per cluster and per-clip face images.
-
-The implementation stores example face crops in `cluster_example_face` so the UI
-can render representative face images for each cluster.
+- detect faces in images and compute embeddings.
+- for each face, find the face_id in database that it belongs to (or create a new face_id).
+- add new face embeddings to Pinecone vector database, with metadata for face ID and chunk ID.
 """
 
-from incdbscan import IncrementalDBSCAN
+# from incdbscan import IncrementalDBSCAN
 from deepface import DeepFace
 import numpy as np
-from sklearn.cluster import *
+# from sklearn.cluster import *
 from .face import Face
 import logging
+from database import PineconeConnector
+import uuid
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,18 +25,15 @@ class FaceRepository:
     """Repository that detects faces, computes embeddings and clusters them.
 
     Attributes:
-        detector_backend (str): DeepFace detector backend name.
-        embedding_model_name (str): Embedding model name used by DeepFace.
-        enforce_detection (bool): Whether DeepFace should enforce detection.
-        align (bool): Whether to align faces before embedding.
-        all_embeddings (list[np.ndarray]): Flattened list of all stored embeddings.
-        clip_faces_map (dict[int, set[int]]): Map from clip_id to set of cluster labels seen in that clip.
-        clustering (IncrementalDBSCAN): Incremental clustering model used to assign embeddings to clusters.
-        cluster_example_face (dict[int, Face]): Representative Face object for each cluster .
-
+        pinecone_connector (PineconeConnector): Connector to Pinecone vector database.
+        detector_backend (str): Backend to use for face detection (default: "mtcnn").
+        embedding_model_name (str): Model name to use for face embedding (default: "ArcFace").
+        enforce_detection (bool): Whether to enforce face detection (default: True).
+        align (bool): Whether to align faces before embedding (default: True).
+        threshold (float): Similarity threshold for face recognition (default: 0.35).
     Class attributes:
-        all_detector_backends (list[str]): Supported detector backends (informational).
-        all_embed_models (list[str]): Supported embedding models (informational).
+        all_detector_backends (list[str]): List of all supported detector backends.
+        all_embed_models (list[str]): List of all supported embedding models.
     """
 
     # list of all detector backends used for face detection
@@ -53,31 +48,29 @@ class FaceRepository:
 
     def __init__(
             self, 
+            pinecone_api_key: str,
+            index_name: str,
             detector_backend="mtcnn", 
             embedding_model_name="ArcFace", 
             enforce_detection=True, 
             align=True,
-            cluster_metric = "cosine",
-            cluster_eps = 0.6,
-            cluster_min_pts = 2):
+            threshold = 0.35):
         # parameters for face detection and embedding with deepface
         self.detector_backend = detector_backend
         self.embedding_model_name = embedding_model_name
         self.enforce_detection = enforce_detection
         self.align = align
+        self.threshold = threshold  # threshold for face recognition matching
 
-        self.all_embeddings: list[np.ndarray] = []
-        self.clip_faces_map: dict[int, set[int]] = {}    # map from clip_id to set of face indices in that clip
-        self.clustering = IncrementalDBSCAN(metric=cluster_metric, eps=cluster_eps, min_pts = cluster_min_pts)
-
+        self.pinecone_connector = PineconeConnector(api_key=pinecone_api_key, index_name=index_name)
+        
         self.cluster_example_face: dict[int, Face] = {} # list of example face images in cluster = key
 
         logging.debug(f"FaceRepository: Initialized FaceRepository with detector_backend={detector_backend}, "
                      f"embedding_model_name={embedding_model_name}, enforce_detection={enforce_detection}, "
-                     f"align={align}, cluster_metric={cluster_metric}, cluster_eps={cluster_eps}, "
-                     f"cluster_min_pts={cluster_min_pts}")
+                     f"align={align}, index_name={index_name}, threshold={threshold}")
 
-    def __detect_and_embed(self, img):
+    def _detect_and_embed(self, img):
         """Detect faces in `img` and compute embeddings.
 
         Args:
@@ -126,8 +119,39 @@ class FaceRepository:
 
         return faces
 
+    def _upsert_face_embedding(self, face_ids_count: dict, namespace: str, face_id: str, chunk_id: str, face_embedding: np.ndarray):
+        """Upsert a face embedding into the Pinecone index.
+
+        Args:
+            face_ids_count (dict): Dictionary mapping face IDs to their counts.
+            namespace (str): Namespace to upsert the face embedding into.
+            face_id (str): Unique identifier for the face.
+            chunk_id (str): Unique identifier for the clip chunk.
+            face_embedding (np.ndarray): The face embedding to upsert.
+
+        Returns:
+            bool: True if upsert was successful, False otherwise.
+        """
+        try:
+            success = self.pinecone_connector.upsert_chunk(
+                chunk_id=str(uuid.uuid4()),
+                chunk_embedding=face_embedding,
+                namespace=namespace,
+                metadata={"face_id": face_id, "chunk_id": chunk_id}
+            )
+        except Exception as e:
+            logger.error(f"FaceRepository: Error upserting face embedding for face_id {face_id} in chunk_id {chunk_id}: {e}")
+            return False
+        
+        if success:
+            if face_id in face_ids_count:
+                face_ids_count[face_id] += 1
+            else:
+                face_ids_count[face_id] = 1
+        return success
+
     # add a list of faces to the cluster
-    def add_faces(self, clip_id: int, faces: list[Face]):
+    def add_faces(self, namespace: str, chunk_id: str, faces: list[Face]):
         """Add a batch of Face objects to the clustering model.
 
         This method inserts the provided embeddings into the incremental
@@ -135,87 +159,86 @@ class FaceRepository:
         clusters appear in `clip_id`.
 
         Args:
-            clip_id (int): Identifier for the video/audio clip the images belong to.
-            faces (list[Face]): List of Face objects (must contain `.embedding`).
+            namespace (str): Namespace to upsert the face embeddings into.
+            chunk_id (str): Unique identifier for the clip chunk.
+            faces (list[Face]): List of Face objects to add.
 
         Returns:
-            list[int]: A list of cluster labels for the provided faces. Labels
-                are integers >= 0 for cluster assignments. (Outliers may be
-                filtered out by the clustering model and not returned here.)
+            dict: A dictionary mapping face IDs to the number of times they
+                appear in this chunk.
         """
-        logging.debug(f"FaceRepository: Adding {len(faces)} faces to clustering for clip_id {clip_id}.")
+        logging.debug(f"FaceRepository: Adding {len(faces)} faces to clustering for chunk_id {chunk_id}.")
 
         try:
             # collect and stack embeddings from face objects
             face_embeddings = [f.embedding for f in faces]
-            X = np.stack(face_embeddings)
         except Exception as e:
-            logger.error(f"FaceRepository: Error extracting embeddings from faces for clip_id {clip_id}: {e}\nreturning empty label list.")
-            return []
-
-        try:
-            self.clustering.insert(X)
-        except Exception as e:
-            logger.error(f"FaceRepository: Error inserting embeddings into clustering model for clip_id {clip_id}: {e}\nreturning empty label list.")
-            return []
-
-        # Persist embeddings and retrieve labels for the inserted batch
-        self.all_embeddings += face_embeddings
-        labels = [int(l) for l in self.clustering.get_cluster_labels(X)]
-
-        # Update mapping from clip_id to set of seen cluster labels
-        if clip_id not in self.clip_faces_map:
-            self.clip_faces_map[clip_id] = set([l for l in labels if l > -1])
-        else:
-            self.clip_faces_map[clip_id].update([l for l in labels if l > -1])
-
-        # Ensure we have a representative Face object for any newly created cluster
-        for i, label in enumerate(labels):
-            if label not in self.cluster_example_face.keys() and label > -1:
-                self.cluster_example_face[label] = faces[i]
-                logging.debug(f"FaceRepository: New face detected with cluster label {label}. Stored example face.")
-
-        logging.debug(f"FaceRepository: Added {len(faces)} faces for clip_id {clip_id}, assigned labels: {labels}. Outlier faces (label -1) will be ignored.")
-        return labels
-    
-    # get all face cluster labels in a given clip
-    def get_faces_in_clip(self, clip_id: int):
-        """Return the set of cluster labels observed in a clip.
-
-        Args:
-            clip_id (int): Clip identifier.
-
-        Returns:
-            set[int]: A set of cluster labels (may be empty if no faces observed).
-        """
-        if clip_id not in self.clip_faces_map:
-            logging.warning(f"FaceRepository: No faces recorded for clip_id {clip_id}. Empty set will be returned.")
-        return self.clip_faces_map.get(clip_id, set())
-        
-    def get_face_images_in_clip(self, clip_id: int):
-        """Retrieve example face crop images for all clusters in a clip.
-
-        Args:
-            clip_id (int): Clip identifier.
-
-        Returns:
-            list[np.ndarray]: List of face crop images ( NumPy arrays ). The
-                order is determined by the set iteration over cluster labels.
-        """
-        face_images = []
-        if (clip_id not in self.clip_faces_map):
-            logging.warning(f"FaceRepository: No faces recorded for clip_id {clip_id}. Empty face image list will be returned.")
+            logger.error(f"FaceRepository: Error extracting embeddings from faces for chunk_id {chunk_id}: {e}\nreturning empty label list.")
             return []
         
-        face_labels = self.clip_faces_map.get(clip_id, set())
-        for label in face_labels:
-            if label in self.cluster_example_face.keys():
-                face_images.append(self.cluster_example_face[label].face_image)
+        # dict where key = face_id, value = number of times appear in this chunk
+        face_ids_count: dict = {}
+        
+        for e in face_embeddings:
+            # find closest face from pinecone vector db
+            best_match = self.pinecone_connector.query_chunks(
+                query_embedding=e,
+                namespace=namespace,
+                top_k=1
+            )
+            print(best_match)
+            if not best_match or len(best_match) == 0:
+                # no match found, insert as new cluster
+                new_id = str(uuid.uuid4())
+                upsert_success = self._upsert_face_embedding(
+                    face_ids_count=face_ids_count,
+                    namespace=namespace,
+                    face_id=new_id,
+                    chunk_id=chunk_id,
+                    face_embedding=e
+                )
+                if not upsert_success:
+                    logger.error(f"FaceRepository: Failed to upsert new face embedding for new_id {new_id} in chunk_id {chunk_id}.")
+                    continue
+                continue
+
+            best_match = best_match[0]
+
+            # if score above threshold, group new embedding into existing cluster
+            if best_match['score'] > self.threshold:
+                face_id = str(best_match["metadata"].get("face_id", None))
+                print(face_id)
+                if face_id is not None:
+                    upsert_success = self._upsert_face_embedding(
+                        face_ids_count=face_ids_count,
+                        namespace=namespace,
+                        face_id=face_id,
+                        chunk_id=chunk_id,
+                        face_embedding=e
+                    )
+                    if not upsert_success:
+                        logger.error(f"FaceRepository: Failed to upsert face embedding for existing face_id {face_id} in chunk_id {chunk_id}.")
+                        continue
+                else:
+                    logger.error(f"FaceRepository: Best match from Pinecone for chunk_id {chunk_id} has no face_id in metadata. Skipping.")
+                    continue
             else:
-                logging.warning(f"FaceRepository: Cluster label {label} for clip_id {clip_id} has no example face stored.")
-        return face_images
+                # otherwise, insert as new cluster
+                new_id = str(uuid.uuid4())
+                upsert_success = self._upsert_face_embedding(
+                    face_ids_count=face_ids_count,
+                    namespace=namespace,
+                    face_id=new_id,
+                    chunk_id=chunk_id,
+                    face_embedding=e
+                )
+                if not upsert_success:
+                    logger.error(f"FaceRepository: Failed to upsert new face embedding for new_id {new_id} in chunk_id {chunk_id}.")
+                    continue
+        
+        return face_ids_count
 
-    def add_images(self, clip_id: int, img_lst: list):
+    def add_images(self, namespace: str, chunk_id: str, img_lst: list):
         """Detect faces and add their embeddings for a list of images.
 
         This is a convenience wrapper that runs detection+embedding for each
@@ -227,18 +250,19 @@ class FaceRepository:
             img_lst (list[str|np.ndarray]): List of image paths or NumPy arrays.
 
         Returns:
-            list[int]: Cluster labels assigned to the detected faces.
+            dict: A dictionary mapping face IDs to the number of times they
+                appear in this chunk.
         """
-        logging.debug(f"FaceRepository: Adding frame images for clip_id {clip_id} for facial recognition, number of images: {len(img_lst)}")
+        logging.debug(f"FaceRepository: Adding frame images for chunk_id {chunk_id} for facial recognition, number of images: {len(img_lst)}")
         if not img_lst:
-            logging.warning(f"FaceRepository: empty img_lst provided for clip_id {clip_id}")
+            logging.warning(f"FaceRepository: empty img_lst provided for chunk_id {chunk_id}")
 
         embedded_faces = []
         for img in img_lst:
-            faces = self.__detect_and_embed(img)
+            faces = self._detect_and_embed(img)
             embedded_faces += faces
 
-        face_cluster = self.add_faces(clip_id, embedded_faces)
-        logging.debug(f"FaceRepository: Completed processing {len(img_lst)} images for clip_id {clip_id}")
+        face_cluster = self.add_faces(namespace, chunk_id, embedded_faces)
+        logging.debug(f"FaceRepository: Completed processing {len(img_lst)} images for chunk_id {chunk_id}")
 
         return face_cluster
