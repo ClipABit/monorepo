@@ -17,10 +17,22 @@ def get_resolve_app():
     """
     Obtain the Resolve application handle in a version-tolerant way.
     """
+    # 1) Inside Resolve/Fusion UI runtime, try 'bmd' first (or import fusionscript)
+    try:
+        # type: ignore[name-defined]
+        return bmd.scriptapp("Resolve")  # Provided by Resolve runtime
+    except Exception:
+        try:
+            import fusionscript as bmd  # type: ignore
+            return bmd.scriptapp("Resolve")
+        except Exception:
+            pass
+    # 2) Fallback to DaVinciResolveScript module (external or some environments)
+    dvr = None
     try:
         import DaVinciResolveScript as dvr  # type: ignore
     except ImportError:
-        # Fallback path: Resolve typically places this near the script location
+        # Try common script locations and this file's directory
         script_paths = [
             os.path.join(os.path.expanduser("~"),
                          "Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts"),
@@ -35,17 +47,41 @@ def get_resolve_app():
             import DaVinciResolveScript as dvr  # type: ignore
         except ImportError:
             dvr = None
-    if dvr is None:
-        return None
-    return dvr.scriptapp("Resolve")
+    if dvr is not None:
+        try:
+            return dvr.scriptapp("Resolve")
+        except Exception:
+            return None
+    return None
 
 
-def show_ui(resolve_app) -> None:
+def get_fusion_app():
+    """
+    Obtain the Fusion application handle for UI Manager access.
+    """
+    # 0) If the console already exposes a 'fusion' object, prefer it.
+    try:
+        g = globals()
+        if "fusion" in g and getattr(g["fusion"], "UIManager", None):
+            return g["fusion"]
+    except Exception:
+        pass
+    try:
+        # type: ignore[name-defined]
+        return bmd.scriptapp("Fusion")  # Provided by Resolve runtime
+    except Exception:
+        try:
+            import fusionscript as bmd  # type: ignore
+            return bmd.scriptapp("Fusion")
+        except Exception:
+            return None
+
+
+def show_ui(fusion_app, resolve_app=None) -> None:
     """
     Build a minimal UI to capture a search query and print it to the console.
     """
-    fusion = resolve_app.Fusion()
-    ui_mgr = fusion.UIManager
+    ui_mgr = fusion_app.UIManager
     dispatcher = bmd.UIDispatcher(ui_mgr)  # type: ignore  # Provided by Resolve runtime
 
     window_title = "Semantic Search"
@@ -77,11 +113,14 @@ def show_ui(resolve_app) -> None:
     def on_search(ev):
         query_text = itm["QueryInput"].Text or ""
         print("[SemanticSearch] query:", query_text)
-        # Placeholder action: demonstrate basic access to the current project and bins
-        project_manager = resolve_app.GetProjectManager()
-        project = project_manager.GetCurrentProject() if project_manager else None
-        project_name = project.GetName() if project else "(no project)"
-        print(f"[SemanticSearch] active project: {project_name}")
+        # If Resolve is available, show current project name; otherwise note absence.
+        if resolve_app is not None:
+            project_manager = resolve_app.GetProjectManager()
+            project = project_manager.GetCurrentProject() if project_manager else None
+            project_name = project.GetName() if project else "(no project)"
+            print(f"[SemanticSearch] active project: {project_name}")
+        else:
+            print("[SemanticSearch] Resolve handle not available (Fusion-only mode).")
         # Extend here: integrate with your backend or embeddings index
 
     main_window.On["Close"] = on_close
@@ -95,10 +134,11 @@ def show_ui(resolve_app) -> None:
 
 def main() -> None:
     resolve = get_resolve_app()
-    if resolve is None:
-        print("Could not load DaVinci Resolve scripting environment.")
+    fusion = get_fusion_app()
+    if fusion is None:
+        print("Could not access Fusion UI environment.")
         sys.exit(1)
-    show_ui(resolve)
+    show_ui(fusion, resolve)
 
 
 if __name__ == "__main__":
