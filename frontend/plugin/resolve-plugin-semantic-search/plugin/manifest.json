@@ -1,0 +1,26 @@
+{
+  "ApiVersion": "1.0",
+  "ID": "com.example.resolve.semanticsearch",
+  "Name": "Semantic Search",
+  "Version": "0.1.0",
+  "Author": "Justin Wu",
+  "Description": "Adds a Semantic Search tool to DaVinci Resolve.",
+  "ResolveMinVersion": "18.0",
+  "Category": "Workflow Integration",
+  "Scripts": [
+    {
+      "Name": "Semantic Search",
+      "Main": "Scripts/semantic_search.py",
+      "Page": "Media",
+      "Lang": "Python3"
+    }
+  ],
+  "UI": [
+    {
+      "Name": "Semantic Search UI",
+      "File": "UI/semantic_search.ui"
+    }
+  ]
+}
+
+
