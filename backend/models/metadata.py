@@ -46,7 +46,7 @@ class ChunkMetadata:
     # File info
     original_filename: str
     file_type: str
-    original_s3_url: str
+    hashed_identifier: str
     
     # Timestamps
     processing_timestamp: datetime = field(default_factory=datetime.utcnow)
@@ -64,7 +64,7 @@ class ChunkMetadata:
             'file_info': {
                 'filename': self.original_filename,
                 'type': self.file_type,
-                's3_url': self.original_s3_url
+                'hashed_identifier': self.hashed_identifier
             },
             'processed_at': self.processing_timestamp.isoformat()
         }
