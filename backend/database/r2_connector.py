@@ -167,14 +167,18 @@ class R2Connector:
             # sanitize filename to prevent directory traversal attacks
             filename = self.sanitize_filename(filename)
 
-            # Construct the object key (user_id/filename)
-            object_key = f"{user_id}/{filename}"
+            # Append timestamp to filename to ensure uniqueness
+            import time
+            filename = f"{int(time.time())}_{filename}"
             
             # Create encoded identifier
             identifier = self._encode_path(self.bucket_name, user_id, filename)
             
             # Determine file MIME type
             content_type = self._determine_content_type(filename)
+
+            # Construct the object key (user_id/filename)
+            object_key = f"{user_id}/{filename}"
 
             # Upload the video
             self.s3_client.put_object(
