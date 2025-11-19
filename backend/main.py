@@ -74,6 +74,8 @@ class Server:
             raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
         
         ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
+        if ENVIRONMENT not in ["dev", "test", "prod"]:
+            raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, test, prod")
         logger.info(f"Running in environment: {ENVIRONMENT}")
 
         # Instantiate classes
