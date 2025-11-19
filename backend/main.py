@@ -80,7 +80,6 @@ class Server:
 
         # Instantiate classes
 
-        logger.info("Container modules initialized and ready!")
         self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
@@ -89,7 +88,7 @@ class Server:
                                         secret_access_key=R2_SECRET_ACCESS_KEY, 
                                         environment=ENVIRONMENT)
 
-        print(f"[Container] Started at {self.start_time.isoformat()}")
+        logger.info(f"Container modules initialized and ready. Started at {self.start_time.isoformat()}")
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str):
@@ -226,8 +225,10 @@ class Server:
         logger.info(f"[Search] Query: {query}")
         
         # TODO: Implement search and rerank logic and use class models here
+        # signed_url = self.r2_connector.generate_presigned_url(identifier=)
 
         return {
             "query": query,
-            "status": "success"
+            "status": "success",
+            # "signed_url": signed_url
         }
