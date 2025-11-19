@@ -99,7 +99,7 @@ class Server:
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes)")
         
         try:
-            # Upload processed data to R2 bucket
+            # Upload original video to R2 bucket
             # TODO: do this in parallel with processing and provide url once done
             success, hashed_identifier = self.r2_connector.upload_video(
                 video_data=video_bytes,
