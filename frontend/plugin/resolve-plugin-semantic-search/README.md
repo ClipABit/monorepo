@@ -17,19 +17,19 @@ Build
 1) Make the build script executable:
 
 ```bash
-chmod +x /Users/justinwu/Desktop/monorepo/frontend/plugin/resolve-plugin-semantic-search/build_drfx.sh
+chmod +x ./build_drfx.sh
 ```
 
 2) Build the package:
 
 ```bash
-/Users/justinwu/Desktop/monorepo/frontend/plugin/resolve-plugin-semantic-search/build_drfx.sh
+./build_drfx.sh
 ```
 
 This generates:
 
 ```
-/Users/justinwu/Desktop/monorepo/frontend/plugin/resolve-plugin-semantic-search/resolve-plugin-semantic-search.drfx
+./resolve-plugin-semantic-search.drfx
 ```
 
 Install
@@ -38,14 +38,14 @@ Install
 - For Workflow Integration (recommended for this plugin), use the installer script on macOS:
 
 ```bash
-chmod +x /Users/justinwu/Desktop/monorepo/frontend/plugin/resolve-plugin-semantic-search/install_local.sh
-/Users/justinwu/Desktop/monorepo/frontend/plugin/resolve-plugin-semantic-search/install_local.sh
+chmod +x ./install_local.sh
+./install_local.sh
 ```
 
 - To install as a Script (appears under Workspace → Scripts → <Page>):
 
 ```bash
-/Users/justinwu/Desktop/monorepo/frontend/plugin/resolve-plugin-semantic-search/install_local.sh --script --page Edit
+./install_local.sh --script --page Edit
 # Pages: Comp | Edit | Color | Deliver | Media | Cut | Fairlight
 ```
 
@@ -53,9 +53,9 @@ chmod +x /Users/justinwu/Desktop/monorepo/frontend/plugin/resolve-plugin-semanti
 
 ```bash
 # Uninstall Workflow Integration
-/Users/justinwu/Desktop/monorepo/frontend/plugin/resolve-plugin-semantic-search/install_local.sh --uninstall
+./install_local.sh --uninstall
 # Uninstall Script install
-/Users/justinwu/Desktop/monorepo/frontend/plugin/resolve-plugin-semantic-search/install_local.sh --script --uninstall
+./install_local.sh --script --uninstall
 ```
 
 Run
