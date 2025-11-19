@@ -5,7 +5,6 @@ from botocore.exceptions import ClientError
 from typing import Optional, Tuple
 import base64
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class R2Connector:
