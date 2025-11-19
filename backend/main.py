@@ -105,7 +105,7 @@ class Server:
                 # user_id="user1" # Specify user ID once we have user management
             )
             if not success:
-                raise Exception("Failed to upload video to R2 storage")
+                raise Exception(f"Failed to upload video to R2 storage: {hashed_identifier}")
 
             # Process video through preprocessing pipeline
             processed_chunks = self.preprocessor.process_video_from_bytes(
