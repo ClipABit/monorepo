@@ -26,11 +26,11 @@ image = (
         )
 
 # Load secrets from .env file
-modal.Secret.from_dotenv(filename=".env")
+local_secrets = modal.Secret.from_dotenv(filename=".env")
 secrets = modal.Secret.objects.list()
 
 # Create Modal app
-app = modal.App(name="ClipABit", image=image, secrets=secrets)
+app = modal.App(name="ClipABit", image=image, secrets=[local_secrets])
 
 
 @app.cls()
@@ -49,6 +49,7 @@ class Server:
 
         # Import classes here
         from preprocessing.preprocessor import Preprocessor
+        from embeddings.embedder import VideoEmbedder
         from database.pinecone_connector import PineconeConnector
         from database.job_store_connector import JobStoreConnector
 
@@ -65,6 +66,7 @@ class Server:
 
         logger.info("Container modules initialized and ready!")
         self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
+        self.video_embedder = VideoEmbedder()
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
 
@@ -90,19 +92,48 @@ class Server:
             avg_complexity = sum(chunk['metadata']['complexity_score'] for chunk in processed_chunks) / len(processed_chunks) if processed_chunks else 0
 
             print(f"[Job {job_id}] Complete: {len(processed_chunks)} chunks, {total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}")
-            
-            # TODO: Send chunks to embedding module
-            # TODO: Store results in database
-            # TODO: Upload processed data to S3
-
-            # Prepare chunk details for response (without frame arrays)
+                        
             chunk_details = []
             for chunk in processed_chunks:
+                embedding = self.video_embedder._generate_clip_embedding(chunk["frames"], num_frames=8)
+               
+                logger.info(f"[Job {job_id}] Generated CLIP embedding for chunk {chunk['chunk_id']}")
+                logger.info(f"[Job {job_id}] Upserting embedding for chunk {chunk['chunk_id']} to Pinecone...")
+              
+    
+                # 1. Handle timestamp_range (List of Numbers -> Two Numbers)
+                if 'timestamp_range' in chunk['metadata']:
+                    start_time, end_time = chunk['metadata'].pop('timestamp_range')
+                    chunk['metadata']['start_time_s'] = start_time
+                    chunk['metadata']['end_time_s'] = end_time
+
+                # 2. Handle file_info (Nested Dict -> Flat Keys)
+                if 'file_info' in chunk['metadata']:
+                    file_info = chunk['metadata'].pop('file_info')
+                    for key, value in file_info.items():
+                        chunk['metadata'][f'file_{key}'] = value
+                        
+                # 3. Final Check: Remove Nulls (Optional but good practice)
+                # Pinecone rejects keys with null values.
+                keys_to_delete = [k for k, v in chunk['metadata'].items() if v is None]
+                for k in keys_to_delete:
+                    del chunk['metadata'][k]
+              
+               
+                self.pinecone_connector.upsert_chunk(
+                    chunk_id=chunk['chunk_id'],
+                    chunk_embedding=embedding.numpy(),
+                    namespace="test",
+                    metadata=chunk['metadata']
+                )            
+                
                 chunk_details.append({
                     "chunk_id": chunk['chunk_id'],
                     "metadata": chunk['metadata'],
-                    "memory_mb": chunk['memory_mb']
+                    "memory_mb": chunk['memory_mb'],
                 })
+              
+            # TODO: Upload processed data to S3
 
             result = {
                 "job_id": job_id,
@@ -112,7 +143,7 @@ class Server:
                 "total_frames": total_frames,
                 "total_memory_mb": total_memory,
                 "avg_complexity": avg_complexity,
-                "chunk_details": chunk_details
+                "chunk_details": chunk_details,
             }
             
             logger.info(f"[Job {job_id}] Finished processing {filename}")
@@ -188,12 +219,16 @@ class Server:
             "message": "Video uploaded successfully, processing in background"
         }
 
-    @modal.fastapi_endpoint(method="POST")
+    @modal.fastapi_endpoint(method="GET")
     async def search(self, query: str):
         """Search endpoint - accepts a text query and returns semantic search results."""
         logger.info(f"[Search] Query: {query}")
         
         # TODO: Implement search and rerank logic and use class models here
+        text_embedding = self.video_embedder.generate_clip_text_embedding(query)
+        search_results = self.pinecone_connector.query_chunks(text_embedding)
+        
+        print(search_results)        
 
         return {
             "query": query,
