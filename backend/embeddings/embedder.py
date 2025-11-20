@@ -1,8 +1,5 @@
-import modal
 import torch
 import numpy as np
-import cv2
-from typing import Dict, Any
 from PIL import Image
 from transformers import (
     CLIPModel,
