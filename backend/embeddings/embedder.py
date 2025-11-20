@@ -56,29 +56,3 @@ class VideoEmbedder:
         
         return video_embedding.cpu()    
     
-    
-    def generate_clip_text_embedding(self, text: str) -> np.ndarray:
-        """
-        Generate a normalized text embedding using the Open AI CLIP Model.
-        
-        Args:
-            text (str): The input text string.
-        
-        Returns:
-            torch.Tensor: A normalized embedding tensor for the input text.
-        """
-        model, processor = self._get_clip_model()
-        
-        inputs = processor(text=[text], return_tensors="pt", padding=True).to(self._device)
-        
-        with torch.no_grad():
-            text_features = model.get_text_features(**inputs)
-            text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
-        
-        print(f"Generated CLIP embedding for text: {text[:30]}...")
-        
-        return text_features.cpu().numpy()
-    
-
-
-    
