@@ -55,6 +55,8 @@ class R2Connector:
         """
         filename = os.path.basename(filename)  # Remove any path traversal components
         filename = filename.replace(" ", "_")  # Replace spaces with underscores
+        if not filename:
+            raise ValueError("Sanitized filename is empty. Please provide a valid filename.")
         return filename
 
     def _encode_path(self, bucket_name: str, user_id: str, filename: str) -> str:
