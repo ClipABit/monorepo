@@ -1,226 +1,242 @@
-"""Shared pytest fixtures for backend tests."""
+"""
+Shared pytest fixtures for ClipABit test suite.
 
-import os
-import tempfile
-from pathlib import Path
-from typing import Generator
-from unittest.mock import MagicMock, Mock
+Fixtures are reusable test setup/data automatically available to all tests.
+Just add fixture name as a function parameter to use it.
 
-import numpy as np
+Types:
+    - Paths: Directories for temp files
+    - Videos: Test video files
+    - Data: Raw test data (frames, arrays, metadata objects)
+    - Components: Pre-configured class instances ready to use
+    - Mocks: Fake external dependencies to test in isolation without side effects
+"""
+
 import pytest
+import numpy as np
+from pathlib import Path
+import tempfile
+import shutil
+
+from preprocessing.chunker import Chunker
+from preprocessing.frame_extractor import FrameExtractor
+from preprocessing.compressor import Compressor
+from preprocessing.preprocessor import Preprocessor
+from models.metadata import VideoChunk, ChunkMetadata
 
 
-# ============================================================================
-# Test Data Fixtures
-# ============================================================================
+# ==============================================================================
+# PATH FIXTURES
+# ==============================================================================
+
+@pytest.fixture(scope="session")
+def fixtures_dir() -> Path:
+    """Path to test fixtures directory."""
+    return Path(__file__).parent / "fixtures"
+
 
 @pytest.fixture
-def sample_video_path(tmp_path: Path) -> Path:
-    """Create a temporary video file path for testing."""
-    video_path = tmp_path / "test_video.mp4"
-    # Note: Tests should mock actual video operations
-    # This just provides a valid path
+def temp_dir():
+    """Temporary directory that auto-cleans after test."""
+    temp_path = tempfile.mkdtemp()
+    yield Path(temp_path)
+    shutil.rmtree(temp_path, ignore_errors=True)
+
+
+# ==============================================================================
+# VIDEO FIXTURES (Auto-generated with OpenCV)
+# ==============================================================================
+
+@pytest.fixture(scope="session")
+def sample_video_5s(tmp_path_factory) -> Path:
+    """5-second test video with mixed motion patterns."""
+    import cv2
+
+    video_dir = tmp_path_factory.mktemp("test_videos")
+    video_path = video_dir / "sample_5s.mp4"
+
+    fps, duration = 30, 5
+    width, height = 640, 480
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(str(video_path), fourcc, fps, (width, height))
+
+    for frame_num in range(fps * duration):
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+
+        color_shift = (frame_num * 2) % 255
+        frame[:, :] = (color_shift, 100 + color_shift // 2, 150)
+
+        cv2.circle(frame, (320 + frame_num * 2, 240), 50, (255, 255, 255), -1)
+        cv2.rectangle(frame, (100, 100 + frame_num), (200, 200 + frame_num), (0, 255, 0), 2)
+
+        writer.write(frame)
+
+    writer.release()
+    return video_path
+
+
+@pytest.fixture(scope="session")
+def sample_video_static(tmp_path_factory) -> Path:
+    """10-second static video with minimal motion."""
+    import cv2
+
+    video_dir = tmp_path_factory.mktemp("test_videos")
+    video_path = video_dir / "sample_static.mp4"
+
+    fps, duration = 30, 10
+    width, height = 640, 480
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(str(video_path), fourcc, fps, (width, height))
+
+    for frame_num in range(fps * duration):
+        frame = np.ones((height, width, 3), dtype=np.uint8) * 128
+        noise = np.random.randint(-2, 3, (height, width, 3), dtype=np.int16)
+        frame = np.clip(frame.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+        writer.write(frame)
+
+    writer.release()
     return video_path
 
 
 @pytest.fixture
+def sample_video_bytes(sample_video_5s) -> bytes:
+    """Video file as bytes for upload testing."""
+    return sample_video_5s.read_bytes()
+
+
+# ==============================================================================
+# DATA FIXTURES
+# ==============================================================================
+
+@pytest.fixture
+def sample_frame() -> np.ndarray:
+    """Single 640x480 BGR frame. Shape: (480, 640, 3)"""
+    return np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+
+
+@pytest.fixture
 def sample_frames() -> np.ndarray:
-    """Generate sample frame data for testing."""
-    # Create 5 frames of 480x640 RGB images
-    return np.random.randint(0, 255, size=(5, 480, 640, 3), dtype=np.uint8)
+    """Array of 10 frames. Shape: (10, 480, 640, 3)"""
+    return np.random.randint(0, 255, (10, 480, 640, 3), dtype=np.uint8)
 
 
 @pytest.fixture
-def sample_video_metadata() -> dict:
-    """Sample video metadata for testing."""
-    return {
-        "filename": "test_video.mp4",
-        "duration": 24.5,
-        "fps": 30.0,
-        "width": 1920,
-        "height": 1080,
-        "frame_count": 735,
-    }
+def sample_video_chunk() -> VideoChunk:
+    """Basic VideoChunk for testing."""
+    return VideoChunk(
+        chunk_id="test_video_chunk_0000",
+        start_time=0.0,
+        end_time=5.0
+    )
 
 
 @pytest.fixture
-def sample_chunk_data() -> dict:
-    """Sample chunk data for testing."""
-    return {
-        "chunk_id": "video123_chunk_0",
-        "video_id": "video123",
-        "start_time": 0.0,
-        "end_time": 5.2,
-        "duration": 5.2,
-        "frame_count": 10,
-        "sampling_fps": 1.92,
-        "complexity_score": 0.65,
-    }
+def sample_chunk_metadata() -> ChunkMetadata:
+    """Complete ChunkMetadata for testing."""
+    return ChunkMetadata(
+        chunk_id="test_video_chunk_0000",
+        video_id="test_video_123",
+        start_time=0.0,
+        end_time=5.0,
+        duration=5.0,
+        frame_count=10,
+        sampling_fps=2.0,
+        complexity_score=0.45,
+        original_filename="test_video.mp4",
+        file_type="mp4",
+        original_s3_url="https://example.com/test.mp4"
+    )
+
+
+# ==============================================================================
+# COMPONENT FIXTURES
+# ==============================================================================
+
+@pytest.fixture
+def chunker() -> Chunker:
+    """Chunker with test configuration."""
+    return Chunker(
+        min_duration=1.0,
+        max_duration=10.0,
+        scene_threshold=13.0
+    )
 
 
 @pytest.fixture
-def sample_job_data() -> dict:
-    """Sample job data for testing."""
-    return {
-        "job_id": "test-job-123",
-        "status": "processing",
-        "filename": "test_video.mp4",
-        "file_size": 3887170,
-        "created_at": "2025-11-16T12:00:00",
-    }
-
-
-# ============================================================================
-# Mock Fixtures
-# ============================================================================
-
-@pytest.fixture
-def mock_modal_dict(mocker) -> MagicMock:
-    """Mock Modal Dict for job storage testing."""
-    mock_dict = MagicMock()
-    mock_dict._storage = {}  # Internal storage for testing
-
-    # Mock the dict-like interface
-    def getitem(key):
-        return mock_dict._storage.get(key)
-
-    def setitem(key, value):
-        mock_dict._storage[key] = value
-
-    def contains(key):
-        return key in mock_dict._storage
-
-    mock_dict.__getitem__ = getitem
-    mock_dict.__setitem__ = setitem
-    mock_dict.__contains__ = contains
-    mock_dict.get = lambda key, default=None: mock_dict._storage.get(key, default)
-    mock_dict.pop = lambda key, default=None: mock_dict._storage.pop(key, default)
-
-    return mock_dict
+def frame_extractor() -> FrameExtractor:
+    """FrameExtractor with test configuration."""
+    return FrameExtractor(
+        min_fps=0.5,
+        max_fps=2.0,
+        motion_threshold=25.0
+    )
 
 
 @pytest.fixture
-def mock_pinecone_index(mocker) -> MagicMock:
-    """Mock Pinecone index for database testing."""
-    mock_index = MagicMock()
-    mock_index.upsert = MagicMock(return_value={"upserted_count": 1})
-    mock_index.query = MagicMock(return_value={
-        "matches": [
-            {
-                "id": "chunk_0",
-                "score": 0.95,
-                "metadata": {"video_id": "video123", "start_time": 0.0}
-            }
-        ]
-    })
-    return mock_index
+def compressor() -> Compressor:
+    """Compressor with test configuration."""
+    return Compressor(
+        target_width=640,
+        target_height=480
+    )
 
 
 @pytest.fixture
-def mock_cv2_video_capture(mocker) -> MagicMock:
-    """Mock OpenCV VideoCapture for video processing tests."""
-    mock_cap = MagicMock()
-    mock_cap.isOpened.return_value = True
-    mock_cap.get.side_effect = lambda prop: {
-        5: 30.0,   # CAP_PROP_FPS
-        7: 735,    # CAP_PROP_FRAME_COUNT
-        3: 1920,   # CAP_PROP_FRAME_WIDTH
-        4: 1080,   # CAP_PROP_FRAME_HEIGHT
-    }.get(prop, 0.0)
+def preprocessor() -> Preprocessor:
+    """Preprocessor with test configuration."""
+    return Preprocessor(
+        min_chunk_duration=1.0,
+        max_chunk_duration=10.0,
+        scene_threshold=13.0,
+        min_sampling_fps=0.5,
+        max_sampling_fps=2.0,
+        motion_threshold=25.0,
+        target_width=640,
+        target_height=480
+    )
 
-    # Mock frame reading
-    frame = np.random.randint(0, 255, size=(1080, 1920, 3), dtype=np.uint8)
-    mock_cap.read.return_value = (True, frame)
-    mock_cap.release = MagicMock()
 
-    return mock_cap
+# ==============================================================================
+# MOCKS
+# ==============================================================================
+
+@pytest.fixture
+def mock_modal_dict(mocker):
+    """Mock Modal Dict with Python dict behavior."""
+    fake_dict = {}
+    mock_dict = mocker.MagicMock()
+
+    mock_dict.__getitem__ = lambda self, key: fake_dict[key]
+    mock_dict.__setitem__ = lambda self, key, val: fake_dict.__setitem__(key, val)
+    mock_dict.__delitem__ = lambda self, key: fake_dict.__delitem__(key)
+    mock_dict.__contains__ = lambda self, key: key in fake_dict
+    mock_dict.get = lambda self, key, default=None: fake_dict.get(key, default)
+
+    mocker.patch('modal.Dict.from_name', return_value=mock_dict)
+    return fake_dict
 
 
 @pytest.fixture
-def mock_scene_manager(mocker) -> MagicMock:
-    """Mock PySceneDetect SceneManager for chunking tests."""
-    mock_manager = MagicMock()
+def mock_scene_detect(mocker):
+    """Mock scenedetect.detect with 2 fake scenes (0-5s, 5-10s)."""
+    from scenedetect import FrameTimecode
 
-    # Mock scene detection results
-    # Returns list of tuples: (start_frame, end_frame)
-    mock_manager.get_scene_list.return_value = [
-        (0, 90),      # 0-3s at 30fps
-        (90, 240),    # 3-8s
-        (240, 450),   # 8-15s
-        (450, 735),   # 15-24.5s
+    fake_scenes = [
+        (FrameTimecode(0.0, 30.0), FrameTimecode(5.0, 30.0)),
+        (FrameTimecode(5.0, 30.0), FrameTimecode(10.0, 30.0)),
     ]
 
-    return mock_manager
+    return mocker.patch('scenedetect.detect', return_value=fake_scenes)
 
 
-# ============================================================================
-# Temporary File/Directory Fixtures
-# ============================================================================
+# ==============================================================================
+# PYTEST CONFIG
+# ==============================================================================
 
-@pytest.fixture
-def temp_dir() -> Generator[Path, None, None]:
-    """Create a temporary directory for test files."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir)
-
-
-@pytest.fixture
-def mock_env_vars(monkeypatch) -> None:
-    """Mock environment variables for testing."""
-    monkeypatch.setenv("PINECONE_API_KEY", "test-api-key-123")
-    monkeypatch.setenv("PINECONE_INDEX_NAME", "test-chunks-index")
-
-
-# ============================================================================
-# Integration Test Fixtures
-# ============================================================================
-
-@pytest.fixture
-def mock_modal_decorators(mocker):
-    """Mock Modal decorators for testing Modal app functions."""
-    # Mock the decorators to be pass-through functions
-    mocker.patch("modal.app", return_value=lambda cls: cls)
-    mocker.patch("modal.method", return_value=lambda func: func)
-    mocker.patch("modal.enter", return_value=lambda func: func)
-    mocker.patch("modal.fastapi_endpoint", return_value=lambda func: func)
-
-
-@pytest.fixture
-def mock_job_store_connector(mock_modal_dict) -> MagicMock:
-    """Mock JobStoreConnector with working dict storage."""
-    from database.job_store_connector import JobStoreConnector
-
-    mock_connector = MagicMock(spec=JobStoreConnector)
-    mock_connector.job_dict = mock_modal_dict
-
-    # Implement basic CRUD operations
-    def create_job(job_id: str, initial_data: dict) -> bool:
-        mock_modal_dict[job_id] = initial_data
-        return True
-
-    def get_job(job_id: str):
-        return mock_modal_dict.get(job_id)
-
-    def update_job(job_id: str, update_data: dict) -> bool:
-        if job_id in mock_modal_dict:
-            mock_modal_dict[job_id].update(update_data)
-            return True
-        return False
-
-    mock_connector.create_job = create_job
-    mock_connector.get_job = get_job
-    mock_connector.update_job = update_job
-    mock_connector.job_exists = lambda job_id: job_id in mock_modal_dict
-
-    return mock_connector
-
-
-@pytest.fixture
-def mock_pinecone_connector(mock_pinecone_index) -> MagicMock:
-    """Mock PineconeConnector with working index operations."""
-    from database.pinecone_connector import PineconeConnector
-
-    mock_connector = MagicMock(spec=PineconeConnector)
-    mock_connector.index = mock_pinecone_index
-
-    return mock_connector
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line(
+        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+    )
