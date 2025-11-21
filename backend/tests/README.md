@@ -1,19 +1,15 @@
 # Testing Guide
 
-Quick guide on how we test things in this project.
+How we test things in ClipABit.
 
-## Setup
+## Quick Start
 
-First time:
 ```bash
 cd backend
 uv sync
-```
-
-Run tests:
-```bash
 uv run pytest
 ```
+
 
 ---
 
@@ -21,101 +17,128 @@ uv run pytest
 
 ```
 tests/
-├── conftest.py              # Shared fixtures for all tests
-├── unit/                    # Test individual components in isolation
-│   └── test_*.py
-└── integration/             # Test multiple components working together
-    └── test_*.py
+├── conftest.py              # Shared fixtures
+├── unit/                    # Test individual components
+│   ├── test_*.py
+└── integration/             # Test multiple components together
+    ├── test_*.py
 ```
 
 **Unit tests** - One component at a time. Fast. No external dependencies.
 
-**Integration tests** - Multiple components. Slower. May use mocks for external services.
-
----
-
-## Writing Tests
-
-**Pick where it goes:**
-- Testing one class/function in isolation? → `tests/unit/`
-- Testing how multiple things work together? → `tests/integration/`
-
-**Basic pattern:**
-```python
-def test_something_specific(fixture_name):
-    """Short description of what this checks."""
-    # Arrange - fixtures handle setup automatically
-
-    # Act
-    result = do_the_thing()
-
-    # Assert
-    assert result == expected
-```
-
-**Naming convention:**
-- File: `test_component_name.py`
-- Function: `test_what_it_does`
-- Class (optional): `class TestComponentName:`
+**Integration tests** - Multiple components working together. May use mocks.
 
 ---
 
 ## Fixtures
 
-Fixtures live in `conftest.py` and are automatically available to all tests.
+All fixtures live in `conftest.py` and are automatically available to tests. Just add them as function parameters.
 
-**What they are:** Reusable test setup/data so you don't repeat yourself.
-
-**How to use them:** Just add as function parameters.
+**Check conftest.py to see what's available.** Common ones:
 
 ```python
-# Instead of this:
-def test_something():
-    video_path = generate_test_video()
-    component = Component(config)
-    result = component.process(video_path)
-
-# Do this:
-def test_something(component, sample_video_5s):
-    result = component.process(str(sample_video_5s))
+def test_something(chunker, sample_video_5s):
+    """Fixtures handle all setup automatically."""
+    chunks = chunker.chunk_video(str(sample_video_5s), "test")
+    assert len(chunks) > 0
 ```
 
-**Common fixture types:**
-- Component instances (pre-configured with test settings)
-- Test data (videos, frames, arrays)
-- Mocks (fake external services like Modal Dict)
+If you're repeating setup code, add a new fixture to conftest.py.
 
-Check `conftest.py` to see what's available. Add new fixtures there when you find yourself repeating setup code.
+---
+
+## Writing Tests
+
+**Good test - specific, clear:**
+```python
+def test_chunks_respect_max_duration(sample_video_5s):
+    """Verify chunks are not longer than max_duration."""
+    chunker = Chunker(min_duration=1.0, max_duration=3.0)
+    chunks = chunker.chunk_video(str(sample_video_5s), "test")
+
+    for chunk in chunks:
+        assert chunk.duration <= 3.0  # Clear expectation
+```
+
+**Bad test - vague, accepts anything:**
+```python
+def test_scene_threshold_affects_chunking(sample_video_5s):
+    """Verify threshold does something."""
+    chunker1 = Chunker(scene_threshold=5.0)
+    chunker2 = Chunker(scene_threshold=20.0)
+
+    chunks1 = chunker1.chunk_video(str(sample_video_5s), "test")
+    chunks2 = chunker2.chunk_video(str(sample_video_5s), "test")
+
+    # Doesn't actually verify different behavior
+    assert len(chunks1) >= 1
+    assert len(chunks2) >= 1
+```
+
+**Organization pattern:**
+```python
+class TestBasicFunctionality:
+    """Test core features."""
+
+    def test_creates_output(self, component):
+        result = component.process(input_data)
+        assert result is not None
+
+class TestEdgeCases:
+    """Test boundary conditions and error handling."""
+
+    def test_empty_input_handles_gracefully(self, component):
+        result = component.process([])
+        assert result == []
+```
+
+**Naming:** `test_<what_it_does>_<condition>`
+- Good: `test_chunker_respects_max_duration`
+- Bad: `test_1`, `test_basic`, `test_works`
 
 ---
 
 ## Running Tests
 
 ```bash
-# Everything
+# Basic
+uv run pytest                    # All tests
+uv run pytest -v                 # Verbose
+uv run pytest -x                 # Stop on first fail
+uv run pytest -s                 # Show print statements
+
+# Specific tests
+uv run pytest tests/unit/test_chunker.py
+uv run pytest tests/unit/test_chunker.py::test_chunks_respect_max_duration
+uv run pytest -k "duration"      # Match pattern
+
+# Coverage
+uv run pytest --cov              # Terminal report
+uv run pytest --cov --cov-report=html  # HTML report (opens in browser)
+
+# Performance
+uv run pytest --durations=10     # Show slowest tests
+uv run pytest -m "not slow"      # Skip slow tests
+```
+
+---
+
+## Troubleshooting
+
+**ModuleNotFoundError**
+```bash
+# Make sure you're in backend/
+cd backend
 uv run pytest
+```
 
-# Specific file
-uv run pytest tests/unit/test_something.py
+**Fixture not found**
+- Check `conftest.py` for available fixtures
 
-# Specific test
-uv run pytest tests/unit/test_something.py::test_specific_thing
-
-# Pattern matching
-uv run pytest -k "pattern"
-
-# Verbose output
-uv run pytest -v
-
-# Show print statements
-uv run pytest -s
-
-# Stop on first failure
-uv run pytest -x
-
-# Coverage report
-uv run pytest --cov
-uv run pytest --cov --cov-report=html  # HTML version
+**Video generation fails**
+```bash
+# Make sure opencv-python (not headless) is installed for dev
+uv sync --dev
 ```
 
 ---
@@ -125,7 +148,7 @@ uv run pytest --cov --cov-report=html  # HTML version
 **Do:**
 - Write tests as you build features
 - One test checks one thing
-- Use descriptive test names (`test_chunker_respects_max_duration`)
+- Use descriptive names
 - Use fixtures instead of repeating setup
 - Test behavior, not implementation details
 
@@ -134,43 +157,43 @@ uv run pytest --cov --cov-report=html  # HTML version
 - Test private methods directly
 - Use real external services (use mocks)
 - Copy/paste setup code (make a fixture)
+- Use random data without seed (makes tests flaky)
 
 ---
 
-## Mocking External Services
+## CI/CD
 
-For things like Modal Dict, Pinecone, S3 - use mocks.
+Tests run automatically on GitHub Actions for every push/PR to main.
 
-```python
-def test_with_modal_dict(mock_modal_dict):
-    # mock_modal_dict acts like a regular dict
-    # No real Modal infrastructure needed
-    connector = JobStoreConnector("test")
-    connector.create_job("123", {"status": "processing"})
-    assert "123" in mock_modal_dict
-```
+**Workflow:** `.github/workflows/ci.yml`
 
-Add new mocks to `conftest.py` when you need to fake external services.
+**What runs:**
+- All tests with coverage
+- Ruff linting on backend and frontend
+- Ubuntu + Python 3.12
+
+Check the "Actions" tab in GitHub to see results.
 
 ---
 
-## Troubleshooting
+## Adding New Tests
 
-**Module not found:**
-Make sure you're in the `backend/` directory.
+1. **Decide where:** unit test (one component) or integration test (multiple components)?
+2. **Create file:** `tests/unit/test_new_component.py` or `tests/integration/test_new_workflow.py`
+3. **Write test:** Look at existing tests for examples
+4. **Add fixtures if needed:** Add to `conftest.py` if you're repeating setup
+5. **Run:** `uv run pytest tests/unit/test_new_component.py -v`
 
 ---
 
 ## Quick Reference
 
 ```bash
-uv run pytest                    # Run all tests
+uv run pytest                    # All tests
 uv run pytest -v                 # Verbose
 uv run pytest -x                 # Stop on first fail
-uv run pytest -s                 # Show prints
-uv run pytest -k "pattern"       # Match pattern
-uv run pytest --cov              # Coverage report
+uv run pytest --cov              # With coverage
 uv run pytest tests/unit/        # Just unit tests
 ```
 
-Check existing tests for examples.
+For more examples, check the existing tests and conftest.py.
