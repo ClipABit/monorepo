@@ -39,7 +39,7 @@ class VideoEmbedder:
             torch.Tensor: A single, normalized embedding tensor for the video chunk.
         """
         
-        # Fetch the model and processor
+        # Fetch the preloaded model and processor
         model, processor = self._get_clip_model()
         
         # Sample frames evenly across the video if the num frames is greater than available frames 
