@@ -26,11 +26,10 @@ image = (
         )
 
 # Load secrets from .env file
-modal.Secret.from_dotenv(filename=".env")
-secrets = modal.Secret.objects.list()
+secrets = modal.Secret.from_dotenv(filename=".env")
 
 # Create Modal app
-app = modal.App(name="ClipABit", image=image, secrets=secrets)
+app = modal.App(name="ClipABit", image=image, secrets=[secrets])
 
 
 @app.cls()
@@ -51,24 +50,45 @@ class Server:
         from preprocessing.preprocessor import Preprocessor
         from database.pinecone_connector import PineconeConnector
         from database.job_store_connector import JobStoreConnector
+        from database.r2_connector import R2Connector
 
 
         logger.info("Container starting up!")
         self.start_time = datetime.now(timezone.utc)
 
-        # Get environment variables
+        # Get environment variables (TODO: abstract to config module)
         PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
         if not PINECONE_API_KEY:
             raise ValueError("PINECONE_API_KEY not found in environment variables")
 
+        R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
+        if not R2_ACCOUNT_ID:
+            raise ValueError("R2_ACCOUNT_ID not found in environment variables")
+        
+        R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+        if not R2_ACCESS_KEY_ID:
+            raise ValueError("R2_ACCESS_KEY_ID not found in environment variables")
+        
+        R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+        if not R2_SECRET_ACCESS_KEY:
+            raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
+        
+        ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
+        if ENVIRONMENT not in ["dev", "test", "prod"]:
+            raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, test, prod")
+        logger.info(f"Running in environment: {ENVIRONMENT}")
+
         # Instantiate classes
 
-        logger.info("Container modules initialized and ready!")
         self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
+        self.r2_connector = R2Connector(account_id=R2_ACCOUNT_ID,
+                                        access_key_id=R2_ACCESS_KEY_ID,
+                                        secret_access_key=R2_SECRET_ACCESS_KEY, 
+                                        environment=ENVIRONMENT)
 
-        print(f"[Container] Started at {self.start_time.isoformat()}")
+        logger.info(f"Container modules initialized and ready. Started at {self.start_time.isoformat()}")
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str):
@@ -76,12 +96,22 @@ class Server:
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes)")
         
         try:
+            # Upload original video to R2 bucket
+            # TODO: do this in parallel with processing and provide url once done
+            success, hashed_identifier = self.r2_connector.upload_video(
+                video_data=video_bytes,
+                filename=filename,
+                # user_id="user1" # Specify user ID once we have user management
+            )
+            if not success:
+                raise Exception(f"Failed to upload video to R2 storage: {hashed_identifier}")
+
             # Process video through preprocessing pipeline
             processed_chunks = self.preprocessor.process_video_from_bytes(
                 video_bytes=video_bytes,
                 video_id=job_id,
                 filename=filename,
-                s3_url=""  # TODO: Add S3 URL when storage is implemented
+                hashed_identifier=hashed_identifier
             )
             
             # Calculate summary statistics
@@ -93,7 +123,7 @@ class Server:
             
             # TODO: Send chunks to embedding module
             # TODO: Store results in database
-            # TODO: Upload processed data to S3
+
 
             # Prepare chunk details for response (without frame arrays)
             chunk_details = []
@@ -107,6 +137,7 @@ class Server:
             result = {
                 "job_id": job_id,
                 "status": "completed",
+                "hashed_identifier": hashed_identifier,
                 "filename": filename,
                 "chunks": len(processed_chunks),
                 "total_frames": total_frames,
@@ -194,8 +225,10 @@ class Server:
         logger.info(f"[Search] Query: {query}")
         
         # TODO: Implement search and rerank logic and use class models here
+        # signed_url = self.r2_connector.generate_presigned_url(identifier=)
 
         return {
             "query": query,
-            "status": "success"
+            "status": "success",
+            # "signed_url": signed_url
         }

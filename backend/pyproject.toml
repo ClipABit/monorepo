@@ -15,6 +15,7 @@ dependencies = [
     "pillow",
     "transformers",
     "scenedetect",
+    "boto3",
 ]
 
 [dependency-groups]
