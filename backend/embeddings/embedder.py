@@ -38,12 +38,17 @@ class VideoEmbedder:
         Returns:
             torch.Tensor: A single, normalized embedding tensor for the video chunk.
         """
+        
+        # Fetch the model and processor
         model, processor = self._get_clip_model()
         
+        # Sample frames evenly across the video if the num frames is greater than available frames 
         num_frames = min(num_frames, frames.shape[0])
         frame_indices = np.linspace(0, frames.shape[0] - 1, num_frames).astype(int)
         sampled_frames = [Image.fromarray(frames[idx]) for idx in frame_indices]
         
+        # Transform the frame data to match the standard dimensions and normalization of the pixel values to the ranges 
+        # of the data the model was trained on.
         inputs = processor(images=sampled_frames, return_tensors="pt", size=224).to(self._device)    
         
         with torch.no_grad():
