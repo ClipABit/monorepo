@@ -22,18 +22,12 @@ from preprocessing.chunker import Chunker
 from preprocessing.frame_extractor import FrameExtractor
 from preprocessing.compressor import Compressor
 from preprocessing.preprocessor import Preprocessor
-from models.metadata import VideoChunk, ChunkMetadata
+from models.metadata import VideoChunk
 
 
 # ==============================================================================
 # PATH FIXTURES
 # ==============================================================================
-
-@pytest.fixture(scope="session")
-def fixtures_dir() -> Path:
-    """Path to test fixtures directory."""
-    return Path(__file__).parent / "fixtures"
-
 
 @pytest.fixture
 def temp_dir():
@@ -132,24 +126,6 @@ def sample_video_chunk() -> VideoChunk:
     )
 
 
-@pytest.fixture
-def sample_chunk_metadata() -> ChunkMetadata:
-    """Complete ChunkMetadata for testing."""
-    return ChunkMetadata(
-        chunk_id="test_video_chunk_0000",
-        video_id="test_video_123",
-        start_time=0.0,
-        end_time=5.0,
-        duration=5.0,
-        frame_count=10,
-        sampling_fps=2.0,
-        complexity_score=0.45,
-        original_filename="test_video.mp4",
-        file_type="mp4",
-        original_s3_url="https://example.com/test.mp4"
-    )
-
-
 # ==============================================================================
 # COMPONENT FIXTURES
 # ==============================================================================
@@ -216,19 +192,6 @@ def mock_modal_dict(mocker):
 
     mocker.patch('modal.Dict.from_name', return_value=mock_dict)
     return fake_dict
-
-
-@pytest.fixture
-def mock_scene_detect(mocker):
-    """Mock scenedetect.detect with 2 fake scenes (0-5s, 5-10s)."""
-    from scenedetect import FrameTimecode
-
-    fake_scenes = [
-        (FrameTimecode(0.0, 30.0), FrameTimecode(5.0, 30.0)),
-        (FrameTimecode(5.0, 30.0), FrameTimecode(10.0, 30.0)),
-    ]
-
-    return mocker.patch('scenedetect.detect', return_value=fake_scenes)
 
 
 # ==============================================================================
