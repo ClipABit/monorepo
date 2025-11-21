@@ -161,21 +161,6 @@ uv sync --dev
 
 ---
 
-## CI/CD
-
-Tests run automatically on GitHub Actions for every push/PR to main.
-
-**Workflow:** `.github/workflows/ci.yml`
-
-**What runs:**
-- All tests with coverage
-- Ruff linting on backend and frontend
-- Ubuntu + Python 3.12
-
-Check the "Actions" tab in GitHub to see results.
-
----
-
 ## Adding New Tests
 
 1. **Decide where:** unit test (one component) or integration test (multiple components)?
