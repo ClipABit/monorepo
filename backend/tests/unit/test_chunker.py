@@ -1,4 +1,3 @@
-import pytest
 from preprocessing.chunker import Chunker
 from models.metadata import VideoChunk
 
@@ -98,8 +97,6 @@ class TestFallbackChunking:
 
     def test_fallback_creates_fixed_duration_chunks(self, chunker, sample_video_5s):
         """Verify fallback creates approximately equal chunks."""
-        # Force fallback by mocking detect
-        import pytest_mock
         chunks = chunker._fallback_chunking(str(sample_video_5s), video_id="test")
 
         if len(chunks) > 1:

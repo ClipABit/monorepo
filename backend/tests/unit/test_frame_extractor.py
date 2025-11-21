@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 from preprocessing.frame_extractor import FrameExtractor
 from models.metadata import VideoChunk
