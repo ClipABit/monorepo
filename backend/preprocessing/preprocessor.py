@@ -198,6 +198,7 @@ class Preprocessor:
         Thread-safe for parallel execution.
         Returns None if processing fails.
         """
+        #TODO: Specifcy explicit return type and not just a dict in docstring
         try:
             # Extract frames with complexity analysis
             frames, sampling_fps, complexity_score = self.extractor.extract_frames(video_path, chunk)
@@ -230,6 +231,7 @@ class Preprocessor:
                 complexity_score=complexity_score
             )
 
+            #TODO: Turn this into a dataclass or specific type
             return {
                 'chunk_id': chunk.chunk_id,
                 'frames': compressed_frames,
@@ -269,8 +271,10 @@ class Preprocessor:
         )
 
     def get_stats(self, processed_chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
+        # TODO: Improve docstring and be explicit about parameter and return types
         """Calculate aggregate statistics from processed chunks."""
         if not processed_chunks:
+            # TODO: Turn this into a dataclass
             return {
                 'total_chunks': 0,
                 'total_frames': 0,
@@ -290,6 +294,7 @@ class Preprocessor:
         complexities = [c['metadata']['complexity_score'] for c in processed_chunks]
         fps_values = [c['metadata']['sampling_fps'] for c in processed_chunks]
 
+        # TODO: Turn this into a dataclass
         return {
             'total_chunks': len(processed_chunks),
             'total_frames': total_frames,
