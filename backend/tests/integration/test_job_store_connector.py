@@ -1,4 +1,3 @@
-import pytest
 from database.job_store_connector import JobStoreConnector
 
 

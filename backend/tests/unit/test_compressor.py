@@ -4,7 +4,6 @@ Unit tests for Compressor class.
 Tests frame resizing, compression, and memory optimization.
 """
 
-import pytest
 import numpy as np
 from preprocessing.compressor import Compressor
 
