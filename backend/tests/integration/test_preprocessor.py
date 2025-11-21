@@ -12,7 +12,7 @@ class TestEndToEndProcessing:
             video_bytes=sample_video_bytes,
             video_id="test_video",
             filename="test.mp4",
-            s3_url="https://example.com/test.mp4"
+            hashed_identifier="abc123"
         )
 
         assert len(result) > 0
@@ -26,7 +26,7 @@ class TestEndToEndProcessing:
             video_path=str(sample_video_5s),
             video_id="test_video",
             filename="test.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
 
         assert len(result) > 0
@@ -37,7 +37,7 @@ class TestEndToEndProcessing:
             video_path=str(sample_video_5s),
             video_id="test",
             filename="test.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
 
         for chunk in result:
@@ -50,7 +50,7 @@ class TestEndToEndProcessing:
             video_path=str(sample_video_5s),
             video_id="test",
             filename="test.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
 
         for chunk in result:
@@ -73,7 +73,7 @@ class TestPipelineStages:
             video_path=str(sample_video_5s),
             video_id="test",
             filename="test.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
 
         # Should create at least 1 chunk
@@ -85,7 +85,7 @@ class TestPipelineStages:
             video_path=str(sample_video_5s),
             video_id="test",
             filename="test.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
 
         total_frames = sum(chunk['metadata']['frame_count'] for chunk in result)
@@ -97,7 +97,7 @@ class TestPipelineStages:
             video_path=str(sample_video_5s),
             video_id="test",
             filename="test.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
 
         for chunk in result:
@@ -116,7 +116,7 @@ class TestProcessingStatistics:
             video_path=str(sample_video_5s),
             video_id="test",
             filename="test.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
 
         stats = preprocessor.get_stats(result)
@@ -147,7 +147,7 @@ class TestParallelProcessing:
             video_path=str(sample_video_5s),
             video_id="test",
             filename="test.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
 
         # Results should be consistent
@@ -166,7 +166,7 @@ class TestParallelProcessing:
             video_path=str(sample_video_5s),
             video_id="test",
             filename="test.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
 
         # All chunks should process successfully
@@ -185,7 +185,7 @@ class TestMetadataCaching:
             video_path=str(sample_video_5s),
             video_id="test1",
             filename="test.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
 
         # Cache should now contain metadata
@@ -196,7 +196,7 @@ class TestMetadataCaching:
             video_path=str(sample_video_5s),
             video_id="test2",
             filename="test.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
 
         assert len(result1) > 0
@@ -212,7 +212,7 @@ class TestErrorHandling:
             video_bytes=b"not a video",
             video_id="test",
             filename="fake.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
         assert result == []  # Returns empty instead of crashing
 
@@ -227,6 +227,6 @@ class TestErrorHandling:
             video_path=str(corrupted_path),
             video_id="test",
             filename="corrupted.mp4",
-            s3_url=""
+            hashed_identifier=""
         )
         assert result == []  # Returns empty instead of crashing
