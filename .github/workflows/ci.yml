@@ -34,9 +34,8 @@ jobs:
       - name: install dependencies
         run: uv sync --frozen
 
-      # TODO: tests
-      # - name: run tests
-      #   run: uv run pytest -v
+      - name: run tests
+        run: uv run pytest -v --cov --cov-report=term
 
   frontend:
     name: frontend tests
