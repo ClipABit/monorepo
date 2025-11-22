@@ -5,7 +5,7 @@ A utility script for uploading text chunks to the Pinecone vector database with 
 
 ### 1. Install Dependencies and Setup venv
 
-From the `/backend` directory, run the following:
+From the `/utils` directory, run the following:
 
 ```bash
 uv sync
@@ -43,10 +43,10 @@ Add text content to `sample.txt` in the same directory as the script: Each line 
 
 ### Running the Script
 
-From the `/backend` directory, run:
+From the `/utils` directory, run:
 
 ```bash
-uv run python3 ./utils/uploader/text_uploader.py
+uv run python3 ./uploader/text_uploader.py
 ```
 
 You should logs of the embeddings being generated and the records being upserted to the database.

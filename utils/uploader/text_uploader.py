@@ -20,7 +20,7 @@ from functools import cache
 from typing import List
 from transformers import CLIPProcessor, CLIPModel
 
-from database.pinecone_connector import PineconeConnector
+from backend.database.pinecone_connector import PineconeConnector
 
 # Setup paths to backend directory
 BACKEND_DIR = os.path.join(os.path.dirname(__file__), "../..")
