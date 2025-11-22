@@ -22,7 +22,6 @@ import argparse
 import logging
 import os
 import shutil
-import sys
 import time
 import platform
 from pathlib import Path
@@ -31,9 +30,8 @@ logger = logging.getLogger("watch_clipabit")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
-DEFAULT_SOURCE = Path("frontend/plugin/clipabit.py")
-DEFAULT_TARGET_DIR = Path(r"C:\Users\sujas\AppData\Roaming\Blackmagic Design\DaVinci Resolve\Support\Fusion\Scripts\Utility")
-DEFAULT_COPY_NAME = "clipabit.py"
+DEFAULT_SOURCE = Path("../../frontend/plugin/ClipABit.py")
+DEFAULT_COPY_NAME = "ClipABit.py"
 
 
 def get_resolve_script_dir():
@@ -59,6 +57,7 @@ def get_resolve_script_dir():
         # (Standard installation path for user-specific scripts)
         return home / ".local" / "share" / "DaVinci Resolve" / "Fusion" / "Scripts" / "Utility"   
 
+
 def copy_file(src: Path, dst_dir: Path, dst_name: str = None) -> None:
     dst_dir = dst_dir.expanduser()
     if dst_name is None:
@@ -73,6 +72,27 @@ def copy_file(src: Path, dst_dir: Path, dst_name: str = None) -> None:
     except Exception as e:
         logger.error("Failed to copy %s -> %s: %s", src, dst, e)
 
+
+def run_polling(src: Path, dst_dir: Path, dst_name: str = None, interval: float = 0.5):
+    """Fallback polling loop if watchdog is not installed."""
+    if not src.exists():
+        logger.warning("Source file does not exist yet: %s", src)
+
+    last_mtime = None
+    try:
+        while True:
+            try:
+                mtime = src.stat().st_mtime if src.exists() else None
+            except Exception:
+                mtime = None
+
+            if mtime is not None and mtime != last_mtime:
+                last_mtime = mtime
+                copy_file(src, dst_dir, dst_name)
+
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        logger.info("Polling watcher stopped by user")
 
 
 def run_watchdog(src: Path, dst_dir: Path, dst_name: str = None):
@@ -137,9 +157,9 @@ def run_watchdog(src: Path, dst_dir: Path, dst_name: str = None):
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Watch clipabit.py and copy to DaVinci Resolve Utility folder")
-    p.add_argument("--source", "-s", type=str, default=str(DEFAULT_SOURCE), help="Path to local clipabit.py (relative to repo root or absolute)")
-    p.add_argument("--dest", "-d", type=str, default=str(DEFAULT_TARGET_DIR), help="Destination Utility folder")
+    p = argparse.ArgumentParser(description="Watch ClipABit.py and copy to DaVinci Resolve Utility folder")
+    p.add_argument("--source", "-s", type=str, default=str(DEFAULT_SOURCE), help="Path to local ClipABit.py (relative to repo root or absolute)")
+    p.add_argument("--dest", "-d", type=str, default=str(get_resolve_script_dir()), help="Destination Utility folder")
     p.add_argument("--name", "-n", type=str, default=DEFAULT_COPY_NAME, help="Filename to write at destination")
     p.add_argument("--poll-interval", type=float, default=0.5, help="Polling interval when watchdog unavailable")
     return p.parse_args()
