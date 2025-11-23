@@ -54,7 +54,7 @@ class Server:
         from database.pinecone_connector import PineconeConnector
         from database.job_store_connector import JobStoreConnector
         from search.searcher import Searcher
-        from embeddings.frame_embedder import FrameEmbedder
+        from database.r2_connector import R2Connector
 
 
         logger.info("Container starting up!")
@@ -87,6 +87,12 @@ class Server:
         self.video_embedder = VideoEmbedder()
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
+        self.r2_connector = R2Connector(
+            account_id=R2_ACCOUNT_ID,
+            access_key_id=R2_ACCESS_KEY_ID,
+            secret_access_key=R2_SECRET_ACCESS_KEY,
+            environment=ENVIRONMENT
+        )
         
         # Frame storage for testing/debugging (stores PIL Images as base64)
         self.frame_store = modal.Dict.from_name("clipabit-frames", create_if_missing=True)
@@ -100,8 +106,6 @@ class Server:
         logger.info(f"Searcher initialized (device: {self.searcher.device})")
         
         # Initialize frame embedder for video search
-        self.frame_embedder = FrameEmbedder()
-        logger.info(f"FrameEmbedder initialized (device: {self.frame_embedder.device})")
         
         # Warm up CLIP models (text and image)
         try:
@@ -110,14 +114,6 @@ class Server:
         except Exception as e:
             logger.warning(f"CLIP text warmup failed: {e}")
         
-        try:
-            import numpy as np
-            from PIL import Image
-            dummy_frame = Image.fromarray(np.zeros((224, 224, 3), dtype=np.uint8))
-            _ = self.frame_embedder.embed_single(dummy_frame)
-            logger.info("CLIP image model warmed up")
-        except Exception as e:
-            logger.warning(f"CLIP image warmup failed: {e}")
 
         logger.info("Container modules initialized and ready!")
 
@@ -125,7 +121,6 @@ class Server:
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str):
-        """Background video processing task - runs in its own container."""
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes)")
         
         try:
@@ -171,30 +166,19 @@ class Server:
                 duration = metadata.get('duration', 0)
                 frame_count = metadata.get('frame_count', len(frames))
                 
-                # Embed each frame and store in Pinecone
+                # Embed each frame and store in Pinecone using VideoEmbedder
                 for frame_idx, frame_array in enumerate(frames):
-                    # Convert BGR to RGB (OpenCV reads as BGR, PIL expects RGB)
                     frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_BGR2RGB)
                     pil_frame = Image.fromarray(frame_rgb)
-                    
-                    # Generate embedding
-                    embedding = self.frame_embedder.embed_single(pil_frame)
-                    
-                    # Calculate timestamp for this frame
+                    embedding = self.video_embedder.embed_single(pil_frame)
                     frame_timestamp = start_time + (frame_idx / frame_count) * duration
-                    
-                    # Create frame ID
                     frame_id = f"{chunk_id}_frame_{frame_idx}"
-                    
-                    # Store frame image as base64 for testing/debugging
                     import io
                     import base64
                     buffer = io.BytesIO()
                     pil_frame.save(buffer, format='JPEG', quality=85)
                     frame_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
                     self.frame_store[frame_id] = frame_base64
-                    
-                    # Store in Pinecone with minimal metadata
                     frame_metadata = {
                         'video_id': job_id,
                         'chunk_id': chunk_id,
@@ -205,14 +189,12 @@ class Server:
                         'complexity': metadata.get('complexity_score', 0),
                         'type': 'video_frame'
                     }
-                    
                     self.pinecone_connector.upsert_chunk(
                         chunk_id=frame_id,
                         chunk_embedding=embedding,
                         namespace="",
                         metadata=frame_metadata
                     )
-                    
                     frames_embedded += 1
             
             logger.info(f"[Job {job_id}] Embedded and stored {frames_embedded} frames in Pinecone")
@@ -292,7 +274,6 @@ class Server:
 
     @modal.fastapi_endpoint(method="GET")
     async def status(self, job_id: str):
-        """Poll job status - returns processing status and results when complete."""
         job_data = self.job_store.get_job(job_id)
 
         if job_data is None:
@@ -306,27 +287,11 @@ class Server:
 
     @modal.fastapi_endpoint(method="POST")
     async def upload(self, file: UploadFile = None):
-        """
-        Video upload endpoint - accepts video file uploads and starts background processing.
-        Returns a job ID for polling status.
-        """
         # TODO: Add error handling for file types and sizes
         import uuid
-        
-        if file is None:
-            raise HTTPException(status_code=400, detail="No file provided")
-
-        # Read file contents
+        job_id = str(uuid.uuid4())
         contents = await file.read()
         file_size = len(contents)
-        
-        # Generate unique job ID
-        job_id = str(uuid.uuid4())
-
-        # Log upload details
-        logger.info(f"[Upload] {job_id}: {file.filename} ({file_size} bytes, {file.content_type})")
-
-        # Create initial job entry in shared storage
         self.job_store.create_job(job_id, {
             "job_id": job_id,
             "filename": file.filename,
@@ -349,28 +314,32 @@ class Server:
 
     @modal.fastapi_endpoint(method="GET")
     async def get_frame(self, frame_id: str):
-        """Retrieve frame image by ID (for testing/debugging)."""
         try:
             import base64
-            from fastapi.responses import Response
-            
             frame_base64 = self.frame_store.get(frame_id)
             if frame_base64 is None:
-                raise HTTPException(status_code=404, detail=f"Frame {frame_id} not found")
-            
+                raise Exception(f"Frame {frame_id} not found")
             # Decode base64 to bytes
             frame_bytes = base64.b64decode(frame_base64)
-            
-            return Response(content=frame_bytes, media_type="image/jpeg")
-        except HTTPException:
-            raise
+            return frame_bytes
         except Exception as e:
             logger.error(f"[GetFrame] Error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise Exception(str(e))
     
     @modal.fastapi_endpoint(method="POST")
-    async def search(self, payload: dict):
-        """Search endpoint - accepts a text query and returns semantic search results."""
+    async def search(self, payload: dict) -> dict:
+        """
+        Search endpoint - accepts a text query and returns semantic search results.
+
+        Args:
+            payload (dict): Request body with keys:
+                - query (str): Text search query.
+                - top_k (int, optional): Number of results to return.
+                - filters (dict, optional): Metadata filters for search.
+
+        Returns:
+            dict: Search results, stats, and timing info.
+        """
         try:
             import time
             t_start = time.perf_counter()
@@ -403,6 +372,25 @@ class Server:
             
             # Get index stats
             stats = self.pinecone_connector.get_stats(namespace="")
+
+            # Collect unique video identifiers from top results
+            video_ids = set()
+            for r in results:
+                vid = r.get('metadata', {}).get('video_id')
+                if vid:
+                    video_ids.add(vid)
+
+            # Generate presigned URLs for each video_id
+            presigned_urls = {}
+            for vid in video_ids:
+                url = self.r2_connector.generate_presigned_url(vid)
+                presigned_urls[vid] = url
+
+            # Attach presigned URLs to results
+            for r in results:
+                vid = r.get('metadata', {}).get('video_id')
+                if vid and vid in presigned_urls:
+                    r['presigned_url'] = presigned_urls[vid]
             
             return {
                 "query": query,

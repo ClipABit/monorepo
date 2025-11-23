@@ -33,25 +33,21 @@ class TextEmbedder:
     def __init__(self, model_name: str = "openai/clip-vit-base-patch32"):
         """
         Initialize the text embedder.
-        
+
         Args:
-            model_name: HuggingFace model identifier for CLIP
+            model_name (str): HuggingFace model identifier for CLIP. Default is "openai/clip-vit-base-patch32".
+
+        Loads the CLIP model and processor at startup (not lazily).
         """
         self.model_name = model_name
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = None
-        self.processor = None
-        
         logger.info(f"TextEmbedder initialized (device: {self.device})")
+        self.processor = CLIPProcessor.from_pretrained(self.model_name)
+        self.model = CLIPModel.from_pretrained(self.model_name).to(self.device)
+        self.model.eval()
+        logger.info("CLIP model loaded successfully")
     
-    def _load_model(self):
-        """Lazy load the CLIP model on first use."""
-        if self.model is None:
-            logger.info(f"Loading CLIP model: {self.model_name}")
-            self.processor = CLIPProcessor.from_pretrained(self.model_name)
-            self.model = CLIPModel.from_pretrained(self.model_name).to(self.device)
-            self.model.eval()
-            logger.info("CLIP model loaded successfully")
+    # Model is loaded at initialization; no need for lazy loading
     
     def embed_text(self, text: Union[str, List[str]]) -> np.ndarray:
         """
@@ -93,14 +89,3 @@ class TextEmbedder:
         
         return embeddings
     
-    def embed_single(self, text: str) -> np.ndarray:
-        """
-        Convenience method to embed a single text string.
-        
-        Args:
-            text: Text string to embed
-        
-        Returns:
-            512-dimensional embedding vector (L2-normalized)
-        """
-        return self.embed_text(text)
