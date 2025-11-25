@@ -4,16 +4,15 @@ import requests
 import streamlit as st
 
 
-st.set_page_config(page_title="ClipABit - Video Upload", layout="centered")
+st.set_page_config(page_title="ClipABit - Semantic Video Search", layout="centered")
 
-st.title("ClipABit — Video Uploader")
-st.caption("Upload a video file and send it to your Modal backend for processing.")
+# Initialize session state
+if 'search_results' not in st.session_state:
+    st.session_state.search_results = None
 
-api_url = st.text_input(
-    "Backend API URL",
-    value="https://clipabit01--clipabit-server-upload-dev.modal.run",
-    help="Full URL of the Modal backend endpoint that accepts multipart file uploads.",
-)
+# API Configuration
+BACKEND_API_URL = "https://clipabit01--clipabit-server-upload-dev.modal.run"
+SEARCH_API_URL = "https://clipabit01--clipabit-server-search-dev.modal.run"
 
 
 def upload_file_to_backend(api_url: str, file_bytes: bytes, filename: str, content_type: str | None = None):
@@ -34,7 +33,6 @@ def poll_job_status(status_url: str, job_id: str, max_wait: int = 120, poll_inte
                 data = resp.json()
                 status = data.get("status", "unknown")
 
-                # Job completed or failed
                 if status in ["completed", "failed"]:
                     return data
 
@@ -42,54 +40,65 @@ def poll_job_status(status_url: str, job_id: str, max_wait: int = 120, poll_inte
         except requests.RequestException:
             time.sleep(poll_interval)
 
-    # Timeout
     return {"job_id": job_id, "status": "timeout", "message": "Job polling timed out"}
 
 
-# File uploader
-uploaded = st.file_uploader("Choose a video file", type=["mp4", "mov", "avi", "mkv", "webm"])
-
-if uploaded is not None:
-    # Read bytes once so we can both preview and upload
-    uploaded_bytes = uploaded.read()
-    
-    # Show video preview
+def search_videos(query: str):
+    """Search for videos using the backend API."""
     try:
-        st.video(io.BytesIO(uploaded_bytes))
-    except Exception:
-        st.info("Preview not available for this format — proceeding to upload.")
-    
-    # File metadata
-    st.write(f"**Filename:** {uploaded.name}")
-    st.write(f"**Size:** {len(uploaded_bytes):,} bytes ({len(uploaded_bytes) / 1024 / 1024:.2f} MB)")
-    
-    # Upload button
-    if st.button("Upload to Backend", type="primary"):
-        if not api_url:
-            st.error("Please set the backend API URL first.")
+        # Backend expects GET request with query parameter
+        resp = requests.get(
+            SEARCH_API_URL,
+            params={"query": query},
+            timeout=30
+        )
+        if resp.status_code == 200:
+            return resp.json()
         else:
+            return {"error": f"Search failed with status {resp.status_code}: {resp.text}"}
+    except requests.RequestException as e:
+        return {"error": f"Search request failed: {str(e)}"}
+
+
+@st.dialog("Upload Video", width="large")
+def upload_dialog():
+    """Modal dialog for video upload."""
+    st.write("Upload a video file to process and index for searching.")
+    
+    uploaded = st.file_uploader("Choose a video file", type=["mp4", "mov", "avi", "mkv", "webm"])
+    
+    if uploaded is not None:
+        uploaded_bytes = uploaded.read()
+        
+        # Show video preview
+        try:
+            st.video(io.BytesIO(uploaded_bytes))
+        except Exception:
+            st.info("Preview not available for this format — proceeding to upload.")
+        
+        # File metadata
+        st.write(f"**Filename:** {uploaded.name}")
+        st.write(f"**Size:** {len(uploaded_bytes):,} bytes ({len(uploaded_bytes) / 1024 / 1024:.2f} MB)")
+        
+        # Upload button
+        if st.button("Upload to Backend", type="primary", use_container_width=True):
             with st.spinner("Uploading video to backend..."):
                 try:
-                    resp = upload_file_to_backend(api_url, uploaded_bytes, uploaded.name, uploaded.type)
+                    resp = upload_file_to_backend(BACKEND_API_URL, uploaded_bytes, uploaded.name, uploaded.type)
 
-                    # Handle response
                     if resp.status_code == 200:
                         try:
                             upload_data = resp.json()
 
-                            # Check if job was spawned
                             if upload_data.get("status") == "processing":
                                 job_id = upload_data.get("job_id")
                                 st.info(f"Video uploaded successfully. Job ID: {job_id}")
 
-                                # Derive status URL from upload URL
-                                status_url = api_url.replace("-upload-", "-status-")
+                                status_url = BACKEND_API_URL.replace("-upload-", "-status-")
 
-                                # Poll for results
                                 with st.spinner("Processing video... This may take a minute."):
                                     data = poll_job_status(status_url, job_id, max_wait=120, poll_interval=2)
                             else:
-                                # Legacy: direct response (if not using spawn)
                                 data = upload_data
 
                             # Display results
@@ -116,14 +125,11 @@ if uploaded is not None:
                                 with col4:
                                     st.metric("Memory", f"{data.get('total_memory_mb', 0):.1f} MB")
 
-                                # Show job ID
                                 st.code(f"Job ID: {data.get('job_id', 'N/A')}", language=None)
 
-                                # Show raw JSON in expander
                                 with st.expander("View raw response"):
                                     st.json(data)
 
-                                # Display chunk details if available
                                 if "chunk_details" in data and data["chunk_details"]:
                                     st.subheader("Chunk Details")
                                     for i, chunk in enumerate(data["chunk_details"], 1):
@@ -186,44 +192,24 @@ if st.button("🔍 Search", type="primary", use_container_width=False):
 if st.session_state.search_results:
     st.markdown("---")
     
-    # Header with toggle
-    col_header, col_toggle = st.columns([3, 1])
-    with col_header:
-        st.subheader("Search Results")
-    with col_toggle:
-        show_frames = st.checkbox("Show frames", value=True, help="Fetch and display frame images (for testing/debugging)")
+    st.subheader("Search Results")
     
     results = st.session_state.search_results
     
     if "error" in results:
         st.error(f"Error: {results['error']}")
     else:
-        # Display query echo
+        # Display query and status
         if "query" in results:
             st.info(f"Query: {results['query']}")
+        if "status" in results:
+            st.success(f"Status: {results['status']}")
         
-        # Display results
-        search_results = results.get('results', [])
-        if search_results:
-            for i, result in enumerate(search_results, 1):
-                metadata = result.get('metadata', {})
-                score = result.get('score', 0)
-                result_id = result.get('id', '')
-                with st.container():
-                    st.markdown(f"### Result {i} - Score: {score:.3f}")
-                    st.write(f"- Chunk ID: `{metadata.get('chunk_id', 'N/A')}`")
-                    st.write(f"- Video ID: `{metadata.get('video_id', 'N/A')}`")
-                    st.write(f"- Duration: **{metadata.get('duration', 0):.2f}s**")
-                    st.write(f"- Start Time: {metadata.get('start_time_s', 0):.2f}s")
-                    st.write(f"- End Time: {metadata.get('end_time_s', 0):.2f}s")
-                    st.write(f"- Frame Count: {metadata.get('frame_count', 0)}")
-                    st.write(f"- Complexity Score: {metadata.get('complexity_score', metadata.get('complexity', 0)):.3f}")
-                    st.write(f"- Filename: {metadata.get('file_filename', 'N/A')}")
-                    st.write(f"- File Type: {metadata.get('file_type', 'N/A')}")
-                    st.write(f"- Processed At: {metadata.get('processed_at', 'N/A')}")
-                    st.markdown("---")
-        else:
-            st.info("No results found")
-        with st.expander("View raw JSON response"):
+        # Show raw response for now since backend doesn't return actual results yet
+        with st.expander("View API response", expanded=True):
             st.json(results)
-    st.caption("ClipABit - Powered by CLIP embeddings and semantic search")
+        
+        # Note to user about implementation
+        st.info("ℹ️ Search endpoint is working! The backend currently returns a placeholder response. Once you implement the actual search logic in your Modal backend, results will appear here automatically.")
+
+st.caption("ClipABit - Powered by CLIP embeddings and semantic search")
