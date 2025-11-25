@@ -38,6 +38,7 @@ def scan_folder(folder):
 
 # 3. Start the scan from the Root folder
 root_folder = media_pool.GetRootFolder()
+clips = root_folder.GetClipList()
 print("Scanning Media Pool...")
 scan_folder(root_folder)
 
@@ -54,20 +55,48 @@ def on_button_click():
 
     # You could put your file saving logic here later!
 
-
+"""
 def upload_file_to_backend(api_url: str, file_bytes: bytes, filename: str, content_type: str | None = None):
-    """Upload file to backend via multipart form-data."""
     files = {"file": (filename, io.BytesIO(file_bytes), content_type or "application/octet-stream")}
     resp = requests.post(api_url, files=files, timeout=300)
     return resp
+"""
 
+def ensure_timeline(project, media_pool, timeline_name="Timeline 1"):
+    timeline = project.GetCurrentTimeline()
+    if timeline:
+        print(f"Using existing timeline: {timeline.GetName()}")
+        return timeline
+    # Create a new timeline with all clips in the media pool root folder
+    root_folder = media_pool.GetRootFolder()
+    clips = root_folder.GetClipList()
+    if clips:
+        new_timeline = media_pool.CreateTimelineFromClips(timeline_name, clips)
+        print(f"Created new timeline: {timeline_name}")
+        return new_timeline
+    else:
+        # If no clips, create an empty timeline
+        new_timeline = media_pool.CreateEmptyTimeline(timeline_name)
+        print(f"Created empty timeline: {timeline_name}")
+        return new_timeline
+
+# Usage in your script:
+timeline = ensure_timeline(project, media_pool)
 
 
 def append_chunk_to_timeline():
-    clips = root_folder.GetClipList()
-    media_pool.AppendToTimeline(
-        [{"mediaPoolItem": clips[0], "startFrame": 0, "endFrame": 20}])
-
+    if not clips:
+        print("No clips found in the root folder.")
+        return
+    # Append the first clip in the root folder to the current timeline
+    if not timeline:
+        print("No active timeline found.")
+        return
+    result = media_pool.AppendToTimeline([{"mediaPoolItem":clips[0], "startFrame": 0, "endFrame": 10}])
+    if result:
+        print("Clip appended to timeline!")
+    else:
+        print("Failed to append clip.")
 
 # Setup
 root = tk.Tk()

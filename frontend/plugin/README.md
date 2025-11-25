@@ -25,7 +25,7 @@ python3 ./watch_clipabit.py
 
 This initializes a script in the directory that resolve looks at to run scripts from its native console.
 
-Further as you make updates to the script code, the ```watch_clipabit.py``` process will automatically update the copy of the code in the resolve scripts directory. This allows for you to update and commit everything from within the repo.
+Further as you *save* updates to the script code, the ```watch_clipabit.py``` process will automatically update the copy of the code in the resolve scripts directory. This allows for you to update and commit everything from within the repo.
 
 To run the "plugin" in resolve you need to first open a project. Then click:
 ```Workspace > Scripts > ClipABit```
@@ -37,9 +37,10 @@ This opens a tkinter application that is the ClipABit plugin for resolve
 * Open the resolve console at: ```Workspace > console``` for logs
 
 
-### Currently Working On
+### Currently Working On . . .
 * Writing a process media pool function that embeds the entire media pool of your project and uploads it to the pinecone database.
   * Each user that uses the plugin will be allocated an index that identifies their device and a namespace for each project within that index.
 * Implementing search so that the user can search for the most appropriate video within the media pool and click an append to timeline button to instantly add the specific seen that matches.
   * Need to ensure that the plugin displays previews of each search result shown.
 * Would like to test out qtpy for ui because that is what resolve works with and thus we can avoid weird errors that way.
+* create an installer so that all the dependencies required for resolve to run the script is initialized
