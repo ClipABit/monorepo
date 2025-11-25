@@ -33,9 +33,9 @@ class TextEmbedder:
     def __init__(self, model_name: str = "openai/clip-vit-base-patch32"):
         """
         Initialize the text embedder.
-        
+
         Args:
-            model_name: HuggingFace model identifier for CLIP
+            model_name: HuggingFace model identifier for CLIP. Defaults to "openai/clip-vit-base-patch32" if not specified.
         """
         self.model_name = model_name
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -92,15 +92,3 @@ class TextEmbedder:
             return embeddings[0]
         
         return embeddings
-    
-    def embed_single(self, text: str) -> np.ndarray:
-        """
-        Convenience method to embed a single text string.
-        
-        Args:
-            text: Text string to embed
-        
-        Returns:
-            512-dimensional embedding vector (L2-normalized)
-        """
-        return self.embed_text(text)

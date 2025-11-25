@@ -81,7 +81,7 @@ class Searcher:
         logger.info(f"Searching for: '{query}' (top_k={top_k})")
         
         # Generate query embedding
-        query_embedding = self.embedder.embed_single(query)
+        query_embedding = self.embedder.embed_text(query)
         
         # Search Pinecone with optional filters
         matches = self.connector.query_chunks(

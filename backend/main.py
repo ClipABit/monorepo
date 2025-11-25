@@ -54,7 +54,7 @@ class Server:
         from database.pinecone_connector import PineconeConnector
         from database.job_store_connector import JobStoreConnector
         from search.searcher import Searcher
-        from embeddings.frame_embedder import FrameEmbedder
+        from database.r2_connector import R2Connector
 
 
         logger.info("Container starting up!")
@@ -95,29 +95,18 @@ class Server:
         self.searcher = Searcher(
             api_key=PINECONE_API_KEY,
             index_name=PINECONE_CHUNKS_INDEX,
-            namespace=""  # Search all data by default
+            namespace=""  # Use default namespace
         )
         logger.info(f"Searcher initialized (device: {self.searcher.device})")
         
-        # Initialize frame embedder for video search
-        self.frame_embedder = FrameEmbedder()
-        logger.info(f"FrameEmbedder initialized (device: {self.frame_embedder.device})")
-        
-        # Warm up CLIP models (text and image)
-        try:
-            _ = self.searcher.embedder.embed_text("warmup")
-            logger.info("CLIP text model warmed up")
-        except Exception as e:
-            logger.warning(f"CLIP text warmup failed: {e}")
-        
-        try:
-            import numpy as np
-            from PIL import Image
-            dummy_frame = Image.fromarray(np.zeros((224, 224, 3), dtype=np.uint8))
-            _ = self.frame_embedder.embed_single(dummy_frame)
-            logger.info("CLIP image model warmed up")
-        except Exception as e:
-            logger.warning(f"CLIP image warmup failed: {e}")
+        # Removed FrameEmbedder initialization
+
+        self.r2_connector = R2Connector(
+            account_id=R2_ACCOUNT_ID,
+            access_key_id=R2_ACCESS_KEY_ID,
+            secret_access_key=R2_SECRET_ACCESS_KEY,
+            environment=ENVIRONMENT
+        )
 
         logger.info("Container modules initialized and ready!")
 
@@ -154,67 +143,7 @@ class Server:
             logger.info(f"[Job {job_id}] Complete: {len(processed_chunks)} chunks, {total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}")
             
             # Embed frames and store in Pinecone
-            logger.info(f"[Job {job_id}] Embedding {total_frames} frames")
-            from PIL import Image
-            
-            frames_embedded = 0
-            for chunk in processed_chunks:
-                chunk_id = chunk['chunk_id']
-                frames = chunk['frames']  # numpy array (N, H, W, 3)
-                metadata = chunk['metadata']
-                
-                # Extract timing info from metadata
-                timestamp_range = metadata.get('timestamp_range', [0, 0])
-                start_time = timestamp_range[0]
-                end_time = timestamp_range[1]
-                duration = metadata.get('duration', 0)
-                frame_count = metadata.get('frame_count', len(frames))
-                
-                # Embed each frame and store in Pinecone
-                for frame_idx, frame_array in enumerate(frames):
-                    # Convert BGR to RGB (OpenCV reads as BGR, PIL expects RGB)
-                    frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_BGR2RGB)
-                    pil_frame = Image.fromarray(frame_rgb)
-                    
-                    # Generate embedding
-                    embedding = self.frame_embedder.embed_single(pil_frame)
-                    
-                    # Calculate timestamp for this frame
-                    frame_timestamp = start_time + (frame_idx / frame_count) * duration
-                    
-                    # Create frame ID
-                    frame_id = f"{chunk_id}_frame_{frame_idx}"
-                    
-                    # Store frame image as base64 for testing/debugging
-                    import io
-                    import base64
-                    buffer = io.BytesIO()
-                    pil_frame.save(buffer, format='JPEG', quality=85)
-                    frame_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-                    self.frame_store[frame_id] = frame_base64
-                    
-                    # Store in Pinecone with minimal metadata
-                    frame_metadata = {
-                        'video_id': job_id,
-                        'chunk_id': chunk_id,
-                        'frame_index': frame_idx,
-                        'timestamp': round(frame_timestamp, 3),
-                        'chunk_start': start_time,
-                        'chunk_end': end_time,
-                        'complexity': metadata.get('complexity_score', 0),
-                        'type': 'video_frame'
-                    }
-                    
-                    self.pinecone_connector.upsert_chunk(
-                        chunk_id=frame_id,
-                        chunk_embedding=embedding,
-                        namespace="",
-                        metadata=frame_metadata
-                    )
-                    
-                    frames_embedded += 1
-            
-            logger.info(f"[Job {job_id}] Embedded and stored {frames_embedded} frames in Pinecone")
+            logger.info(f"[Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
             
             # TODO: Upload processed data to S3 (video storage)
 
@@ -249,7 +178,7 @@ class Server:
                 self.pinecone_connector.upsert_chunk(
                     chunk_id=chunk['chunk_id'],
                     chunk_embedding=embedding.numpy(),
-                    namespace="test",
+                    namespace="",
                     metadata=chunk['metadata']
                 )            
                 
@@ -291,6 +220,21 @@ class Server:
 
     @modal.fastapi_endpoint(method="GET")
     async def status(self, job_id: str):
+        """
+        Check the status of a video processing job.
+
+        Args:
+            job_id (str): The unique identifier for the video processing job.
+
+        Returns:
+            dict: Contains:
+                - job_id (str): The job identifier
+                - status (str): 'processing', 'completed', or 'failed'
+                - message (str, optional): If still processing or not found
+                - result (dict, optional): Full job result if completed
+
+        This endpoint allows clients (e.g., frontend) to poll for job progress and retrieve results when ready.
+        """
         job_data = self.job_store.get_job(job_id)
 
         if job_data is None:
@@ -304,6 +248,15 @@ class Server:
 
     @modal.fastapi_endpoint(method="POST")
     async def upload(self, file: UploadFile = None):
+        """
+        Handle video file upload and start background processing.
+
+        Args:
+            file (UploadFile): The uploaded video file.
+
+        Returns:
+            dict: Contains job_id, filename, content_type, size_bytes, status, and message.
+        """
         # TODO: Add error handling for file types and sizes
         import uuid
         job_id = str(uuid.uuid4())
@@ -329,30 +282,18 @@ class Server:
             "message": "Video uploaded successfully, processing in background"
         }
 
-    @modal.fastapi_endpoint(method="GET")
-    async def get_frame(self, frame_id: str):
-        """Retrieve frame image by ID (for testing/debugging)."""
-        try:
-            import base64
-            from fastapi.responses import Response
-            
-            frame_base64 = self.frame_store.get(frame_id)
-            if frame_base64 is None:
-                raise HTTPException(status_code=404, detail=f"Frame {frame_id} not found")
-            
-            # Decode base64 to bytes
-            frame_bytes = base64.b64decode(frame_base64)
-            
-            return Response(content=frame_bytes, media_type="image/jpeg")
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"[GetFrame] Error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
     
     @modal.fastapi_endpoint(method="POST")
     async def search(self, payload: dict):
-        """Search endpoint - accepts a text query and returns semantic search results."""
+        """
+        Search endpoint - accepts a text query and returns semantic search results.
+        
+        # payload: dict with keys:
+        #   - query (str): The search query string (required)
+        #   - top_k (int, optional): Number of top results to return (default: 10)
+        #   - filters (dict, optional): Metadata filters for search (default: None)
+        # Returns: dict with 'query', 'results', 'stats', and 'timing'.
+        """
         try:
             import time
             t_start = time.perf_counter()
@@ -378,10 +319,8 @@ class Server:
             
             t_done = time.perf_counter()
             
-            # Log result types for debugging
-            video_frames = sum(1 for r in results if r.get('metadata', {}).get('type') == 'video_frame')
-            text_chunks = sum(1 for r in results if r.get('metadata', {}).get('type') != 'video_frame')
-            logger.info(f"[Search] Found {len(results)} results in {t_done - t_start:.3f}s ({video_frames} video frames, {text_chunks} text chunks)")
+            # Log chunk-level results only
+            logger.info(f"[Search] Found {len(results)} chunk-level results in {t_done - t_start:.3f}s")
             
             # Get index stats
             stats = self.pinecone_connector.get_stats(namespace="")

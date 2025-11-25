@@ -225,66 +225,28 @@ if st.session_state.search_results:
         if "query" in results:
             st.info(f"Query: {results['query']}")
         
-        # Display results with frame images
+        # Display results
         search_results = results.get('results', [])
-        
         if search_results:
             for i, result in enumerate(search_results, 1):
                 metadata = result.get('metadata', {})
                 score = result.get('score', 0)
                 result_id = result.get('id', '')
-                result_type = metadata.get('type', 'text_chunk')
-                
                 with st.container():
                     st.markdown(f"### Result {i} - Score: {score:.3f}")
-                    
-                    if result_type == 'video_frame':
-                        # Show frame image if toggle enabled
-                        if show_frames:
-                            col1, col2 = st.columns([1, 2])
-                            
-                            with col1:
-                                try:
-                                    frame_url = f"{GET_FRAME_API_URL}?frame_id={result_id}"
-                                    response = requests.get(frame_url, timeout=10)
-                                    if response.status_code == 200:
-                                        st.image(response.content, caption=f"Frame at {metadata.get('timestamp', 0):.2f}s", use_container_width=True)
-                                    else:
-                                        st.warning(f"Frame image not available (status {response.status_code})")
-                                except Exception as e:
-                                    st.error(f"Failed to load frame: {e}")
-                            
-                            with col2:
-                                st.write("**Frame Details:**")
-                                st.write(f"- Video ID: `{metadata.get('video_id', 'N/A')}`")
-                                st.write(f"- Timestamp: {metadata.get('timestamp', 0):.3f}s")
-                                st.write(f"- Chunk: {metadata.get('chunk_id', 'N/A')}")
-                                st.write(f"- Frame Index: {metadata.get('frame_index', 'N/A')}")
-                                st.write(f"- Complexity: {metadata.get('complexity', 0):.3f}")
-                        else:
-                            # Metadata-only mode (production)
-                            st.write("**Frame Details (metadata only):**")
-                            st.write(f"- Video ID: `{metadata.get('video_id', 'N/A')}`")
-                            st.write(f"- Timestamp: **{metadata.get('timestamp', 0):.3f}s**")
-                            st.write(f"- Chunk: {metadata.get('chunk_id', 'N/A')}")
-                            st.write(f"- Frame Index: {metadata.get('frame_index', 'N/A')}")
-                            st.write(f"- Complexity: {metadata.get('complexity', 0):.3f}")
-                            st.caption("💡 Enable 'Show frames' to see frame images")
-                    else:
-                        # Text chunk result
-                        st.write("**Text Chunk:**")
-                        st.write(metadata.get('text', 'No text available'))
-                        st.caption(f"Source: {metadata.get('source', 'N/A')}")
-                    
+                    st.write(f"- Chunk ID: `{metadata.get('chunk_id', 'N/A')}`")
+                    st.write(f"- Video ID: `{metadata.get('video_id', 'N/A')}`")
+                    st.write(f"- Duration: **{metadata.get('duration', 0):.2f}s**")
+                    st.write(f"- Start Time: {metadata.get('start_time_s', 0):.2f}s")
+                    st.write(f"- End Time: {metadata.get('end_time_s', 0):.2f}s")
+                    st.write(f"- Frame Count: {metadata.get('frame_count', 0)}")
+                    st.write(f"- Complexity Score: {metadata.get('complexity_score', metadata.get('complexity', 0)):.3f}")
+                    st.write(f"- Filename: {metadata.get('file_filename', 'N/A')}")
+                    st.write(f"- File Type: {metadata.get('file_type', 'N/A')}")
+                    st.write(f"- Processed At: {metadata.get('processed_at', 'N/A')}")
                     st.markdown("---")
         else:
             st.info("No results found")
-        
-        # Display full JSON response in expander
         with st.expander("View raw JSON response"):
             st.json(results)
-
-# Footer
-st.markdown("---")
-st.caption("ClipABit - Powered by CLIP embeddings and semantic search")
-
+    st.caption("ClipABit - Powered by CLIP embeddings and semantic search")

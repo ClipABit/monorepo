@@ -1,10 +1,3 @@
-"""
-Embeddings module for video and text semantic search.
+from .embedder import VideoEmbedder
 
-Exports:
-    FrameEmbedder: CLIP-based video frame embedder
-"""
-
-from embeddings.frame_embedder import FrameEmbedder
-
-__all__ = ['FrameEmbedder']
+__all__ = ['VideoEmbedder']
