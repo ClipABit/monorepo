@@ -148,12 +148,82 @@ if uploaded is not None:
                     st.error(f"Upload failed: {e}")
 
 
-st.markdown("---")
-st.markdown(
-    """
-    **Notes:**
-    - The backend must accept a multipart form file field named `file`
-    - Make sure your Modal backend is running (`modal serve main.py`)
-    - Update the API URL above to match your Modal deployment URL
-    """
-)
+# Main UI
+col_title, col_stats = st.columns([3, 1])
+with col_title:
+    st.title("🎬 ClipABit")
+    st.subheader("Semantic Video Search")
+with col_stats:
+    # Show database stats if we have search results
+    if st.session_state.search_results and 'stats' in st.session_state.search_results:
+        stats = st.session_state.search_results['stats']
+        st.metric("Vectors in DB", f"{stats.get('namespace_vectors', 0):,}")
+
+# Header with search and upload button
+col1, col2 = st.columns([5, 1])
+
+with col1:
+    search_query = st.text_input(
+        "Search for video content",
+        placeholder="e.g., 'a woman walking on a train platform'",
+        label_visibility="collapsed"
+    )
+
+with col2:
+    if st.button("📤 Upload", use_container_width=True):
+        upload_dialog()
+
+# Search button
+if st.button("🔍 Search", type="primary", use_container_width=False):
+    if search_query:
+        with st.spinner("Searching..."):
+            results = search_videos(search_query)
+            st.session_state.search_results = results
+    else:
+        st.warning("Please enter a search query")
+
+# Display results
+if st.session_state.search_results:
+    st.markdown("---")
+    
+    # Header with toggle
+    col_header, col_toggle = st.columns([3, 1])
+    with col_header:
+        st.subheader("Search Results")
+    with col_toggle:
+        show_frames = st.checkbox("Show frames", value=True, help="Fetch and display frame images (for testing/debugging)")
+    
+    results = st.session_state.search_results
+    
+    if "error" in results:
+        st.error(f"Error: {results['error']}")
+    else:
+        # Display query echo
+        if "query" in results:
+            st.info(f"Query: {results['query']}")
+        
+        # Display results
+        search_results = results.get('results', [])
+        if search_results:
+            for i, result in enumerate(search_results, 1):
+                metadata = result.get('metadata', {})
+                score = result.get('score', 0)
+                result_id = result.get('id', '')
+                with st.container():
+                    st.markdown(f"### Result {i} - Score: {score:.3f}")
+                    st.write(f"- Chunk ID: `{metadata.get('chunk_id', 'N/A')}`")
+                    st.write(f"- Video ID: `{metadata.get('video_id', 'N/A')}`")
+                    st.write(f"- Duration: **{metadata.get('duration', 0):.2f}s**")
+                    st.write(f"- Start Time: {metadata.get('start_time_s', 0):.2f}s")
+                    st.write(f"- End Time: {metadata.get('end_time_s', 0):.2f}s")
+                    st.write(f"- Frame Count: {metadata.get('frame_count', 0)}")
+                    st.write(f"- Complexity Score: {metadata.get('complexity_score', metadata.get('complexity', 0)):.3f}")
+                    st.write(f"- Filename: {metadata.get('file_filename', 'N/A')}")
+                    st.write(f"- File Type: {metadata.get('file_type', 'N/A')}")
+                    st.write(f"- Processed At: {metadata.get('processed_at', 'N/A')}")
+                    st.markdown("---")
+        else:
+            st.info("No results found")
+        with st.expander("View raw JSON response"):
+            st.json(results)
+    st.caption("ClipABit - Powered by CLIP embeddings and semantic search")
