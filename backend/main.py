@@ -1,6 +1,7 @@
 import logging
 from fastapi import UploadFile, HTTPException
 import modal
+import cv2
 
 # Constants
 PINECONE_CHUNKS_INDEX = "chunks-index"
@@ -22,6 +23,7 @@ image = (
                 "embeddings",
                 "models",
                 "database",
+                "search",
             )
         )
 
@@ -51,6 +53,7 @@ class Server:
         from embeddings.embedder import VideoEmbedder
         from database.pinecone_connector import PineconeConnector
         from database.job_store_connector import JobStoreConnector
+        from search.searcher import Searcher
         from database.r2_connector import R2Connector
 
 
@@ -80,21 +83,37 @@ class Server:
         logger.info(f"Running in environment: {ENVIRONMENT}")
 
         # Instantiate classes
-
         self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
         self.video_embedder = VideoEmbedder()
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
-        self.r2_connector = R2Connector(account_id=R2_ACCOUNT_ID,
-                                        access_key_id=R2_ACCESS_KEY_ID,
-                                        secret_access_key=R2_SECRET_ACCESS_KEY, 
-                                        environment=ENVIRONMENT)
+        
+        # Frame storage for testing/debugging (stores PIL Images as base64)
+        self.frame_store = modal.Dict.from_name("clipabit-frames", create_if_missing=True)
+        
+        # Initialize semantic searcher
+        self.searcher = Searcher(
+            api_key=PINECONE_API_KEY,
+            index_name=PINECONE_CHUNKS_INDEX,
+            namespace=""  # Use default namespace
+        )
+        logger.info(f"Searcher initialized (device: {self.searcher.device})")
+        
+        # Removed FrameEmbedder initialization
 
-        logger.info(f"Container modules initialized and ready. Started at {self.start_time.isoformat()}")
+        self.r2_connector = R2Connector(
+            account_id=R2_ACCOUNT_ID,
+            access_key_id=R2_ACCESS_KEY_ID,
+            secret_access_key=R2_SECRET_ACCESS_KEY,
+            environment=ENVIRONMENT
+        )
+
+        logger.info("Container modules initialized and ready!")
+
+        print(f"[Container] Started at {self.start_time.isoformat()}")
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str):
-        """Background video processing task - runs in its own container."""
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes)")
         
         try:
@@ -121,11 +140,12 @@ class Server:
             total_memory = sum(chunk['memory_mb'] for chunk in processed_chunks)
             avg_complexity = sum(chunk['metadata']['complexity_score'] for chunk in processed_chunks) / len(processed_chunks) if processed_chunks else 0
 
-            print(f"[Job {job_id}] Complete: {len(processed_chunks)} chunks, {total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}")
+            logger.info(f"[Job {job_id}] Complete: {len(processed_chunks)} chunks, {total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}")
             
-            # TODO: Send chunks to embedding module
-            # TODO: Store results in database
-
+            # Embed frames and store in Pinecone
+            logger.info(f"[Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
+            
+            # TODO: Upload processed data to S3 (video storage)
 
             # Prepare chunk details for response (without frame arrays)
             chunk_details = []
@@ -158,7 +178,7 @@ class Server:
                 self.pinecone_connector.upsert_chunk(
                     chunk_id=chunk['chunk_id'],
                     chunk_embedding=embedding.numpy(),
-                    namespace="test",
+                    namespace="",
                     metadata=chunk['metadata']
                 )            
                 
@@ -200,7 +220,21 @@ class Server:
 
     @modal.fastapi_endpoint(method="GET")
     async def status(self, job_id: str):
-        """Poll job status - returns processing status and results when complete."""
+        """
+        Check the status of a video processing job.
+
+        Args:
+            job_id (str): The unique identifier for the video processing job.
+
+        Returns:
+            dict: Contains:
+                - job_id (str): The job identifier
+                - status (str): 'processing', 'completed', or 'failed'
+                - message (str, optional): If still processing or not found
+                - result (dict, optional): Full job result if completed
+
+        This endpoint allows clients (e.g., frontend) to poll for job progress and retrieve results when ready.
+        """
         job_data = self.job_store.get_job(job_id)
 
         if job_data is None:
@@ -215,26 +249,19 @@ class Server:
     @modal.fastapi_endpoint(method="POST")
     async def upload(self, file: UploadFile = None):
         """
-        Video upload endpoint - accepts video file uploads and starts background processing.
-        Returns a job ID for polling status.
+        Handle video file upload and start background processing.
+
+        Args:
+            file (UploadFile): The uploaded video file.
+
+        Returns:
+            dict: Contains job_id, filename, content_type, size_bytes, status, and message.
         """
         # TODO: Add error handling for file types and sizes
         import uuid
-        
-        if file is None:
-            raise HTTPException(status_code=400, detail="No file provided")
-
-        # Read file contents
+        job_id = str(uuid.uuid4())
         contents = await file.read()
         file_size = len(contents)
-        
-        # Generate unique job ID
-        job_id = str(uuid.uuid4())
-
-        # Log upload details
-        logger.info(f"[Upload] {job_id}: {file.filename} ({file_size} bytes, {file.content_type})")
-
-        # Create initial job entry in shared storage
         self.job_store.create_job(job_id, {
             "job_id": job_id,
             "filename": file.filename,
@@ -255,16 +282,59 @@ class Server:
             "message": "Video uploaded successfully, processing in background"
         }
 
-    @modal.fastapi_endpoint(method="GET")
-    async def search(self, query: str):
-        """Search endpoint - accepts a text query and returns semantic search results."""
-        logger.info(f"[Search] Query: {query}")
+    
+    @modal.fastapi_endpoint(method="POST")
+    async def search(self, payload: dict):
+        """
+        Search endpoint - accepts a text query and returns semantic search results.
         
-        # TODO: Implement search and rerank logic and use class models here
-        # signed_url = self.r2_connector.generate_presigned_url(identifier=)
-
-        return {
-            "query": query,
-            "status": "success",
-            # "signed_url": signed_url
-        }
+        # payload: dict with keys:
+        #   - query (str): The search query string (required)
+        #   - top_k (int, optional): Number of top results to return (default: 10)
+        #   - filters (dict, optional): Metadata filters for search (default: None)
+        # Returns: dict with 'query', 'results', 'stats', and 'timing'.
+        """
+        try:
+            import time
+            t_start = time.perf_counter()
+            
+            # Parse request
+            query = payload.get("query", "").strip()
+            if not query:
+                raise HTTPException(status_code=400, detail="Missing 'query' in request body")
+            
+            top_k = int(payload.get("top_k", 10))
+            if top_k <= 0:
+                top_k = 10
+            
+            filters = payload.get("filters")
+            logger.info(f"[Search] Query: '{query}' | top_k={top_k} | filters={filters}")
+            
+            # Execute semantic search
+            results = self.searcher.search(
+                query=query,
+                top_k=top_k,
+                filters=filters
+            )
+            
+            t_done = time.perf_counter()
+            
+            # Log chunk-level results only
+            logger.info(f"[Search] Found {len(results)} chunk-level results in {t_done - t_start:.3f}s")
+            
+            # Get index stats
+            stats = self.pinecone_connector.get_stats(namespace="")
+            
+            return {
+                "query": query,
+                "results": results,
+                "stats": stats,
+                "timing": {
+                    "total_s": round(t_done - t_start, 3)
+                }
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[Search] Error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
