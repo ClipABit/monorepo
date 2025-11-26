@@ -209,12 +209,7 @@ if st.button("🔍 Search", type="primary", use_container_width=False):
 if st.session_state.search_results:
     st.markdown("---")
     
-    # Header with toggle
-    col_header, col_toggle = st.columns([3, 1])
-    with col_header:
-        st.subheader("Search Results")
-    with col_toggle:
-        show_frames = st.checkbox("Show frames", value=True, help="Fetch and display frame images (for testing/debugging)")
+    st.subheader("Search Results")
     
     results = st.session_state.search_results
     
