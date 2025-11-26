@@ -43,7 +43,7 @@ class R2Connector:
         
         logger.info(f"Initialized R2Connector for bucket: {self.bucket_name}")
     
-    def sanitize_filename(self, filename: str) -> str:
+    def _sanitize_filename(self, filename: str) -> str:
         """
         Sanitize filename to prevent directory traversal attacks.
         
@@ -167,7 +167,7 @@ class R2Connector:
         """
         try:
             # sanitize filename to prevent directory traversal attacks
-            filename = self.sanitize_filename(filename)
+            filename = self._sanitize_filename(filename)
 
             # Append timestamp to filename to ensure uniqueness
             import time
