@@ -7,7 +7,6 @@ similar content.
 
 import logging
 from typing import List, Dict, Any, Optional
-import numpy as np
 
 from database.pinecone_connector import PineconeConnector
 from search.embedder import TextEmbedder
