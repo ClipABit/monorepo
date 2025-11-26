@@ -1,7 +1,6 @@
 import logging
 from fastapi import UploadFile, HTTPException
 import modal
-import cv2
 
 # Constants
 PINECONE_CHUNKS_INDEX = "chunks-index"
