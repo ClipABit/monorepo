@@ -74,7 +74,7 @@ def poll_job_status(job_id: str, max_wait: int = 120, status_placeholder=None):
                     status_placeholder.warning(f"⚠ Checking status... ({elapsed}s elapsed)")
             
             time.sleep(2)
-        except requests.RequestException as e:
+        except requests.RequestException:
             if status_placeholder:
                 status_placeholder.warning(f"⚠ Connection issue, retrying... ({elapsed}s elapsed)")
             time.sleep(2)
