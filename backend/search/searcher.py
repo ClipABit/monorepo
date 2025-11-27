@@ -6,7 +6,7 @@ similar content.
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 from database.pinecone_connector import PineconeConnector
 from search.embedder import TextEmbedder
@@ -31,7 +31,7 @@ class Searcher:
         self,
         api_key: str,
         index_name: str,
-        namespace: str = ""
+        namespace: str = "__default__"
     ):
         """
         Initialize searcher with Pinecone connection.
@@ -57,25 +57,23 @@ class Searcher:
     def search(
         self,
         query: str,
-        top_k: int = 5,
-        filters: Optional[Dict[str, Any]] = None
+        top_k: int = 5
     ) -> List[Dict[str, Any]]:
         """
         Search for semantically similar content.
-        
+
         Args:
             query: Natural language search query
             top_k: Number of results to return (default: 5)
-            filters: Optional metadata filters (e.g., {"source": "video_123"})
-        
+
         Returns:
             List of matches with scores and metadata, sorted by similarity
-            
+
         Example:
             results = searcher.search("cooking in kitchen", top_k=3)
             for result in results:
                 print(f"Score: {result['score']}")
-                print(f"Text: {result['metadata']['text']}")
+                print(f"Metadata: {result['metadata']}")
         """
         logger.info(f"Searching for: '{query}' (top_k={top_k})")
         
@@ -86,8 +84,7 @@ class Searcher:
         matches = self.connector.query_chunks(
             query_embedding=query_embedding,
             namespace=self.namespace,
-            top_k=top_k,
-            metadata_filter=filters
+            top_k=top_k
         )
         
         # Format results
