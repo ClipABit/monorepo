@@ -27,7 +27,7 @@ GET_FRAME_API_URL = "https://clipabit01--clipabit-server-get-frame-dev.modal.run
 def search_videos(query: str):
     """Send search query to backend."""
     try:
-        resp = requests.post(SEARCH_API_URL, json={"query": query, "top_k": 10}, timeout=30)
+        resp = requests.get(SEARCH_API_URL, params={"query": query}, timeout=30)
         if resp.status_code == 200:
             return resp.json()
         else:
