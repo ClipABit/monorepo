@@ -282,52 +282,42 @@ class Server:
         }
 
     
-    @modal.fastapi_endpoint(method="POST")
-    async def search(self, payload: dict):
+    @modal.fastapi_endpoint(method="GET")
+    async def search(self, query: str):
         """
         Search endpoint - accepts a text query and returns semantic search results.
-        
-        # payload: dict with keys:
-        #   - query (str): The search query string (required)
-        #   - top_k (int, optional): Number of top results to return (default: 10)
-        #   - filters (dict, optional): Metadata filters for search (default: None)
-        # Returns: dict with 'query', 'results', 'stats', and 'timing'.
+
+        Args:
+        - query (str): The search query string (required)
+        - top_k (int, optional): Number of top results to return (default: 10)
+
+        Returns: dict with 'query', 'results', and 'timing'.
         """
         try:
             import time
             t_start = time.perf_counter()
-            
+
             # Parse request
-            query = payload.get("query", "").strip()
             if not query:
-                raise HTTPException(status_code=400, detail="Missing 'query' in request body")
-            
-            top_k = int(payload.get("top_k", 10))
-            if top_k <= 0:
-                top_k = 10
-            
-            filters = payload.get("filters")
-            logger.info(f"[Search] Query: '{query}' | top_k={top_k} | filters={filters}")
-            
+                raise HTTPException(status_code=400, detail="Missing 'query' parameter")
+
+            top_k = 10
+            logger.info(f"[Search] Query: '{query}' | top_k={top_k}")
+
             # Execute semantic search
             results = self.searcher.search(
                 query=query,
-                top_k=top_k,
-                filters=filters
+                top_k=top_k
             )
             
             t_done = time.perf_counter()
             
             # Log chunk-level results only
             logger.info(f"[Search] Found {len(results)} chunk-level results in {t_done - t_start:.3f}s")
-            
-            # Get index stats
-            stats = self.pinecone_connector.get_stats(namespace="")
-            
+
             return {
                 "query": query,
                 "results": results,
-                "stats": stats,
                 "timing": {
                     "total_s": round(t_done - t_start, 3)
                 }
