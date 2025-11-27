@@ -62,20 +62,20 @@ class R2Connector:
             raise ValueError("Sanitized filename is empty. Please provide a valid filename.")
         return filename
 
-    def _encode_path(self, bucket_name: str, user_id: str, filename: str) -> str:
+    def _encode_path(self, bucket_name: str, namespace: str, filename: str) -> str:
         """
         Encode bucket name, user ID, and filename into a URL-safe identifier.
         
         Args:
             bucket_name: Name of the R2 bucket
-            user_id: User identifier
+            namespace: Namespace (web client name or user/project)
             filename: Name of the video file
         
         Returns:
             str: URL-safe base64-encoded identifier
         """
         # Create the full path string
-        path = f"{bucket_name}/{user_id}/{filename}"
+        path = f"{bucket_name}/{namespace}/{filename}"
         
         # Convert to base64 for URL-safe representation
         encoded = base64.urlsafe_b64encode(path.encode('utf-8')).decode('utf-8').rstrip('=')
@@ -88,7 +88,7 @@ class R2Connector:
         Args:
             identifier: The base64-encoded identifier
         Returns:
-            Tuple[str, str, str]: (bucket_name, user_id, filename)
+            Tuple[str, str, str]: (bucket_name, namespace, filename)
         """
         # Add padding if necessary
         padding = '=' * (-len(identifier) % 4)
@@ -100,8 +100,8 @@ class R2Connector:
         if len(parts) != 3:
             raise ValueError("Invalid identifier format")
         
-        bucket_name, user_id, filename = parts
-        return bucket_name, user_id, filename
+        bucket_name, namespace, filename = parts
+        return bucket_name, namespace, filename
     
     def _get_object_key_from_identifier(self, identifier: str) -> Optional[str]:
         """
@@ -115,7 +115,7 @@ class R2Connector:
         """
         try:
             # Decode the identifier
-            bucket_name, user_id, filename = self._decode_path(identifier)
+            bucket_name, namespace, filename = self._decode_path(identifier)
             
             # Validate bucket name matches
             if bucket_name != self.bucket_name:
@@ -123,7 +123,7 @@ class R2Connector:
                 return None
             
             # Construct object key
-            object_key = f"{user_id}/{filename}"
+            object_key = f"{namespace}/{filename}"
             logger.info(f"Decoded identifier to object key: {object_key}")
             return object_key
             
@@ -316,9 +316,9 @@ class R2Connector:
                     except ClientError as e:
                         logger.error(f"Error processing video {object_key}: {e}")
             
-            logger.info(f"Fetched data for {len(video_data_list)} videos for user {user_id}")
+            logger.info(f"Fetched data for {len(video_data_list)} videos for user {namespace}")
             return video_data_list
             
         except ClientError as e:
-            logger.error(f"Error listing objects for user {user_id}: {e}")
+            logger.error(f"Error listing objects for user {namespace}: {e}")
             return []
