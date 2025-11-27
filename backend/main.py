@@ -268,3 +268,22 @@ class Server:
             "status": "success",
             # "signed_url": signed_url
         }
+
+    @modal.fastapi_endpoint(method="GET")
+    async def list_videos(self, namespace: str = "__default__"):
+        """
+        List all videos for a specific namespace (user_id).
+        Returns a list of video data objects containing filename, identifier, and presigned URL.
+        """
+        logger.info(f"[List Videos] Fetching videos for namespace: {namespace}")
+        
+        try:
+            video_data = self.r2_connector.fetch_all_video_data(user_id=namespace)
+            return {
+                "status": "success",
+                "namespace": namespace,
+                "videos": video_data
+            }
+        except Exception as e:
+            logger.error(f"[List Videos] Error fetching videos: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
