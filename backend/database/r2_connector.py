@@ -155,7 +155,7 @@ class R2Connector:
         self,
         video_data: bytes,
         filename: str,
-        directory: str = "__default__" # corresponds to pinecone namespace
+        namespace: str = "__default__" # corresponds to pinecone namespace
     ) -> Tuple[bool, str]:
         """
         Upload a video to R2 storage and return a hashed identifier.
@@ -163,26 +163,26 @@ class R2Connector:
         Args:
             video_data: The video file as bytes
             filename: Name of the video file
-            directory: User ID to organize videos (default: "__default__")
+            namespace: Namespace to organize videos (default: "__default__")
         
         Returns:
             Tuple[bool, str]: (Success flag, hashed identifier or error message)
         """
         try:
-            # sanitize filename to prevent directory traversal attacks
             filename = self._sanitize_filename(filename)
-           # Append timestamp to filename to ensure uniqueness
+            
+            # Append timestamp to filename to ensure uniqueness
             import time
             filename = f"{int(time.time())}_{filename}"
             
             # Create encoded identifier
-            identifier = self._encode_path(self.bucket_name, directory, filename)
+            identifier = self._encode_path(self.bucket_name, namespace, filename)
             
             # Determine file MIME type
             content_type = self._determine_content_type(filename)
 
-            # Construct the object key (directory/filename)
-            object_key = f"{directory}/{filename}"
+            # Construct the object key (namespace/filename)
+            object_key = f"{namespace}/{filename}"
 
             # Upload the video
             self.s3_client.put_object(
@@ -262,13 +262,13 @@ class R2Connector:
             logger.error(f"Error generating presigned URL: {e}")
             return None
 
-    def fetch_all_video_data(self, directory: str = "__default__", expiration: int = 3600) -> list[dict]:
+    def fetch_all_video_data(self, namespace: str = "__default__", expiration: int = 3600) -> list[dict]:
         """
-        Fetch all video data for a directory, including filenames, identifiers, and presigned URLs.
+        Fetch all video data for a namespace, including filenames, identifiers, and presigned URLs.
         For WEB this will be the web client name, and for PLUGIN this will be user/project
         
         Args:
-            directory: The directory name
+            namespace: The namespace name
             expiration: URL expiration time in seconds (default: 1 hour)
         
         Returns:
@@ -276,8 +276,8 @@ class R2Connector:
         """
         video_data_list = []
         try:
-            # Ensure directory ends with /
-            prefix = f"{directory}/"
+            # Ensure namespace ends with /
+            prefix = f"{namespace}/"
             
             paginator = self.s3_client.get_paginator('list_objects_v2')
             
@@ -294,11 +294,11 @@ class R2Connector:
                         
                     try:
                         # Extract filename from object key
-                        # object_key is directory/filename
+                        # object_key is namespace/filename
                         filename = object_key.split('/', 1)[1]
                         
                         # Generate hashed identifier
-                        identifier = self._encode_path(self.bucket_name, directory, filename)
+                        identifier = self._encode_path(self.bucket_name, namespace, filename)
                         
                         # Generate presigned URL directly from object key
                         url = self.s3_client.generate_presigned_url(
