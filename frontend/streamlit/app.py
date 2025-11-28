@@ -6,7 +6,7 @@ import streamlit as st
 
 # Page configuration
 st.set_page_config(
-    page_title="ClipABit - Semantic Video Search",
+    page_title="ClipABit",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -14,14 +14,12 @@ st.set_page_config(
 # Initialize session state
 if 'search_results' not in st.session_state:
     st.session_state.search_results = None
-if 'show_upload' not in st.session_state:
-    st.session_state.show_upload = False
 
 # API endpoints
 SEARCH_API_URL = "https://clipabit01--clipabit-server-search-dev.modal.run"
 UPLOAD_API_URL = "https://clipabit01--clipabit-server-upload-dev.modal.run"
 STATUS_API_URL = "https://clipabit01--clipabit-server-status-dev.modal.run"
-GET_FRAME_API_URL = "https://clipabit01--clipabit-server-get-frame-dev.modal.run"
+LIST_VIDEOS_API_URL = "https://clipabit01--clipabit-server-list-videos-dev.modal.run"
 
 
 def search_videos(query: str):
@@ -36,6 +34,19 @@ def search_videos(query: str):
         return {"error": str(e)}
 
 
+@st.cache_data(ttl=60, show_spinner="Fetching all videos in repository...")
+def fetch_all_videos():
+    """Fetch all videos from the backend."""
+    try:
+        resp = requests.get(LIST_VIDEOS_API_URL, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("videos", [])
+        return []
+    except requests.RequestException:
+        return []
+
+
 def upload_file_to_backend(file_bytes: bytes, filename: str, content_type: str | None = None):
     """Upload file to backend via multipart form-data."""
     files = {"file": (filename, io.BytesIO(file_bytes), content_type or "application/octet-stream")}
@@ -43,46 +54,8 @@ def upload_file_to_backend(file_bytes: bytes, filename: str, content_type: str |
     return resp
 
 
-def poll_job_status(job_id: str, max_wait: int = 120, status_placeholder=None):
-    """Poll job status until complete or timeout."""
-    start_time = time.time()
-    poll_count = 0
-    
-    while time.time() - start_time < max_wait:
-        poll_count += 1
-        elapsed = int(time.time() - start_time)
-        
-        try:
-            resp = requests.get(f"{STATUS_API_URL}?job_id={job_id}", timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                status = data.get("status", "unknown")
-                
-                # Update status display
-                if status_placeholder:
-                    if status == "processing":
-                        status_placeholder.info(f"⏳ Processing... ({elapsed}s elapsed, poll #{poll_count})")
-                    elif status == "completed":
-                        status_placeholder.success(f"✓ Processing complete! (took {elapsed}s)")
-                    elif status == "failed":
-                        status_placeholder.error(f"✗ Processing failed after {elapsed}s")
-                
-                if status in ["completed", "failed"]:
-                    return data
-            else:
-                if status_placeholder:
-                    status_placeholder.warning(f"⚠ Checking status... ({elapsed}s elapsed)")
-            
-            time.sleep(2)
-        except requests.RequestException:
-            if status_placeholder:
-                status_placeholder.warning(f"⚠ Connection issue, retrying... ({elapsed}s elapsed)")
-            time.sleep(2)
-    
-    return {"job_id": job_id, "status": "timeout", "message": "Job polling timed out"}
-
-
 # Upload dialog
+@st.fragment
 @st.dialog("Upload Video")
 def upload_dialog():
     st.write("Upload a video to add it to the searchable database.")
@@ -106,65 +79,23 @@ def upload_dialog():
         
         with col1:
             if st.button("Upload", type="primary", use_container_width=True):
-                try:
-                    # Upload phase
-                    with st.spinner("📤 Uploading video to server..."):
+                with st.spinner("Uploading..."):
+                    try:
                         resp = upload_file_to_backend(uploaded_bytes, uploaded.name, uploaded.type)
-                    
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data.get("status") == "processing":
-                            job_id = data.get("job_id")
-                            st.success(f"✓ Video uploaded! Job ID: `{job_id}`")
-                            
-                            st.markdown("---")
-                            st.subheader("Processing Status")
-                            st.caption("This may take a few minutes depending on video length...")
-                            
-                            # Create placeholder for live status updates
-                            status_placeholder = st.empty()
-                            status_placeholder.info("⏳ Starting video processing...")
-                            
-                            # Poll for completion with live updates
-                            result = poll_job_status(job_id, max_wait=120, status_placeholder=status_placeholder)
-                            
-                            st.markdown("---")
-                            
-                            if result.get("status") == "completed":
-                                st.success("🎉 Video processing complete!")
-                                
-                                # Display results
-                                st.subheader("Processing Results")
-                                col_a, col_b, col_c = st.columns(3)
-                                with col_a:
-                                    st.metric("Video Chunks", result.get("chunks", 0))
-                                with col_b:
-                                    st.metric("Frames Embedded", result.get("total_frames", 0))
-                                with col_c:
-                                    st.metric("Memory Used", f"{result.get('total_memory_mb', 0):.1f} MB")
-                                
-                                st.info("✨ Video frames are now searchable! Close this dialog and try searching for content.")
-                                
-                                with st.expander("📊 View detailed processing info"):
-                                    st.json(result)
-                                
-                            elif result.get("status") == "failed":
-                                st.error(f"❌ Processing failed: {result.get('error', 'Unknown error')}")
-                                with st.expander("View error details"):
-                                    st.json(result)
-                            elif result.get("status") == "timeout":
-                                st.warning("⏰ Processing timed out (120s limit reached). The job may still be running in the background.")
-                                st.info(f"You can manually check status at: {STATUS_API_URL}?job_id={job_id}")
+                        
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if data.get("status") == "processing":
+                                job_id = data.get("job_id")
+                                st.toast(f"Video uploaded! Job ID: {job_id}")
+                                time.sleep(1)
+                                st.rerun()
                             else:
-                                st.warning(f"⚠ Unknown status: {result.get('status', 'unknown')}")
-                                st.json(result)
+                                st.error("Upload failed")
                         else:
-                            st.error("❌ Upload failed - unexpected response")
-                            st.json(data)
-                    else:
-                        st.error(f"Upload failed with status {resp.status_code}")
-                except requests.RequestException as e:
-                    st.error(f"Upload failed: {e}")
+                            st.error(f"Upload failed with status {resp.status_code}")
+                    except requests.RequestException as e:
+                        st.error(f"Upload failed: {e}")
         
         with col2:
             if st.button("Cancel", use_container_width=True):
@@ -172,81 +103,98 @@ def upload_dialog():
 
 
 # Main UI
-col_title, col_stats = st.columns([3, 1])
-with col_title:
-    st.title("🎬 ClipABit")
-    st.subheader("Semantic Video Search")
-with col_stats:
-    # Show database stats if we have search results
-    if st.session_state.search_results and 'stats' in st.session_state.search_results:
-        stats = st.session_state.search_results['stats']
-        st.metric("Vectors in DB", f"{stats.get('namespace_vectors', 0):,}")
+st.title("ClipABit")
+st.subheader("Semantic Video Search - Demo")
 
-# Header with search and upload button
-col1, col2 = st.columns([5, 1])
+# Upload button row
+up_col1, up_col2 = st.columns([1, 7])
+with up_col1:
+    if st.button("Upload", use_container_width=True):
+        upload_dialog()
+        
+# insert vertical spaces
+st.write("")
+st.write("")
+
+# Header with search and clear button
+col1, col2, col3 = st.columns([6, 1, 1])
 
 with col1:
     search_query = st.text_input(
-        "Search for video content",
-        placeholder="e.g., 'a woman walking on a train platform'",
+        "Search",
+        placeholder="Search for video content...",
         label_visibility="collapsed"
     )
 
 with col2:
-    if st.button("📤 Upload", use_container_width=True):
-        upload_dialog()
-
-# Search button
-if st.button("🔍 Search", type="primary", use_container_width=False):
-    if search_query:
-        with st.spinner("Searching..."):
-            results = search_videos(search_query)
-            st.session_state.search_results = results
-    else:
-        st.warning("Please enter a search query")
-
-# Display results
-if st.session_state.search_results:
-    st.markdown("---")
-    
-    # Header with toggle
-    col_header, col_toggle = st.columns([3, 1])
-    with col_header:
-        st.subheader("Search Results")
-    with col_toggle:
-        show_frames = st.checkbox("Show frames", value=True, help="Fetch and display frame images (for testing/debugging)")
-    
-    results = st.session_state.search_results
-    
-    if "error" in results:
-        st.error(f"Error: {results['error']}")
-    else:
-        # Display query echo
-        if "query" in results:
-            st.info(f"Query: {results['query']}")
-        
-        # Display results
-        search_results = results.get('results', [])
-        if search_results:
-            for i, result in enumerate(search_results, 1):
-                metadata = result.get('metadata', {})
-                score = result.get('score', 0)
-                result_id = result.get('id', '')
-                with st.container():
-                    st.markdown(f"### Result {i} - Score: {score:.3f}")
-                    st.write(f"- Chunk ID: `{metadata.get('chunk_id', 'N/A')}`")
-                    st.write(f"- Video ID: `{metadata.get('video_id', 'N/A')}`")
-                    st.write(f"- Duration: **{metadata.get('duration', 0):.2f}s**")
-                    st.write(f"- Start Time: {metadata.get('start_time_s', 0):.2f}s")
-                    st.write(f"- End Time: {metadata.get('end_time_s', 0):.2f}s")
-                    st.write(f"- Frame Count: {metadata.get('frame_count', 0)}")
-                    st.write(f"- Complexity Score: {metadata.get('complexity_score', metadata.get('complexity', 0)):.3f}")
-                    st.write(f"- Filename: {metadata.get('file_filename', 'N/A')}")
-                    st.write(f"- File Type: {metadata.get('file_type', 'N/A')}")
-                    st.write(f"- Processed At: {metadata.get('processed_at', 'N/A')}")
-                    st.markdown("---")
+    if st.button("Search", type="primary", use_container_width=True):
+        if search_query:
+            with st.spinner("Searching..."):
+                results = search_videos(search_query)
+                st.session_state.search_results = results
         else:
-            st.info("No results found")
-        with st.expander("View raw JSON response"):
-            st.json(results)
-    st.caption("ClipABit - Powered by CLIP embeddings and semantic search")
+            st.warning("Please enter a search query")
+
+with col3:
+    if st.button("Clear", use_container_width=True):
+        st.session_state.search_results = None
+        st.rerun()
+
+
+st.markdown("---")
+
+# Custom CSS to force video containers to have a consistent aspect ratio
+st.markdown("""
+    <style>
+    .stVideo {
+        aspect-ratio: 16 / 9;
+        background-color: #000;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# Display results or repository
+if st.session_state.search_results:
+    st.subheader(f"Search Results for: '{search_query}'")
+    
+    results_data = st.session_state.search_results
+    
+    if "error" in results_data:
+        st.error(f"Error: {results_data['error']}")
+    elif "results" in results_data:
+        results = results_data["results"]
+        if results:
+            cols = st.columns(3)
+            for idx, result in enumerate(results):
+                metadata = result.get("metadata", {})
+                presigned_url = metadata.get("presigned_url")
+                start_time = metadata.get("start_time_s", 0)
+                filename = metadata.get("file_filename", "Unknown Video")
+                score = result.get("score", 0)
+                
+                if presigned_url:
+                    with cols[idx % 3]:
+                        st.caption(f"**{filename}** (Score: {score:.2f})")
+                        st.video(presigned_url, start_time=int(start_time))
+        else:
+            st.info("No matching videos found.")
+
+else:
+    st.subheader("Video Repository")
+    
+    # Fetch and display videos
+    videos = fetch_all_videos()
+    
+    if videos:
+        # Create a grid of videos
+        cols = st.columns(3)
+        for idx, video in enumerate(videos):
+            with cols[idx % 3]:
+                st.caption(f"**{video['file_name']}**")
+                st.video(video['presigned_url'])
+    else:
+        st.info("No videos found in the repository.")
+
+# Footer
+st.markdown("---")
+st.caption("ClipABit - Powered by CLIP embeddings and semantic search")
