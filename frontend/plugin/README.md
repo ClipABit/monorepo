@@ -16,6 +16,12 @@ First install all the necessary packages by running:
 uv pip install
 ```
 
+And make sure to install all the ui and requests library globally
+
+```bash
+pip install PyQt6
+```
+
 Then open a terminal in the utils directory for the plugin by running the below commands in the root directory of the project.
 
 ```bash
