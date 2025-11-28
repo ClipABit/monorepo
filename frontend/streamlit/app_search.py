@@ -102,27 +102,24 @@ def upload_dialog():
                 st.rerun()
 
 
-@st.dialog("Search Results", width="large")
-def search_results_dialog(query: str):
-    st.write(f"Results for: **{query}**")
-    
-    with st.spinner("Searching..."):
-        results = search_videos(query)
-    
-    if "error" in results:
-        st.error(f"Error: {results['error']}")
-    else:
-        # Display full JSON response for now as requested
-        # "Use the video name and hashed id wherever you need metadata/ids about the video in the frontend"
-        # Assuming search results will eventually return similar structures
-        st.json(results)
+
 
 
 # Main UI
 st.title("ClipABit")
 st.subheader("Semantic Video Search - Demo")
 
-# Header with search and upload button
+# Upload button row
+up_col1, up_col2 = st.columns([1, 7])
+with up_col1:
+    if st.button("Upload", use_container_width=True):
+        upload_dialog()
+        
+# insert vertical spaces
+st.write("")
+st.write("")
+
+# Header with search and clear button
 col1, col2, col3 = st.columns([6, 1, 1])
 
 with col1:
@@ -135,20 +132,19 @@ with col1:
 with col2:
     if st.button("Search", type="primary", use_container_width=True):
         if search_query:
-            search_results_dialog(search_query)
+            with st.spinner("Searching..."):
+                results = search_videos(search_query)
+                st.session_state.search_results = results
         else:
             st.warning("Please enter a search query")
 
 with col3:
-    if st.button("Upload", use_container_width=True):
-        upload_dialog()
+    if st.button("Clear", use_container_width=True):
+        st.session_state.search_results = None
+        st.rerun()
 
 
 st.markdown("---")
-st.subheader("Video Repository")
-
-# Fetch and display videos
-videos = fetch_all_videos()
 
 # Custom CSS to force video containers to have a consistent aspect ratio
 st.markdown("""
@@ -160,14 +156,47 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-if videos:
-    # Create a grid of videos
-    cols = st.columns(3)
-    for idx, video in enumerate(videos):
-        with cols[idx % 3]:
-            st.video(video['presigned_url'])
+# Display results or repository
+if st.session_state.search_results:
+    st.subheader(f"Search Results for: '{search_query}'")
+    
+    results_data = st.session_state.search_results
+    
+    if "error" in results_data:
+        st.error(f"Error: {results_data['error']}")
+    elif "results" in results_data:
+        results = results_data["results"]
+        if results:
+            cols = st.columns(3)
+            for idx, result in enumerate(results):
+                metadata = result.get("metadata", {})
+                presigned_url = metadata.get("presigned_url")
+                start_time = metadata.get("start_time_s", 0)
+                filename = metadata.get("file_filename", "Unknown Video")
+                score = result.get("score", 0)
+                
+                if presigned_url:
+                    with cols[idx % 3]:
+                        st.caption(f"**{filename}** (Score: {score:.2f})")
+                        st.video(presigned_url, start_time=int(start_time))
+        else:
+            st.info("No matching videos found.")
+
 else:
-    st.info("No videos found in the repository.")
+    st.subheader("Video Repository")
+    
+    # Fetch and display videos
+    videos = fetch_all_videos()
+    
+    if videos:
+        # Create a grid of videos
+        cols = st.columns(3)
+        for idx, video in enumerate(videos):
+            with cols[idx % 3]:
+                st.caption(f"**{video['file_name']}**")
+                st.video(video['presigned_url'])
+    else:
+        st.info("No videos found in the repository.")
 
 # Footer
 st.markdown("---")

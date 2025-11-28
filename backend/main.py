@@ -86,25 +86,18 @@ class Server:
         self.video_embedder = VideoEmbedder()
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
-        
-        # Frame storage for testing/debugging (stores PIL Images as base64)
-        self.frame_store = modal.Dict.from_name("clipabit-frames", create_if_missing=True)
-        
-        # Initialize semantic searcher
-        self.searcher = Searcher(
-            api_key=PINECONE_API_KEY,
-            index_name=PINECONE_CHUNKS_INDEX,
-            namespace=""  # Use default namespace
-        )
-        logger.info(f"Searcher initialized (device: {self.searcher.device})")
-        
-        # Removed FrameEmbedder initialization
 
         self.r2_connector = R2Connector(
             account_id=R2_ACCOUNT_ID,
             access_key_id=R2_ACCESS_KEY_ID,
             secret_access_key=R2_SECRET_ACCESS_KEY,
             environment=ENVIRONMENT
+        )
+        
+        self.searcher = Searcher(
+            api_key=PINECONE_API_KEY,
+            index_name=PINECONE_CHUNKS_INDEX,
+            r2_connector=self.r2_connector
         )
 
         logger.info("Container modules initialized and ready!")

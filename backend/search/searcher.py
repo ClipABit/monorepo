@@ -6,9 +6,10 @@ similar content.
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from database.pinecone_connector import PineconeConnector
+from database.r2_connector import R2Connector
 from search.embedder import TextEmbedder
 
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +32,7 @@ class Searcher:
         self,
         api_key: str,
         index_name: str,
+        r2_connector: Optional[R2Connector] = None,
         namespace: str = "__default__"
     ):
         """
@@ -39,10 +41,12 @@ class Searcher:
         Args:
             api_key: Pinecone API key
             index_name: Name of Pinecone index to search
+            r2_connector: Instance of R2Connector for generating URLs
             namespace: Optional namespace for partitioning data
         """
         self.embedder = TextEmbedder()
         self.connector = PineconeConnector(api_key=api_key, index_name=index_name)
+        self.r2_connector = r2_connector
         self.namespace = namespace
         
         logger.info(
@@ -90,10 +94,20 @@ class Searcher:
         # Format results
         results = []
         for match in matches:
+            metadata = match.get('metadata', {})
+            
+            # Generate presigned URL if identifier exists
+            presigned_url = None
+            if 'file_hashed_identifier' in metadata and self.r2_connector:
+                presigned_url = self.r2_connector.generate_presigned_url(
+                    identifier=metadata['file_hashed_identifier']
+                )
+                metadata['presigned_url'] = presigned_url
+            
             result = {
                 'id': match.get('id'),
                 'score': match.get('score', 0.0),
-                'metadata': match.get('metadata', {})
+                'metadata': metadata
             }
             results.append(result)
         
