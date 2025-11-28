@@ -3,7 +3,7 @@
 Video processing app split into backend and frontend.
 
 - `/backend` - Modal-hosted FastAPI service that processes videos
-- `/frontend/web` - Streamlit uploader UI
+- `/frontend/streamlit` - Streamlit technical demo frontend
 - `/frontend/plugin` - DaVinci Resolve plugin (coming soon)
 
 ## Running Locally
@@ -17,7 +17,7 @@ uv sync
 uv run modal serve main.py
 
 # Terminal 2: Frontend
-cd frontend/web
+cd frontend/streamlit
 uv sync
 uv run streamlit run app.py
 ```
