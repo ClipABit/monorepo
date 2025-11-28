@@ -37,7 +37,7 @@ class Searcher:
     ):
         """
         Initialize searcher with Pinecone connection.
-        
+
         Args:
             api_key: Pinecone API key
             index_name: Name of Pinecone index to search
@@ -95,7 +95,7 @@ class Searcher:
         results = []
         for match in matches:
             metadata = match.get('metadata', {})
-            
+
             # Generate presigned URL if identifier exists
             presigned_url = None
             if 'file_hashed_identifier' in metadata and self.r2_connector:
@@ -103,7 +103,7 @@ class Searcher:
                     identifier=metadata['file_hashed_identifier']
                 )
                 metadata['presigned_url'] = presigned_url
-            
+
             result = {
                 'id': match.get('id'),
                 'score': match.get('score', 0.0),

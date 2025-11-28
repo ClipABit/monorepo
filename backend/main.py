@@ -93,7 +93,7 @@ class Server:
             secret_access_key=R2_SECRET_ACCESS_KEY,
             environment=ENVIRONMENT
         )
-        
+
         self.searcher = Searcher(
             api_key=PINECONE_API_KEY,
             index_name=PINECONE_CHUNKS_INDEX,
@@ -320,7 +320,7 @@ class Server:
         except Exception as e:
             logger.error(f"[Search] Error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
-        
+
     @modal.fastapi_endpoint(method="GET")
     async def list_videos(self, namespace: str = "__default__"):
         """
@@ -328,7 +328,7 @@ class Server:
         Returns a list of video data objects containing filename, identifier, and presigned URL.
         """
         logger.info(f"[List Videos] Fetching videos for namespace: {namespace}")
-        
+
         try:
             video_data = self.r2_connector.fetch_all_video_data(namespace)
             return {
