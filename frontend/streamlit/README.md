@@ -1,6 +1,6 @@
 # ClipABit Web Client
 
-Simple Streamlit interface for uploading videos to the backend. That's it.
+Streamlit interface for ClipABit technical demo. Supports uploading and searching through videos in a demo repository 
 
 ## Quick Start
 
@@ -16,8 +16,6 @@ Opens at `http://localhost:8501`. Make sure the backend is running first.
 
 ## What It Does
 
-- Lets you paste in your Modal backend URL (or uses the default)
-- Upload a video file
-- Shows you the response from the backend
-
-The app sends a multipart POST request with the video as a `file` field. Backend handles the rest.
+- Let's you view all the videos in the demo repository
+- Semantically search through those videos using the search field (Try it out!)
+- Upload your own videos to get processed with our embedding engine and become available to search through
