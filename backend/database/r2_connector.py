@@ -11,6 +11,9 @@ class R2Connector:
     """
     R2 Connector Class for managing Cloudflare R2 storage interactions.
     Supports uploading videos to folders and retrieving them by hashed identifiers.
+
+    Web client videos are stored under folders named after the web client name.
+    Plugin client videos are stored under folders named after the user/project.
     """
     
     def __init__(
@@ -59,20 +62,20 @@ class R2Connector:
             raise ValueError("Sanitized filename is empty. Please provide a valid filename.")
         return filename
 
-    def _encode_path(self, bucket_name: str, user_id: str, filename: str) -> str:
+    def _encode_path(self, bucket_name: str, namespace: str, filename: str) -> str:
         """
         Encode bucket name, user ID, and filename into a URL-safe identifier.
         
         Args:
             bucket_name: Name of the R2 bucket
-            user_id: User identifier
+            namespace: Namespace (web client name or user/project)
             filename: Name of the video file
         
         Returns:
             str: URL-safe base64-encoded identifier
         """
         # Create the full path string
-        path = f"{bucket_name}/{user_id}/{filename}"
+        path = f"{bucket_name}/{namespace}/{filename}"
         
         # Convert to base64 for URL-safe representation
         encoded = base64.urlsafe_b64encode(path.encode('utf-8')).decode('utf-8').rstrip('=')
@@ -85,7 +88,7 @@ class R2Connector:
         Args:
             identifier: The base64-encoded identifier
         Returns:
-            Tuple[str, str, str]: (bucket_name, user_id, filename)
+            Tuple[str, str, str]: (bucket_name, namespace, filename)
         """
         # Add padding if necessary
         padding = '=' * (-len(identifier) % 4)
@@ -97,8 +100,8 @@ class R2Connector:
         if len(parts) != 3:
             raise ValueError("Invalid identifier format")
         
-        bucket_name, user_id, filename = parts
-        return bucket_name, user_id, filename
+        bucket_name, namespace, filename = parts
+        return bucket_name, namespace, filename
     
     def _get_object_key_from_identifier(self, identifier: str) -> Optional[str]:
         """
@@ -112,7 +115,7 @@ class R2Connector:
         """
         try:
             # Decode the identifier
-            bucket_name, user_id, filename = self._decode_path(identifier)
+            bucket_name, namespace, filename = self._decode_path(identifier)
             
             # Validate bucket name matches
             if bucket_name != self.bucket_name:
@@ -120,7 +123,7 @@ class R2Connector:
                 return None
             
             # Construct object key
-            object_key = f"{user_id}/{filename}"
+            object_key = f"{namespace}/{filename}"
             logger.info(f"Decoded identifier to object key: {object_key}")
             return object_key
             
@@ -152,7 +155,7 @@ class R2Connector:
         self,
         video_data: bytes,
         filename: str,
-        user_id: str = "__default__"
+        namespace: str = "__default__" # corresponds to pinecone namespace
     ) -> Tuple[bool, str]:
         """
         Upload a video to R2 storage and return a hashed identifier.
@@ -160,27 +163,26 @@ class R2Connector:
         Args:
             video_data: The video file as bytes
             filename: Name of the video file
-            user_id: User ID to organize videos (default: "__default__")
+            namespace: Namespace to organize videos (default: "__default__")
         
         Returns:
             Tuple[bool, str]: (Success flag, hashed identifier or error message)
         """
         try:
-            # sanitize filename to prevent directory traversal attacks
             filename = self._sanitize_filename(filename)
-
+            
             # Append timestamp to filename to ensure uniqueness
             import time
             filename = f"{int(time.time())}_{filename}"
             
             # Create encoded identifier
-            identifier = self._encode_path(self.bucket_name, user_id, filename)
+            identifier = self._encode_path(self.bucket_name, namespace, filename)
             
             # Determine file MIME type
             content_type = self._determine_content_type(filename)
 
-            # Construct the object key (user_id/filename)
-            object_key = f"{user_id}/{filename}"
+            # Construct the object key (namespace/filename)
+            object_key = f"{namespace}/{filename}"
 
             # Upload the video
             self.s3_client.put_object(
@@ -260,23 +262,63 @@ class R2Connector:
             logger.error(f"Error generating presigned URL: {e}")
             return None
 
-    def generate_presigned_urls_batch(self, identifiers: list[str], expiration: int = 3600) -> dict[str, Optional[str]]:
+    def fetch_all_video_data(self, namespace: str = "__default__", expiration: int = 3600) -> list[dict]:
         """
-        Generate presigned URLs for multiple videos using their identifiers.
-        These can then be used to access videos directly without authentication.
+        Fetch all video data for a namespace, including filenames, identifiers, and presigned URLs.
+        For WEB this will be the web client name, and for PLUGIN this will be user/project
         
         Args:
-            identifiers: List of base64-encoded identifiers
+            namespace: The namespace name
             expiration: URL expiration time in seconds (default: 1 hour)
         
         Returns:
-            dict: Mapping of identifier to presigned URL (None if generation failed)
+            list[dict]: List of dictionaries containing file_name, hashed_identifier, and presigned_url
         """
-        results = {}
-        for identifier in identifiers:
-            presigned = self.generate_presigned_url(identifier, expiration)
-            results[identifier] = presigned
-        
-        successful = sum(1 for url in results.values() if url is not None)
-        logger.info(f"Generated {successful}/{len(identifiers)} presigned URLs")
-        return results
+        video_data_list = []
+        try:
+            # Ensure namespace ends with /
+            prefix = f"{namespace}/"
+            
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            
+            for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
+                if 'Contents' not in page:
+                    continue
+                
+                for obj in page['Contents']:
+                    object_key = obj['Key']
+                    
+                    # Skip if it's just the folder placeholder itself
+                    if object_key == prefix:
+                        continue
+                        
+                    try:
+                        # Extract filename from object key
+                        # object_key is namespace/filename
+                        filename = object_key.split('/', 1)[1]
+                        
+                        # Generate hashed identifier
+                        identifier = self._encode_path(self.bucket_name, namespace, filename)
+                        
+                        # Generate presigned URL directly from object key
+                        url = self.s3_client.generate_presigned_url(
+                            'get_object',
+                            Params={'Bucket': self.bucket_name, 'Key': object_key},
+                            ExpiresIn=expiration
+                        )
+                        
+                        if url:
+                            video_data_list.append({
+                                "file_name": filename,
+                                "hashed_identifier": identifier,
+                                "presigned_url": url
+                            })
+                    except ClientError as e:
+                        logger.error(f"Error processing video {object_key}: {e}")
+            
+            logger.info(f"Fetched data for {len(video_data_list)} videos for user {namespace}")
+            return video_data_list
+            
+        except ClientError as e:
+            logger.error(f"Error listing objects for user {namespace}: {e}")
+            return []
