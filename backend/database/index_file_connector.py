@@ -74,62 +74,6 @@ class IndexFileConnector:
         logger.info(f"Generated cluster ID: {cluster_id}")
         
         return cluster_id
-    
-    # Future extension for face embeddings
-
-    def link_chunk_to_cluster(self, chunk_id: str, cluster_id: str) -> None:
-        """
-        Link a chunk to a cluster.
-        
-        Args:
-            chunk_id: The chunk ID
-            cluster_id: The cluster ID to link to
-        """
-        d = self._get_dict()
-        
-        d[chunk_id] = cluster_id
-
-        # Get existing array of chunks linked to cluster or initialize to empty list
-        cluster_chunks = d.get(cluster_id, [])
-        
-        if chunk_id not in cluster_chunks:
-            cluster_chunks.append(chunk_id)
-        
-        d[cluster_id] = cluster_chunks
-    
-    def get_cluster_for_chunk(self, chunk_id: str) -> Optional[str]:
-        """
-        Get the cluster ID associated with a chunk.
-        
-        Args:
-            chunk_id: The chunk ID to look up
-            
-        Returns:
-            str: The cluster ID if found, None otherwise
-        """
-        d = self._get_dict()
-        cluster_id = d.get(chunk_id)
-        
-        if cluster_id and cluster_id.startswith("cluster_"):
-            return cluster_id
-        return None
-    
-    def get_chunks_for_cluster(self, cluster_id: str) -> Optional[list[str]]:
-        """
-        Get all chunk IDs associated with a cluster.
-        
-        Args:
-            cluster_id: The cluster ID to look up
-            
-        Returns:
-            list[str]: List of chunk IDs if found, None if cluster doesn't exist
-        """
-        d = self._get_dict()
-        chunks = d.get(cluster_id)
-        
-        if chunks and isinstance(chunks, list):
-            return chunks
-        return None
 
     def get_stats(self) -> Dict[str, int]:
         """
