@@ -26,11 +26,17 @@ image = (
             )
         )
 
-# Load secrets from .env file
-secrets = modal.Secret.from_dotenv(filename=".env")
+import os
+
+# Environment: "dev" (default) or "prod" (set via ENV variable)
+env = os.environ.get("ENV", "dev")
 
 # Create Modal app
-app = modal.App(name="ClipABit", image=image, secrets=[secrets])
+app = modal.App(
+    name=env,
+    image=image,
+    secrets=[modal.Secret.from_name(env)]
+)
 
 
 @app.cls()
