@@ -1,3 +1,4 @@
+import os
 import logging
 from fastapi import UploadFile, HTTPException
 import modal
@@ -25,8 +26,6 @@ image = (
                 "search",
             )
         )
-
-import os
 
 # Environment: "dev" (default) or "prod" (set via ENV variable)
 env = os.environ.get("ENV", "dev")
