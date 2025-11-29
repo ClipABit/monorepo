@@ -297,7 +297,7 @@ wheels = [
 [[package]]
 name = "clipabit-backend"
 version = "0.0.1"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "boto3" },
     { name = "fastapi", extra = ["standard"] },
