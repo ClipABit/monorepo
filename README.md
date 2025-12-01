@@ -19,7 +19,7 @@ uv run modal serve main.py
 # Terminal 2: Frontend
 cd frontend/streamlit
 uv sync
-uv run streamlit run app.py
+uv run streamlit run Home.py
 ```
 
 Backend runs on Modal, frontend opens at `localhost:8501`.
