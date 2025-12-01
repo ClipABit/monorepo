@@ -2,7 +2,7 @@ import io
 import time
 import requests
 import streamlit as st
-
+import streamlit.components.v1 as components
 
 # Page configuration
 st.set_page_config(
@@ -152,6 +152,14 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
+
+
+typeform_embed_code = """
+<div data-tf-live="01KB6RBC3Y1MB8QKBCM4ZNND0C"></div><script src="//embed.typeform.com/next/embed.js"></script>
+"""
+
+components.html(typeform_embed_code, height=500)
+
 
 # Display results or repository
 if st.session_state.search_results:
