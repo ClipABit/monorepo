@@ -27,8 +27,8 @@ image = (
             )
         )
 
-# Environment: "dev" (default) or "prod" (set via ENV variable)
-env = os.environ.get("ENV", "dev")
+# Environment: "dev" (default) or "prod" (set via ENVIRONMENT variable)
+env = os.environ.get("ENVIRONMENT", "dev")
 
 # Create Modal app
 app = modal.App(
