@@ -47,7 +47,7 @@ st.markdown(
 
         .hero-tagline {
             font-size: 0.9rem;
-            color: #D1D5DB;
+            color: #A0A1A0;
             margin-top: 0.4rem;
             margin-bottom: 0.6rem;
         }
@@ -55,35 +55,30 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-col1, col2 = st.columns([2, 1])
 
-with col1:
-    st.markdown('<div class="hero-title">Find the perfect clip in seconds.</div>', unsafe_allow_html=True)
-    st.markdown(
-        """
-        <div class="hero-subtitle">
-            ClipABit is like <b>Ctrl + F for your footage</b>.  
-            Search across hours of raw video using natural language and jump straight to the moments that matter.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        """
-        <div class="hero-tagline">
-            No more scrubbing timelines. No more guessing. Just type what you remember and we’ll find it.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+# Hero Section
+st.markdown('<div class="hero-title">Find the perfect clip in seconds.</div>', unsafe_allow_html=True)
+st.markdown(
+    """
+    <div class="hero-subtitle">
+        ClipABit is like <b>Ctrl + F for your footage</b>.  
+        Search across hours of raw video using natural language and jump straight to the moments that matter.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown(
+    """
+    <div class="hero-tagline">
+        No more scrubbing timelines. No more guessing. Just type what you remember and we’ll find it.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-    cta_col1, cta_col2 = st.columns([1, 1])
-    with cta_col1:
-        if st.button("🚀 Try the demo", use_container_width=True):
-            st.switch_page("pages/1_Search_Demo.py")  # adjust or remove if you don't use multipage
-    with cta_col2:
-        if st.button("💾 View our video repository", use_container_width=True):
-            st.switch_page("pages/2_Video_Repository.py")  # adjust or remove if you don't use multipage
+
+if st.button("🚀 Try the demo", width="stretch"):
+        st.switch_page("pages/1_Search_Demo.py")  # adjust or remove if you don't use multipage
 
 st.markdown("---")
 
@@ -92,11 +87,10 @@ st.subheader("What is ClipABit?")
 st.markdown(
     """
     <div class="clip-card">
-    Ever watched a YouTube behind-the-scenes and heard *“the edit took hours”*?
+    Ever watched a long YouTube video and thought about how hard editors had to work to find the right clips?
 
     **ClipABit** makes that process radically faster by letting editors:
-    - ⚡ **Upload your videos** for us to process them
-    - 🔍 **Search for whatever** - like a Google Search!
+    - 🔍 **Search for whatever** - like using Google!
     - 🧠 **Identify faces and people** thanks to our facial recognition algorithms
     </div>
     """,
@@ -108,7 +102,7 @@ st.markdown("---")
 # Section: Demo overview
 st.subheader("What’s in this demo?")
 
-demo_col1, demo_col2, demo_col3 = st.columns(3)
+demo_col1, demo_col2 = st.columns(2)
 
 with demo_col1:
     st.markdown(
@@ -130,22 +124,6 @@ with demo_col2:
     st.markdown(
         """
         <div class="clip-card">
-          <h3>📤 Upload your own footage</h3>
-          <p>Try your own content:</p>
-          <ul>
-            <li>Movie Clips</li>
-            <li>Vlogs & B-rolls</li>
-            <li>Tutorials or product demos</li>
-          </ul>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-with demo_col3:
-    st.markdown(
-        """
-        <div class="clip-card">
           <h3>🔎 Test search quality</h3>
           <p>Try prompts like:</p>
           <ul>
@@ -162,7 +140,7 @@ with demo_col3:
 st.markdown("---")
 
 # Section: What we're trying to do
-problem_col1, problem_col2 = st.columns([1.3, 1])
+problem_col1, problem_col2 = st.columns(2)
 
 with problem_col1:
     st.subheader("What problem are we solving?")
