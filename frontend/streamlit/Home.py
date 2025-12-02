@@ -1,5 +1,7 @@
 import streamlit as st
 
+CLIPABIT_EMAIL = "warrenxu2017@gmail.com"
+
 st.set_page_config(
     page_title="ClipABit",
     page_icon="🎬",
@@ -50,6 +52,37 @@ st.markdown(
             color: #A0A1A0;
             margin-top: 0.4rem;
             margin-bottom: 0.6rem;
+        }
+
+        /* Contact icon container */
+        .contact-icon-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        /* Link wrapper for icons */
+        .contact-icon-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+        }
+
+        /* Base styles for icon images and emojis */
+        .contact-icon-img,
+        .contact-icon-emoji {
+            transition: transform 0.18s ease-out, box-shadow 0.18s ease-out, opacity 0.18s ease-out;
+            opacity: 0.9;
+        }
+
+        /* Hover effect */
+        .contact-icon-link:hover .contact-icon-img,
+        .contact-icon-link:hover .contact-icon-emoji {
+            transform: translateY(-2px) scale(1.06);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+            opacity: 1;
         }
     </style>
     """,
@@ -174,6 +207,36 @@ with problem_col2:
         unsafe_allow_html=True,
     )
 
-# Footer
+# Contact Us & footer
 st.markdown("---")
+
+st.subheader("Contact us")
+st.markdown(
+    f"""
+    <div class="clip-card">
+        <p>Have feedback, feature ideas, or want to learn more? Check us out below!</p>
+        <div class="contact-icon-row">
+            <a class="contact-icon-link"
+                href="https://github.com/ClipABit"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="View on GitHub">
+                <img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+                     alt="GitHub"
+                     width="28"
+                     class="contact-icon-img"
+                     style="border-radius: 50%; display: block;">
+            </a>
+            <a  class="contact-icon-link"
+                href="mailto:{CLIPABIT_EMAIL}"
+                title="Email us"
+                style="text-decoration: none; font-size: 24px; display: flex; align-items: center;">
+                <span class="contact-icon-emoji" style="font-size: 24px; line-height: 1;">✉️</span>
+            </a>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.caption("ClipABit - Powered by CLIP embeddings and semantic search")
