@@ -1,6 +1,6 @@
 import streamlit as st
 
-CLIPABIT_EMAIL = "warrenxu2017@gmail.com"
+CLIPABIT_EMAIL = "clipabit01@gmail.com"
 
 st.set_page_config(
     page_title="ClipABit",
