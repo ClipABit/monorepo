@@ -21,16 +21,16 @@ class R2Connector:
         account_id: str,
         access_key_id: str,
         secret_access_key: str,
-        environment: str = "dev"  # dev, test, or prod
+        environment: str = "dev"  # dev or prod
     ):
         """
         Initialize R2 connector with bucket credentials.
-        
+
         Args:
             account_id: Cloudflare account ID
             access_key_id: R2 access key ID
             secret_access_key: R2 secret access key
-            environment: Environment name (dev/test/prod) which maps directly to bucket name
+            environment: Environment name (dev/prod) which maps directly to bucket name
         """
         self.bucket_name = environment
         self.endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
