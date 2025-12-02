@@ -2,6 +2,7 @@ import io
 import time
 import requests
 import streamlit as st
+from config import Config
 
 
 # Page configuration
@@ -15,17 +16,18 @@ st.set_page_config(
 if 'search_results' not in st.session_state:
     st.session_state.search_results = None
 
-# API endpoints
-SEARCH_API_URL = "https://clipabit01--clipabit-server-search-dev.modal.run"
-UPLOAD_API_URL = "https://clipabit01--clipabit-server-upload-dev.modal.run"
-STATUS_API_URL = "https://clipabit01--clipabit-server-status-dev.modal.run"
-LIST_VIDEOS_API_URL = "https://clipabit01--clipabit-server-list-videos-dev.modal.run"
+# API endpoints from config
+SEARCH_API_URL = Config.SEARCH_API_URL
+UPLOAD_API_URL = Config.UPLOAD_API_URL
+STATUS_API_URL = Config.STATUS_API_URL
+LIST_VIDEOS_API_URL = Config.LIST_VIDEOS_API_URL
+NAMESPACE = Config.NAMESPACE
 
 
 def search_videos(query: str):
     """Send search query to backend."""
     try:
-        resp = requests.get(SEARCH_API_URL, params={"query": query}, timeout=30)
+        resp = requests.get(SEARCH_API_URL, params={"query": query, "namespace": NAMESPACE}, timeout=30)
         if resp.status_code == 200:
             return resp.json()
         else:
@@ -38,7 +40,7 @@ def search_videos(query: str):
 def fetch_all_videos():
     """Fetch all videos from the backend."""
     try:
-        resp = requests.get(LIST_VIDEOS_API_URL, timeout=30)
+        resp = requests.get(LIST_VIDEOS_API_URL, params={"namespace": NAMESPACE}, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
             return data.get("videos", [])
@@ -50,7 +52,8 @@ def fetch_all_videos():
 def upload_file_to_backend(file_bytes: bytes, filename: str, content_type: str | None = None):
     """Upload file to backend via multipart form-data."""
     files = {"file": (filename, io.BytesIO(file_bytes), content_type or "application/octet-stream")}
-    resp = requests.post(UPLOAD_API_URL, files=files, timeout=300)
+    data = {"namespace": NAMESPACE}
+    resp = requests.post(UPLOAD_API_URL, files=files, data=data, timeout=300)
     return resp
 
 
