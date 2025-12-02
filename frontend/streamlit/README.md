@@ -1,6 +1,6 @@
 # ClipABit Web Client
 
-Streamlit interface for ClipABit technical demo. Supports uploading and searching through videos in a demo repository 
+Streamlit interface for ClipABit technical demo. Supports uploading and searching through videos in a demo repository
 
 ## Quick Start
 
