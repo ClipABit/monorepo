@@ -3,8 +3,11 @@ import logging
 from fastapi import UploadFile, HTTPException, Form
 import modal
 
-# Constants
-PINECONE_CHUNKS_INDEX = "chunks-index"
+# Pinecone index names per environment
+PINECONE_INDEX_MAP = {
+    "dev": "chunks-index",
+    "prod": "prod-chunks"
+}
 
 # Configure logging
 logging.basicConfig(
@@ -82,14 +85,18 @@ class Server:
             raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
         
         ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
-        if ENVIRONMENT not in ["dev", "test", "prod"]:
-            raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, test, prod")
+        if ENVIRONMENT not in ["dev", "prod"]:
+            raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod")
         logger.info(f"Running in environment: {ENVIRONMENT}")
+
+        # Select Pinecone index based on environment
+        pinecone_index = PINECONE_INDEX_MAP[ENVIRONMENT]
+        logger.info(f"Using Pinecone index: {pinecone_index}")
 
         # Instantiate classes
         self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
         self.video_embedder = VideoEmbedder()
-        self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
+        self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=pinecone_index)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
 
         self.r2_connector = R2Connector(
@@ -101,7 +108,7 @@ class Server:
 
         self.searcher = Searcher(
             api_key=PINECONE_API_KEY,
-            index_name=PINECONE_CHUNKS_INDEX,
+            index_name=pinecone_index,
             r2_connector=self.r2_connector
         )
 
