@@ -35,6 +35,7 @@ def fetch_all_videos():
         resp = requests.get(LIST_VIDEOS_API_URL, params={"namespace": NAMESPACE}, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
+            print(data)
             return data.get("videos", [])
         return []
     except requests.RequestException:
@@ -169,7 +170,9 @@ if st.session_state.search_results:
                 
                 if presigned_url:
                     with cols[idx % 3]:
-                        st.caption(f"**{filename}** (Score: {score:.2f})")
+                        with st.expander("Info"):
+                            st.write(f"**File:** {filename}")
+                            st.write(f"**Score:** {score:.2f}")
                         st.video(presigned_url, start_time=int(start_time))
         else:
             st.info("No matching videos found.")
@@ -179,13 +182,15 @@ else:
     
     # Fetch and display videos
     videos = fetch_all_videos()
+
     
     if videos:
         # Create a grid of videos
         cols = st.columns(3)
         for idx, video in enumerate(videos):
             with cols[idx % 3]:
-                st.caption(f"**{video['file_name']}**")
+                with st.expander("Info"):
+                    st.write(f"**File:** {video['file_name']}")
                 st.video(video['presigned_url'])
     else:
         st.info("No videos found in the repository.")
