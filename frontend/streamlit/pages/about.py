@@ -2,16 +2,6 @@ import streamlit as st
 
 CLIPABIT_EMAIL = "clipabit01@gmail.com"
 
-st.set_page_config(
-    page_title="ClipABit",
-    page_icon="🎬",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
-
-with st.sidebar:
-    st.success("☝️ Explore the demo and features")
-
 # Custom CSS for styling
 st.markdown(
     """
@@ -111,7 +101,7 @@ st.markdown(
 
 
 if st.button("🚀 Try the demo", width="stretch"):
-        st.switch_page("pages/1_Search_Demo.py")  # adjust or remove if you don't use multipage
+        st.switch_page("pages/search_demo.py")
 
 st.markdown("---")
 
@@ -207,9 +197,7 @@ with problem_col2:
         unsafe_allow_html=True,
     )
 
-# Contact Us & footer
-st.markdown("---")
-
+# Section: Contact us
 st.subheader("Contact us")
 st.markdown(
     f"""
@@ -239,4 +227,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Footer
+st.markdown("---")
 st.caption("ClipABit - Powered by CLIP embeddings and semantic search")
