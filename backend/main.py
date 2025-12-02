@@ -1,10 +1,13 @@
 import os
 import logging
-from fastapi import UploadFile, HTTPException
+from fastapi import UploadFile, HTTPException, Form
 import modal
 
-# Constants
-PINECONE_CHUNKS_INDEX = "chunks-index"
+# Pinecone index names per environment
+PINECONE_INDEX_MAP = {
+    "dev": "chunks-index",
+    "prod": "prod-chunks"
+}
 
 # Configure logging
 logging.basicConfig(
@@ -27,8 +30,8 @@ image = (
             )
         )
 
-# Environment: "dev" (default) or "prod" (set via ENV variable)
-env = os.environ.get("ENV", "dev")
+# Environment: "dev" (default) or "prod" (set via ENVIRONMENT variable)
+env = os.environ.get("ENVIRONMENT", "dev")
 
 # Create Modal app
 app = modal.App(
@@ -82,14 +85,18 @@ class Server:
             raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
         
         ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
-        if ENVIRONMENT not in ["dev", "test", "prod"]:
-            raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, test, prod")
+        if ENVIRONMENT not in ["dev", "prod"]:
+            raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod")
         logger.info(f"Running in environment: {ENVIRONMENT}")
+
+        # Select Pinecone index based on environment
+        pinecone_index = PINECONE_INDEX_MAP[ENVIRONMENT]
+        logger.info(f"Using Pinecone index: {pinecone_index}")
 
         # Instantiate classes
         self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
         self.video_embedder = VideoEmbedder()
-        self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=PINECONE_CHUNKS_INDEX)
+        self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=pinecone_index)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
 
         self.r2_connector = R2Connector(
@@ -101,7 +108,7 @@ class Server:
 
         self.searcher = Searcher(
             api_key=PINECONE_API_KEY,
-            index_name=PINECONE_CHUNKS_INDEX,
+            index_name=pinecone_index,
             r2_connector=self.r2_connector
         )
 
@@ -110,8 +117,8 @@ class Server:
         print(f"[Container] Started at {self.start_time.isoformat()}")
 
     @modal.method()
-    async def process_video(self, video_bytes: bytes, filename: str, job_id: str):
-        logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes)")
+    async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = ""):
+        logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}'")
         
         try:
             # Upload original video to R2 bucket
@@ -119,7 +126,7 @@ class Server:
             success, hashed_identifier = self.r2_connector.upload_video(
                 video_data=video_bytes,
                 filename=filename,
-                # user_id="user1" # Specify user ID once we have user management
+                namespace=namespace
             )
             if not success:
                 raise Exception(f"Failed to upload video to R2 storage: {hashed_identifier}")
@@ -175,7 +182,7 @@ class Server:
                 self.pinecone_connector.upsert_chunk(
                     chunk_id=chunk['chunk_id'],
                     chunk_embedding=embedding.numpy(),
-                    namespace="",
+                    namespace=namespace,
                     metadata=chunk['metadata']
                 )            
                 
@@ -244,12 +251,13 @@ class Server:
         return job_data
 
     @modal.fastapi_endpoint(method="POST")
-    async def upload(self, file: UploadFile = None):
+    async def upload(self, file: UploadFile = None, namespace: str = Form("")):
         """
         Handle video file upload and start background processing.
 
         Args:
             file (UploadFile): The uploaded video file.
+            namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
 
         Returns:
             dict: Contains job_id, filename, content_type, size_bytes, status, and message.
@@ -264,11 +272,12 @@ class Server:
             "filename": file.filename,
             "status": "processing",
             "size_bytes": file_size,
-            "content_type": file.content_type
+            "content_type": file.content_type,
+            "namespace": namespace
         })
 
         # Spawn background processing (non-blocking - returns immediately)
-        self.process_video.spawn(contents, file.filename, job_id)
+        self.process_video.spawn(contents, file.filename, job_id, namespace)
 
         return {
             "job_id": job_id,
@@ -281,12 +290,13 @@ class Server:
 
     
     @modal.fastapi_endpoint(method="GET")
-    async def search(self, query: str):
+    async def search(self, query: str, namespace: str = ""):
         """
         Search endpoint - accepts a text query and returns semantic search results.
 
         Args:
         - query (str): The search query string (required)
+        - namespace (str, optional): Namespace for Pinecone search (default: "")
         - top_k (int, optional): Number of top results to return (default: 10)
 
         Returns: dict with 'query', 'results', and 'timing'.
@@ -300,16 +310,17 @@ class Server:
                 raise HTTPException(status_code=400, detail="Missing 'query' parameter")
 
             top_k = 10
-            logger.info(f"[Search] Query: '{query}' | top_k={top_k}")
+            logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
 
             # Execute semantic search
             results = self.searcher.search(
                 query=query,
-                top_k=top_k
+                top_k=top_k,
+                namespace=namespace
             )
-            
+
             t_done = time.perf_counter()
-            
+
             # Log chunk-level results only
             logger.info(f"[Search] Found {len(results)} chunk-level results in {t_done - t_start:.3f}s")
 
