@@ -1,15 +1,18 @@
-import streamlit as st
-import requests
-import time
 import io
-
-# API endpoints
-SEARCH_API_URL = "https://clipabit01--clipabit-server-search-dev.modal.run"
-UPLOAD_API_URL = "https://clipabit01--clipabit-server-upload-dev.modal.run"
+import time
+import requests
+import streamlit as st
 
 # Initialize session state
 if 'search_results' not in st.session_state:
     st.session_state.search_results = None
+
+# API endpoints
+SEARCH_API_URL = "https://clipabit01--clipabit-server-search-dev.modal.run"
+UPLOAD_API_URL = "https://clipabit01--clipabit-server-upload-dev.modal.run"
+STATUS_API_URL = "https://clipabit01--clipabit-server-status-dev.modal.run"
+LIST_VIDEOS_API_URL = "https://clipabit01--clipabit-server-list-videos-dev.modal.run"
+
 
 def search_videos(query: str):
     """Send search query to backend."""
@@ -22,11 +25,26 @@ def search_videos(query: str):
     except requests.RequestException as e:
         return {"error": str(e)}
 
+
+@st.cache_data(ttl=60, show_spinner="Fetching all videos in repository...")
+def fetch_all_videos():
+    """Fetch all videos from the backend."""
+    try:
+        resp = requests.get(LIST_VIDEOS_API_URL, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("videos", [])
+        return []
+    except requests.RequestException:
+        return []
+
+
 def upload_file_to_backend(file_bytes: bytes, filename: str, content_type: str | None = None):
     """Upload file to backend via multipart form-data."""
     files = {"file": (filename, io.BytesIO(file_bytes), content_type or "application/octet-stream")}
     resp = requests.post(UPLOAD_API_URL, files=files, timeout=300)
     return resp
+
 
 # Upload dialog
 @st.fragment
@@ -52,7 +70,7 @@ def upload_dialog():
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            if st.button("Upload", type="primary", use_container_width=True):
+            if st.button("Upload", type="primary", width="stretch"):
                 with st.spinner("Uploading..."):
                     try:
                         resp = upload_file_to_backend(uploaded_bytes, uploaded.name, uploaded.type)
@@ -75,12 +93,15 @@ def upload_dialog():
             if st.button("Cancel", use_container_width=True):
                 st.rerun()
 
+
+# Main UI
+st.title("ClipABit")
 st.subheader("Semantic Video Search - Demo")
 
 # Upload button row
 up_col1, up_col2 = st.columns([1, 7])
 with up_col1:
-    if st.button("Upload", use_container_width=True):
+    if st.button("Upload", disabled=True, width="stretch"):
         upload_dialog()
         
 # insert vertical spaces
@@ -111,9 +132,8 @@ with col3:
         st.session_state.search_results = None
         st.rerun()
 
-# Footer
+
 st.markdown("---")
-st.caption("ClipABit - Powered by CLIP embeddings and semantic search")
 
 # Custom CSS to force video containers to have a consistent aspect ratio
 st.markdown("""
@@ -125,7 +145,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Display results if there are any
+# Display results or repository
 if st.session_state.search_results:
     st.subheader(f"Search Results for: '{search_query}'")
     
@@ -150,3 +170,23 @@ if st.session_state.search_results:
                         st.video(presigned_url, start_time=int(start_time))
         else:
             st.info("No matching videos found.")
+
+else:
+    st.subheader("Video Repository")
+    
+    # Fetch and display videos
+    videos = fetch_all_videos()
+    
+    if videos:
+        # Create a grid of videos
+        cols = st.columns(3)
+        for idx, video in enumerate(videos):
+            with cols[idx % 3]:
+                st.caption(f"**{video['file_name']}**")
+                st.video(video['presigned_url'])
+    else:
+        st.info("No videos found in the repository.")
+
+# Footer
+st.markdown("---")
+st.caption("ClipABit - Powered by CLIP embeddings and semantic search")
