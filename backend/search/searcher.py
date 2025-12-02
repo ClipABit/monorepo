@@ -61,7 +61,8 @@ class Searcher:
     def search(
         self,
         query: str,
-        top_k: int = 5
+        top_k: int = 5,
+        namespace: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Search for semantically similar content.
@@ -69,6 +70,7 @@ class Searcher:
         Args:
             query: Natural language search query
             top_k: Number of results to return (default: 5)
+            namespace: Optional namespace to override default (default: None uses self.namespace)
 
         Returns:
             List of matches with scores and metadata, sorted by similarity
@@ -79,15 +81,17 @@ class Searcher:
                 print(f"Score: {result['score']}")
                 print(f"Metadata: {result['metadata']}")
         """
-        logger.info(f"Searching for: '{query}' (top_k={top_k})")
-        
+        # Use provided namespace or fall back to default
+        search_namespace = namespace if namespace is not None else self.namespace
+        logger.info(f"Searching for: '{query}' (top_k={top_k}, namespace='{search_namespace}')")
+
         # Generate query embedding
         query_embedding = self.embedder.embed_text(query)
-        
+
         # Search Pinecone with optional filters
         matches = self.connector.query_chunks(
             query_embedding=query_embedding,
-            namespace=self.namespace,
+            namespace=search_namespace,
             top_k=top_k
         )
         
