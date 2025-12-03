@@ -24,10 +24,6 @@ jobs:
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-          cache-suffix: "backend"
-
-      - name: install dependencies
-        run: uv sync --frozen
 
       - name: deploy to modal
         run: uv run modal deploy main.py
