@@ -35,7 +35,6 @@ def fetch_all_videos():
         resp = requests.get(LIST_VIDEOS_API_URL, params={"namespace": NAMESPACE}, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
-            print(data)
             return data.get("videos", [])
         return []
     except requests.RequestException:
@@ -103,10 +102,13 @@ st.title("ClipABit")
 st.subheader("Semantic Video Search - Demo")
 
 # Upload button row
-up_col1, up_col2 = st.columns([1, 7])
+up_col1, up_col2, up_col3 = st.columns([1, 1, 6])
+# with up_col1:
+#     if st.button("Upload", disabled=True, width="stretch"):
+#         upload_dialog()
 with up_col1:
-    if st.button("Upload", disabled=True, width="stretch"):
-        upload_dialog()
+    if st.button("Feedback", width="stretch"):
+        st.switch_page("pages/feedback.py")
         
 # insert vertical spaces
 st.write("")

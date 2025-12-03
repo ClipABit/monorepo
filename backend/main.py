@@ -40,9 +40,6 @@ app = modal.App(
     secrets=[modal.Secret.from_name(env)]
 )
 
-# Create Modal app
-app = modal.App(name="ClipABit", image=image, secrets=secrets)
-
 @app.cls()
 class Server:
 

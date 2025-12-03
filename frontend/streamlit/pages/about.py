@@ -102,6 +102,8 @@ st.markdown(
 
 if st.button("🚀 Try the demo", width="stretch"):
         st.switch_page("pages/search_demo.py")
+if st.button("Provide Feedback", width="stretch"):
+        st.switch_page("pages/feedback.py")
 
 st.markdown("---")
 
