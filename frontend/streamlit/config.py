@@ -7,7 +7,7 @@ class Config:
     """Configuration class for environment-based settings."""
 
     # Environment (defaults to "dev")
-    ENVIRONMENT = st.secrets.get("ENVIRONMENT", "dev")
+    ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
 
     # Validate environment
     if ENVIRONMENT not in ["dev", "prod"]:
