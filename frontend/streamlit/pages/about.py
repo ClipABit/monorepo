@@ -113,7 +113,7 @@ st.markdown(
     Ever watched a long YouTube video and thought about how hard editors had to work to find the right clips?
 
     **ClipABit** makes that process radically faster by letting editors:
-    - 🔍 **Search for whatever** - like using Google!
+    - 🔍 **Search through your clips** - Find key moments, locations, and people!
     - 🧠 **Identify faces and people** thanks to our facial recognition algorithms
     </div>
     """,
