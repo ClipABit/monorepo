@@ -6,10 +6,8 @@ Video processing backend that runs on Modal. Accepts video uploads via FastAPI a
 
 ```bash
 # 1. Install dependencies (creates .venv automatically)
-# 1. Install dependencies (creates .venv automatically)
 uv sync
 
-# 2. Authenticate with Modal (first time only - opens browser)
 # 2. Authenticate with Modal (first time only - opens browser)
 uv run modal token new
 

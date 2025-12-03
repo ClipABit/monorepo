@@ -40,9 +40,9 @@ app = modal.App(
     secrets=[modal.Secret.from_name(env)]
 )
 
+
 @app.cls()
 class Server:
-
 
     @modal.enter()
     def startup(self):
