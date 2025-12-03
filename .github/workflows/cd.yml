@@ -1,0 +1,35 @@
+name: cd
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-suffix: "backend"
+
+      - name: install dependencies
+        run: uv sync --frozen
+
+      - name: deploy to modal
+        run: uv run modal deploy main.py
+        env:
+          ENVIRONMENT: prod
