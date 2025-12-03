@@ -12,6 +12,8 @@ class Config:
     # Validate environment
     if ENVIRONMENT not in ["dev", "prod"]:
         raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod")
+    
+    print(f"Running in {ENVIRONMENT} environment")
 
     # Modal app name (matches backend app name)
     APP_NAME = ENVIRONMENT
