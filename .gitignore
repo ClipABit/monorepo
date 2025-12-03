@@ -7,4 +7,6 @@ __pycache__
 .env.*
 !.env.example
 
+.streamlit/secrets.toml
+
 .DS_Store
