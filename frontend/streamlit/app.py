@@ -1,4 +1,5 @@
 import streamlit as st
+from config import Config
 
 demo_page = st.Page("pages/search_demo.py", title="Search Demo", icon="🔎")
 about_page = st.Page("pages/about.py", title="About ClipABit", icon="ℹ️")
@@ -11,3 +12,5 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 pg.run()
+
+Config.print_config()
