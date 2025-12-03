@@ -40,9 +40,12 @@ app = modal.App(
     secrets=[modal.Secret.from_name(env)]
 )
 
+# Create Modal app
+app = modal.App(name="ClipABit", image=image, secrets=secrets)
 
 @app.cls()
 class Server:
+
 
     @modal.enter()
     def startup(self):
@@ -51,6 +54,7 @@ class Server:
             Here is where you would instantiate classes and load models that are
             reused across multiple requests to avoid reloading them each time.
         """
+
         # Import local module inside class
         import os
         from datetime import datetime, timezone
