@@ -1,7 +1,6 @@
 """Configuration module for ClipABit Streamlit frontend."""
 
 import os
-import streamlit as st
 
 class Config:
     """Configuration class for environment-based settings."""
