@@ -15,9 +15,48 @@ dependencies = [
     "pillow",
     "transformers",
     "scenedetect",
+    "boto3",
 ]
+
+[project.scripts]
+dev = "cli:serve"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cli.py"]
 
 [dependency-groups]
 dev = [
-    "opencv-python", 
+    "opencv-python",
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+python_files = ["test_*.py"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["preprocessing", "database", "models", "embeddings"]
+omit = ["tests/*", "utils/*", "*/conftest.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+precision = 2

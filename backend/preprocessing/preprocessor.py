@@ -102,7 +102,7 @@ class Preprocessor:
         video_bytes: bytes,
         video_id: str,
         filename: str,
-        s3_url: str = ""
+        hashed_identifier: str = ""
     ) -> List[Dict[str, Any]]:
         """Process video from uploaded bytes with automatic temp file cleanup."""
         logger.info("Starting preprocessing: video_id=%s, filename=%s", video_id, filename)
@@ -116,7 +116,7 @@ class Preprocessor:
                     video_path=temp_file.name,
                     video_id=video_id,
                     filename=filename,
-                    s3_url=s3_url
+                    hashed_identifier=hashed_identifier
                 )
             except Exception as e:
                 logger.error("Processing failed for video_id=%s: %s", video_id, e)
@@ -127,7 +127,7 @@ class Preprocessor:
         video_path: str,
         video_id: str,
         filename: str,
-        s3_url: str = ""
+        hashed_identifier: str = ""
     ) -> List[Dict[str, Any]]:
         """
         Run complete preprocessing pipeline with parallel chunk processing.
@@ -158,7 +158,7 @@ class Preprocessor:
             future_to_chunk = {
                 executor.submit(
                     self._process_single_chunk,
-                    chunk, video_path, video_id, filename, s3_url
+                    chunk, video_path, video_id, filename, hashed_identifier
                 ): chunk
                 for chunk in chunks
             }
@@ -190,7 +190,7 @@ class Preprocessor:
         video_path: str,
         video_id: str,
         filename: str,
-        s3_url: str
+        hashed_identifier: str
     ) -> Optional[Dict[str, Any]]:
         """
         Process single chunk: extract → compress → package.
@@ -198,6 +198,7 @@ class Preprocessor:
         Thread-safe for parallel execution.
         Returns None if processing fails.
         """
+        #TODO: Specifcy explicit return type and not just a dict in docstring
         try:
             # Extract frames with complexity analysis
             frames, sampling_fps, complexity_score = self.extractor.extract_frames(video_path, chunk)
@@ -224,12 +225,13 @@ class Preprocessor:
                 chunk=chunk,
                 video_id=video_id,
                 filename=filename,
-                s3_url=s3_url,
+                hashed_identifier=hashed_identifier,
                 frame_count=len(compressed_frames),
                 sampling_fps=sampling_fps,
                 complexity_score=complexity_score
             )
 
+            #TODO: Turn this into a dataclass or specific type
             return {
                 'chunk_id': chunk.chunk_id,
                 'frames': compressed_frames,
@@ -246,7 +248,7 @@ class Preprocessor:
         chunk: VideoChunk,
         video_id: str,
         filename: str,
-        s3_url: str,
+        hashed_identifier: str,
         frame_count: int,
         sampling_fps: float,
         complexity_score: float
@@ -265,12 +267,14 @@ class Preprocessor:
             complexity_score=complexity_score,
             original_filename=filename,
             file_type=file_type,
-            original_s3_url=s3_url
+            hashed_identifier=hashed_identifier
         )
 
     def get_stats(self, processed_chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
+        # TODO: Improve docstring and be explicit about parameter and return types
         """Calculate aggregate statistics from processed chunks."""
         if not processed_chunks:
+            # TODO: Turn this into a dataclass
             return {
                 'total_chunks': 0,
                 'total_frames': 0,
@@ -290,6 +294,7 @@ class Preprocessor:
         complexities = [c['metadata']['complexity_score'] for c in processed_chunks]
         fps_values = [c['metadata']['sampling_fps'] for c in processed_chunks]
 
+        # TODO: Turn this into a dataclass
         return {
             'total_chunks': len(processed_chunks),
             'total_frames': total_frames,

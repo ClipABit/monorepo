@@ -1,0 +1,119 @@
+"""
+Semantic Searcher using Pinecone vector database.
+
+Coordinates text embedding and vector search to find semantically
+similar content.
+"""
+
+import logging
+from typing import List, Dict, Any, Optional
+
+from database.pinecone_connector import PineconeConnector
+from database.r2_connector import R2Connector
+from search.embedder import TextEmbedder
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+class Searcher:
+    """
+    High-level semantic search coordinator.
+    
+    Combines text embedding and Pinecone vector search to provide
+    an easy-to-use interface for semantic similarity search.
+    
+    Usage:
+        searcher = Searcher(api_key="...", index_name="chunks-index")
+        results = searcher.search("woman on a train", top_k=3)
+    """
+    
+    def __init__(
+        self,
+        api_key: str,
+        index_name: str,
+        r2_connector: Optional[R2Connector] = None,
+        namespace: str = "__default__"
+    ):
+        """
+        Initialize searcher with Pinecone connection.
+
+        Args:
+            api_key: Pinecone API key
+            index_name: Name of Pinecone index to search
+            r2_connector: Instance of R2Connector for generating URLs
+            namespace: Optional namespace for partitioning data
+        """
+        self.embedder = TextEmbedder()
+        self.connector = PineconeConnector(api_key=api_key, index_name=index_name)
+        self.r2_connector = r2_connector
+        self.namespace = namespace
+        
+        logger.info(
+            f"Searcher initialized (index={index_name}, namespace='{namespace}')"
+        )
+    
+    @property
+    def device(self) -> str:
+        """Get the device being used for embeddings (cpu/cuda)."""
+        return self.embedder.device
+    
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        namespace: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for semantically similar content.
+
+        Args:
+            query: Natural language search query
+            top_k: Number of results to return (default: 5)
+            namespace: Optional namespace to override default (default: None uses self.namespace)
+
+        Returns:
+            List of matches with scores and metadata, sorted by similarity
+
+        Example:
+            results = searcher.search("cooking in kitchen", top_k=3)
+            for result in results:
+                print(f"Score: {result['score']}")
+                print(f"Metadata: {result['metadata']}")
+        """
+        # Use provided namespace or fall back to default
+        search_namespace = namespace if namespace is not None else self.namespace
+        logger.info(f"Searching for: '{query}' (top_k={top_k}, namespace='{search_namespace}')")
+
+        # Generate query embedding
+        query_embedding = self.embedder.embed_text(query)
+
+        # Search Pinecone with optional filters
+        matches = self.connector.query_chunks(
+            query_embedding=query_embedding,
+            namespace=search_namespace,
+            top_k=top_k
+        )
+        
+        # Format results
+        results = []
+        for match in matches:
+            metadata = match.get('metadata', {})
+
+            # Generate presigned URL if identifier exists
+            presigned_url = None
+            if 'file_hashed_identifier' in metadata and self.r2_connector:
+                presigned_url = self.r2_connector.generate_presigned_url(
+                    identifier=metadata['file_hashed_identifier']
+                )
+                metadata['presigned_url'] = presigned_url
+
+            result = {
+                'id': match.get('id'),
+                'score': match.get('score', 0.0),
+                'metadata': metadata
+            }
+            results.append(result)
+        
+        logger.info(f"Found {len(results)} results")
+        return results
