@@ -4,7 +4,7 @@ Uses modal.Dict for persistent storage with automatic ID generation.
 """
 
 import modal
-from typing import Optional, Dict
+from typing import Dict
 import logging
 
 logger = logging.getLogger(__name__)
