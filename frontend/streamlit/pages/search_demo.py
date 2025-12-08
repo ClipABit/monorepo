@@ -14,6 +14,7 @@ UPLOAD_API_URL = Config.UPLOAD_API_URL
 STATUS_API_URL = Config.STATUS_API_URL
 LIST_VIDEOS_API_URL = Config.LIST_VIDEOS_API_URL
 NAMESPACE = Config.NAMESPACE
+ENVIRONMENT = Config.ENVIRONMENT
 
 
 def search_videos(query: str):
@@ -107,6 +108,11 @@ up_col1, up_col2, up_col3 = st.columns([1, 1, 6])
 #     if st.button("Upload", disabled=True, width="stretch"):
 #         upload_dialog()
 with up_col1:
+        # upload disabled in prod env
+    upload_enabled = (ENVIRONMENT == "dev")
+    if st.button("Upload", disabled=(not upload_enabled), width="stretch"):
+        upload_dialog()
+with up_col2:
     if st.button("Feedback", width="stretch"):
         st.switch_page("pages/feedback.py")
         
