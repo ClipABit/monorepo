@@ -126,6 +126,12 @@ def sample_video_chunk() -> VideoChunk:
     )
 
 
+@pytest.fixture
+def sample_embedding() -> np.ndarray:
+    """Sample embedding vector for testing (512-dimensional, typical CLIP embedding size)."""
+    return np.random.rand(512).astype(np.float32)
+
+
 # ==============================================================================
 # COMPONENT FIXTURES
 # ==============================================================================
