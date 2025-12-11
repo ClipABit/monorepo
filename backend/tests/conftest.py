@@ -23,6 +23,7 @@ from preprocessing.frame_extractor import FrameExtractor
 from preprocessing.compressor import Compressor
 from preprocessing.preprocessor import Preprocessor
 from models.metadata import VideoChunk
+from database.pinecone_connector import PineconeConnector
 
 
 # ==============================================================================
@@ -198,6 +199,21 @@ def mock_modal_dict(mocker):
 
     mocker.patch('modal.Dict.from_name', return_value=mock_dict)
     return fake_dict
+
+
+@pytest.fixture
+def mock_pinecone_connector(mocker):
+    """Mock PineconeConnector with all necessary mocks set up"""
+    
+    mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
+    mock_client = mocker.MagicMock()
+    mock_index = mocker.MagicMock()
+    mock_pinecone.return_value = mock_client
+    mock_client.Index.return_value = mock_index
+    
+    connector = PineconeConnector(api_key="test-key", index_name="test-index")
+    
+    return connector, mock_index, mock_client, mock_pinecone
 
 
 # ==============================================================================

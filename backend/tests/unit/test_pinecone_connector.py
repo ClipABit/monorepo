@@ -21,15 +21,10 @@ class TestPineconeConnectorInitialization:
 class TestUpsertChunk:
     """Test chunk upsert operations."""
 
-    def test_upsert_chunk_success(self, mocker, sample_embedding):
+    def test_upsert_chunk_success(self, mock_pinecone_connector, sample_embedding):
         """Verify successful chunk upsert."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
-
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
+        connector, mock_index, mock_client, _ = mock_pinecone_connector
+        
         result = connector.upsert_chunk(
             chunk_id="chunk-123",
             chunk_embedding=sample_embedding,
@@ -47,15 +42,10 @@ class TestUpsertChunk:
         assert vectors[0][0] == "chunk-123"
         assert vectors[0][2]["video_id"] == "video-1"
 
-    def test_upsert_chunk_with_default_namespace(self, mocker, sample_embedding):
+    def test_upsert_chunk_with_default_namespace(self, mock_pinecone_connector, sample_embedding):
         """Verify upsert uses default namespace when not specified."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
-
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
+        connector, mock_index, _, _ = mock_pinecone_connector
+        
         result = connector.upsert_chunk(
             chunk_id="chunk-123",
             chunk_embedding=sample_embedding
@@ -65,15 +55,10 @@ class TestUpsertChunk:
         call_args = mock_index.upsert.call_args
         assert call_args[1]['namespace'] == "__default__"
 
-    def test_upsert_chunk_without_metadata(self, mocker, sample_embedding):
+    def test_upsert_chunk_without_metadata(self, mock_pinecone_connector, sample_embedding):
         """Verify upsert works with no metadata provided."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
-
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
+        connector, mock_index, _, _ = mock_pinecone_connector
+        
         result = connector.upsert_chunk(
             chunk_id="chunk-123",
             chunk_embedding=sample_embedding
@@ -84,15 +69,10 @@ class TestUpsertChunk:
         vectors = call_args[1]['vectors']
         assert vectors[0][2] == {}  # Empty metadata dict
 
-    def test_upsert_chunk_converts_numpy_to_list(self, mocker, sample_embedding):
+    def test_upsert_chunk_converts_numpy_to_list(self, mock_pinecone_connector, sample_embedding):
         """Verify numpy array is converted to list before upsert."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
-
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
+        connector, mock_index, _, _ = mock_pinecone_connector
+        
         connector.upsert_chunk(
             chunk_id="chunk-123",
             chunk_embedding=sample_embedding
@@ -104,16 +84,11 @@ class TestUpsertChunk:
         assert isinstance(vectors[0][1], list)
         assert not isinstance(vectors[0][1], np.ndarray)
 
-    def test_upsert_chunk_handles_exception(self, mocker, sample_embedding):
+    def test_upsert_chunk_handles_exception(self, mock_pinecone_connector, sample_embedding):
         """Verify upsert returns False on exception."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
+        connector, mock_index, _, _ = mock_pinecone_connector
         mock_index.upsert.side_effect = Exception("Pinecone error")
 
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
         result = connector.upsert_chunk(
             chunk_id="chunk-123",
             chunk_embedding=sample_embedding
@@ -121,15 +96,9 @@ class TestUpsertChunk:
 
         assert result is False
 
-    def test_upsert_multiple_chunks(self, mocker, sample_embedding):
+    def test_upsert_multiple_chunks(self, mock_pinecone_connector, sample_embedding):
         """Verify multiple chunks can be upserted."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
-
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
+        connector, mock_index, _, _ = mock_pinecone_connector
         
         result1 = connector.upsert_chunk("chunk-1", sample_embedding, metadata={"id": 1})
         result2 = connector.upsert_chunk("chunk-2", sample_embedding, metadata={"id": 2})
@@ -144,13 +113,9 @@ class TestUpsertChunk:
 class TestQueryChunks:
     """Test chunk query operations."""
 
-    def test_query_chunks_success(self, mocker, sample_embedding):
+    def test_query_chunks_success(self, mock_pinecone_connector, sample_embedding):
         """Verify successful chunk query."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
+        connector, mock_index, _, _ = mock_pinecone_connector
 
         # Mock query response
         mock_response = {
@@ -162,7 +127,6 @@ class TestQueryChunks:
         }
         mock_index.query.return_value = mock_response
 
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
         results = connector.query_chunks(
             query_embedding=sample_embedding,
             namespace="test-namespace",
@@ -178,46 +142,31 @@ class TestQueryChunks:
         assert call_args[1]['top_k'] == 3
         assert call_args[1]['include_metadata'] is True
 
-    def test_query_chunks_with_default_namespace(self, mocker, sample_embedding):
+    def test_query_chunks_with_default_namespace(self, mock_pinecone_connector, sample_embedding):
         """Verify query uses default namespace when not specified."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
+        connector, mock_index, _, _ = mock_pinecone_connector
         mock_index.query.return_value = {'matches': []}
 
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
         connector.query_chunks(query_embedding=sample_embedding)
 
         call_args = mock_index.query.call_args
         assert call_args[1]['namespace'] == "__default__"
 
-    def test_query_chunks_with_default_top_k(self, mocker, sample_embedding):
+    def test_query_chunks_with_default_top_k(self, mock_pinecone_connector, sample_embedding):
         """Verify query uses default top_k when not specified."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
+        connector, mock_index, _, _ = mock_pinecone_connector
         mock_index.query.return_value = {'matches': []}
 
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
         connector.query_chunks(query_embedding=sample_embedding)
 
         call_args = mock_index.query.call_args
         assert call_args[1]['top_k'] == 5
 
-    def test_query_chunks_converts_numpy_to_list(self, mocker, sample_embedding):
+    def test_query_chunks_converts_numpy_to_list(self, mock_pinecone_connector, sample_embedding):
         """Verify numpy array is converted to list before query."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
+        connector, mock_index, _, _ = mock_pinecone_connector
         mock_index.query.return_value = {'matches': []}
 
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
         connector.query_chunks(query_embedding=sample_embedding)
 
         call_args = mock_index.query.call_args
@@ -225,27 +174,18 @@ class TestQueryChunks:
         assert isinstance(call_args[1]['vector'], list)
         assert not isinstance(call_args[1]['vector'], np.ndarray)
 
-    def test_query_chunks_handles_exception(self, mocker, sample_embedding):
+    def test_query_chunks_handles_exception(self, mock_pinecone_connector, sample_embedding):
         """Verify query returns empty list on exception."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
+        connector, mock_index, _, _ = mock_pinecone_connector
         mock_index.query.side_effect = Exception("Pinecone error")
 
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
         results = connector.query_chunks(query_embedding=sample_embedding)
 
         assert results == []
 
-    def test_query_chunks_with_custom_top_k(self, mocker, sample_embedding):
+    def test_query_chunks_with_custom_top_k(self, mock_pinecone_connector, sample_embedding):
         """Verify query respects custom top_k parameter."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
+        connector, mock_index, _, _ = mock_pinecone_connector
 
         mock_response = {
             'matches': [
@@ -255,7 +195,6 @@ class TestQueryChunks:
         }
         mock_index.query.return_value = mock_response
 
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
         results = connector.query_chunks(
             query_embedding=sample_embedding,
             top_k=10
@@ -265,16 +204,11 @@ class TestQueryChunks:
         call_args = mock_index.query.call_args
         assert call_args[1]['top_k'] == 10
 
-    def test_query_chunks_returns_empty_list_when_no_matches(self, mocker, sample_embedding):
+    def test_query_chunks_returns_empty_list_when_no_matches(self, mock_pinecone_connector, sample_embedding):
         """Verify query returns empty list when no matches found."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
+        connector, mock_index, _, _ = mock_pinecone_connector
         mock_index.query.return_value = {'matches': []}
 
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
         results = connector.query_chunks(query_embedding=sample_embedding)
 
         assert results == []
@@ -283,15 +217,10 @@ class TestQueryChunks:
 class TestEdgeCases:
     """Test edge cases and error handling."""
 
-    def test_upsert_with_empty_embedding(self, mocker):
+    def test_upsert_with_empty_embedding(self, mock_pinecone_connector):
         """Verify upsert handles empty embedding array."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
-
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
+        connector, mock_index, _, _ = mock_pinecone_connector
+        
         empty_embedding = np.array([])
         result = connector.upsert_chunk("chunk-123", empty_embedding)
 
@@ -300,16 +229,11 @@ class TestEdgeCases:
         vectors = call_args[1]['vectors']
         assert vectors[0][1] == []  # Empty list
 
-    def test_query_with_empty_embedding(self, mocker):
+    def test_query_with_empty_embedding(self, mock_pinecone_connector):
         """Verify query handles empty embedding array."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
+        connector, mock_index, _, _ = mock_pinecone_connector
         mock_index.query.return_value = {'matches': []}
 
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
         empty_embedding = np.array([])
         results = connector.query_chunks(empty_embedding)
 
@@ -317,16 +241,11 @@ class TestEdgeCases:
         call_args = mock_index.query.call_args
         assert call_args[1]['vector'] == []
 
-    def test_upsert_with_large_metadata(self, mocker, sample_embedding):
+    def test_upsert_with_large_metadata(self, mock_pinecone_connector, sample_embedding):
         """Verify upsert handles large metadata dictionaries."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
+        connector, mock_index, _, _ = mock_pinecone_connector
 
         large_metadata = {f"key_{i}": f"value_{i}" for i in range(100)}
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
         result = connector.upsert_chunk("chunk-123", sample_embedding, metadata=large_metadata)
 
         assert result is True
@@ -334,15 +253,9 @@ class TestEdgeCases:
         vectors = call_args[1]['vectors']
         assert len(vectors[0][2]) == 100
 
-    def test_different_namespaces_isolated(self, mocker, sample_embedding):
+    def test_different_namespaces_isolated(self, mock_pinecone_connector, sample_embedding):
         """Verify different namespaces are handled separately."""
-        mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
-        mock_client = mocker.MagicMock()
-        mock_index = mocker.MagicMock()
-        mock_pinecone.return_value = mock_client
-        mock_client.Index.return_value = mock_index
-
-        connector = PineconeConnector(api_key="test-key", index_name="test-index")
+        connector, mock_index, _, _ = mock_pinecone_connector
         
         # Upsert to different namespaces
         connector.upsert_chunk("chunk-1", sample_embedding, namespace="namespace-1")
