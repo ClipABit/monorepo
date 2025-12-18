@@ -14,5 +14,5 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 pg.run()
-
+print("Current Environment:", Config.ENVIRONMENT)
 Config.print_config()
