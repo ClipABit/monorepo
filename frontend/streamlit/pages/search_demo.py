@@ -110,6 +110,7 @@ up_col1, up_col2, up_col3 = st.columns([1, 1, 6])
 with up_col1:
         # upload disabled in prod env
     upload_enabled = (ENVIRONMENT == "dev")
+    upload_enabled = True  # temporarily enable upload in prod for uploading demo videos
     if st.button("Upload", disabled=(not upload_enabled), width="stretch"):
         upload_dialog()
 with up_col2:
