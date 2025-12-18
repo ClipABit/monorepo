@@ -113,9 +113,9 @@ with up_col1:
     upload_enabled = True  # temporarily enable upload in prod for uploading demo videos
     if st.button("Upload", disabled=(not upload_enabled), width="stretch"):
         upload_dialog()
-with up_col2:
-    if st.button("Feedback", width="stretch"):
-        st.switch_page("pages/feedback.py")
+# with up_col2:
+#     if st.button("Feedback", width="stretch"):
+#         st.switch_page("pages/feedback.py")
         
 # insert vertical spaces
 st.write("")
