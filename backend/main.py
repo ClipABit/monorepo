@@ -65,7 +65,7 @@ class Server:
         from database.r2_connector import R2Connector
 
 
-        logger.info("Container starting up!")
+        logger.info(f"Container starting up! Environment = {env}")
         self.start_time = datetime.now(timezone.utc)
 
         # Get environment variables (TODO: abstract to config module)
@@ -149,8 +149,6 @@ class Server:
             
             # Embed frames and store in Pinecone
             logger.info(f"[Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
-            
-            # TODO: Upload processed data to S3 (video storage)
 
             # Prepare chunk details for response (without frame arrays)
             chunk_details = []
