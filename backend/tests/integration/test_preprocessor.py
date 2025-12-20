@@ -265,7 +265,8 @@ class TestCodecSupport:
         result = preprocessor.process_video_from_bytes(
             video_bytes=video_bytes,
             video_id="test_av1",
-            filename="test_av1.mp4"
+            filename="test_av1.mp4",
+            hashed_identifier=""
         )
         
         # Verify we got chunks back
@@ -283,7 +284,8 @@ class TestCodecSupport:
         result = preprocessor.process_video_from_bytes(
             video_bytes=video_bytes,
             video_id="test_vp9",
-            filename="test_vp9.mp4"
+            filename="test_vp9.mp4",
+            hashed_identifier=""
         )
         
         # Verify we got chunks back
@@ -299,7 +301,8 @@ class TestCodecSupport:
         result = preprocessor.process_video_from_bytes(
             video_bytes=video_bytes,
             video_id="test_h264",
-            filename="test_h264.mp4"
+            filename="test_h264.mp4",
+            hashed_identifier=""
         )
         
         # Verify we got chunks back

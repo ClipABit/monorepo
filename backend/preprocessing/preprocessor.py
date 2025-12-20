@@ -184,15 +184,18 @@ class Preprocessor:
         """Process video from uploaded bytes with automatic temp file cleanup."""
         logger.info("Starting preprocessing: video_id=%s, filename=%s", video_id, filename)
 
-        # Create a temp file for the original upload
-        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as input_temp:
-            input_temp.write(video_bytes)
-            input_temp.flush()
-            input_path = input_temp.name
-
-        processing_path = input_path
+        input_path = None
+        processing_path = None
 
         try:
+            # Create a temp file for the original upload
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as input_temp:
+                input_path = input_temp.name
+                input_temp.write(video_bytes)
+                input_temp.flush()
+
+            processing_path = input_path
+
             # Detect codec
             codec = self._get_video_codec(input_path)
             logger.info(f"Detected video codec: {codec}")
@@ -228,11 +231,11 @@ class Preprocessor:
             raise
         finally:
             # Cleanup all temp files
-            if os.path.exists(input_path):
+            if input_path and os.path.exists(input_path):
                 os.unlink(input_path)
             
             # If processing_path is different (transcoded), clean it up too
-            if processing_path != input_path and os.path.exists(processing_path):
+            if processing_path and processing_path != input_path and os.path.exists(processing_path):
                 os.unlink(processing_path)
 
     def process_video(
