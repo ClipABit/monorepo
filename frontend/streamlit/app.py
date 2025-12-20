@@ -13,6 +13,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+Config.print_config_partial()
+
 pg.run()
-print("Current Environment:", Config.ENVIRONMENT)
-Config.print_config()

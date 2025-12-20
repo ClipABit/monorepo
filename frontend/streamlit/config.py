@@ -1,6 +1,16 @@
 """Configuration module for ClipABit Streamlit frontend."""
 
 import os
+import logging
+import sys
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
 
 class Config:
     """Configuration class for environment-based settings."""
@@ -41,9 +51,19 @@ class Config:
         }
 
     @classmethod
-    def print_config(cls):
+    def print_config_partial(cls):
         """Print current configuration for debugging."""
         config = cls.get_config()
-        print("Current Configuration:")
+        logger.info("Current Configuration:")
+        logger.info(f"  Environment: {config['environment']}")
+        logger.info(f"  App Name: {config['app_name']}")
+        logger.info(f"  Namespace: {config['namespace']}")
+
+    
+    @classmethod
+    def print_config_full(cls):
+        """Print current configuration for debugging."""
+        config = cls.get_config()
+        logger.info("Current Configuration:")
         for key, value in config.items():
-            print(f"  {key}: {value}")
+            logger.info(f"  {key}: {value}")
