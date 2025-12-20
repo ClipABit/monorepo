@@ -51,21 +51,24 @@ def sample_video_5s(tmp_path_factory) -> Path:
     video_path = video_dir / "sample_5s.mp4"
     
     # Create a simple video using OpenCV
-    height, width = 480, 640
-    fps = 30
-    duration = 5
-    frames = duration * fps
-    
+    fps, duration = 30, 5
+    width, height = 640, 480
+
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(video_path), fourcc, fps, (width, height))
-    
-    for _ in range(frames):
-        # Create a frame with random noise/motion
-        frame = np.random.randint(0, 255, (height, width, 3), dtype=np.uint8)
-        out.write(frame)
-        
-    out.release()
-    
+    writer = cv2.VideoWriter(str(video_path), fourcc, fps, (width, height))
+
+    for frame_num in range(fps * duration):
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+
+        color_shift = (frame_num * 2) % 255
+        frame[:, :] = (color_shift, 100 + color_shift // 2, 150)
+
+        cv2.circle(frame, (320 + frame_num * 2, 240), 50, (255, 255, 255), -1)
+        cv2.rectangle(frame, (100, 100 + frame_num), (200, 200 + frame_num), (0, 255, 0), 2)
+
+        writer.write(frame)
+
+    writer.release()
     return video_path
 
 
@@ -96,25 +99,7 @@ def sample_video_av1(tmp_path_factory) -> Path:
         
     return video_path
 
-    fps, duration = 30, 5
-    width, height = 640, 480
-
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    writer = cv2.VideoWriter(str(video_path), fourcc, fps, (width, height))
-
-    for frame_num in range(fps * duration):
-        frame = np.zeros((height, width, 3), dtype=np.uint8)
-
-        color_shift = (frame_num * 2) % 255
-        frame[:, :] = (color_shift, 100 + color_shift // 2, 150)
-
-        cv2.circle(frame, (320 + frame_num * 2, 240), 50, (255, 255, 255), -1)
-        cv2.rectangle(frame, (100, 100 + frame_num), (200, 200 + frame_num), (0, 255, 0), 2)
-
-        writer.write(frame)
-
-    writer.release()
-    return video_path
+    
 
 
 @pytest.fixture(scope="session")
