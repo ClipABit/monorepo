@@ -132,7 +132,7 @@ class Preprocessor:
 
         transcoded_temp = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
         transcoded_path = transcoded_temp.name
-        transcoded_temp.close() # Close so ffmpeg can write to it
+        transcoded_temp.close()  # Close so ffmpeg can write to it
 
         logger.info(f"Transcoding video ({codec} -> h264) to ensure compatibility: {input_path} -> {transcoded_path}")
         
