@@ -15,7 +15,6 @@ class TestEndToEndProcessing:
             filename="test.mp4",
             hashed_identifier="abc123"
         )
-        print(result)
         assert len(result) > 0
         assert all('chunk_id' in chunk for chunk in result)
         assert all('frames' in chunk for chunk in result)
