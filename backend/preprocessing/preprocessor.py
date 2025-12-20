@@ -115,6 +115,46 @@ class Preprocessor:
         except Exception as e:
             logger.warning(f"Failed to detect codec for {video_path}: {e}")
             return "unknown"
+        
+    def _transcode_to_h264(self, input_path: str, codec: str) -> str:
+        """
+            Transcode video to H.264 codec using ffmpeg.
+
+            Arguments:
+                input_path: Path to the input video file.
+                codec: Detected codec of the input video.
+
+            Returns:
+                Path to the transcoded video file.
+        """
+        if codec == "h264":
+            return input_path  # No transcoding needed
+
+        transcoded_temp = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+        transcoded_path = transcoded_temp.name
+        transcoded_temp.close() # Close so ffmpeg can write to it
+
+        logger.info(f"Transcoding video ({codec} -> h264) to ensure compatibility: {input_path} -> {transcoded_path}")
+        
+        # FFmpeg command: -y (overwrite), -i (input), -c:v libx264 (video codec), -c:a aac (audio), -preset fast
+        cmd = [
+            "ffmpeg", "-y", "-v", "error",
+            "-i", input_path,
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-c:a", "aac",
+            transcoded_path
+        ]
+        
+        try:
+            subprocess.run(cmd, check=True)
+            return transcoded_path
+        except subprocess.CalledProcessError:
+            # Cleanup partial file if transcoding fails
+            if os.path.exists(transcoded_path):
+                os.unlink(transcoded_path)
+            raise
+
 
     def process_video_from_bytes(
         self,
@@ -133,7 +173,6 @@ class Preprocessor:
             input_path = input_temp.name
 
         processing_path = input_path
-        transcoded_temp = None
 
         try:
             # Detect codec
@@ -141,25 +180,7 @@ class Preprocessor:
             logger.info(f"Detected video codec: {codec}")
 
             if codec != "h264":
-                # Transcode if not H.264
-                transcoded_temp = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
-                transcoded_path = transcoded_temp.name
-                transcoded_temp.close() # Close so ffmpeg can write to it
-
-                logger.info(f"Transcoding video ({codec} -> h264) to ensure compatibility: {input_path} -> {transcoded_path}")
-                
-                # FFmpeg command: -y (overwrite), -i (input), -c:v libx264 (video codec), -c:a aac (audio), -preset fast
-                cmd = [
-                    "ffmpeg", "-y", "-v", "error",
-                    "-i", input_path,
-                    "-c:v", "libx264",
-                    "-preset", "fast",
-                    "-c:a", "aac",
-                    transcoded_path
-                ]
-                
-                subprocess.run(cmd, check=True)
-                processing_path = transcoded_path
+                processing_path = self._transcode_to_h264(input_path, codec)
             else:
                 logger.info("Video is already H.264, skipping transcoding")
             
@@ -180,8 +201,10 @@ class Preprocessor:
             # Cleanup all temp files
             if os.path.exists(input_path):
                 os.unlink(input_path)
-            if transcoded_temp and os.path.exists(transcoded_path):
-                os.unlink(transcoded_path)
+            
+            # If processing_path is different (transcoded), clean it up too
+            if processing_path != input_path and os.path.exists(processing_path):
+                os.unlink(processing_path)
 
     def process_video(
         self,
@@ -259,7 +282,7 @@ class Preprocessor:
         Thread-safe for parallel execution.
         Returns None if processing fails.
         """
-        #TODO: Specifcy explicit return type and not just a dict in docstring
+        #TODO: Specify explicit return type and not just a dict in docstring
         try:
             # Extract frames with complexity analysis
             frames, sampling_fps, complexity_score = self.extractor.extract_frames(video_path, chunk)
