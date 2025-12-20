@@ -1,5 +1,7 @@
 import logging
 import tempfile
+import subprocess
+import os
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import cv2
@@ -97,6 +99,81 @@ class Preprocessor:
         logger.debug("Cached metadata: fps=%.2f, frames=%d, duration=%.2fs", fps, frame_count, duration)
         return metadata
 
+    def _get_video_codec(self, video_path: str) -> str:
+        """Get the video codec using ffprobe."""
+        try:
+            cmd = [
+                "ffprobe", 
+                "-v", "error", 
+                "-select_streams", "v:0", 
+                "-show_entries", "stream=codec_name", 
+                "-of", "default=noprint_wrappers=1:nokey=1", 
+                video_path
+            ]
+            codec = subprocess.check_output(cmd).decode().strip()
+            return codec
+        except Exception as e:
+            logger.warning(f"Failed to detect codec for {video_path}: {e}")
+            return "unknown"
+        
+    def _transcode_to_h264(self, input_path: str, codec: str) -> str:
+        """
+            Transcode video to H.264 codec using ffmpeg.
+
+            Arguments:
+                input_path: Path to the input video file.
+                codec: Detected codec of the input video.
+
+            Returns:
+                Path to the transcoded video file.
+        """
+        if codec == "h264":
+            return input_path  # No transcoding needed
+
+        transcoded_temp = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+        transcoded_path = transcoded_temp.name
+        transcoded_temp.close()  # Close so ffmpeg can write to it
+
+        logger.info(f"Transcoding video ({codec} -> h264) to ensure compatibility: {input_path} -> {transcoded_path}")
+        
+        # FFmpeg command: -y (overwrite), -i (input), -c:v libx264 (video codec), -c:a aac (audio), -preset fast
+        cmd = [
+            "ffmpeg", "-y", "-v", "error",
+            "-i", input_path,
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-c:a", "aac",
+            transcoded_path
+        ]
+        
+        try:
+            completed_process = subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            # Log any non-fatal stderr output for debugging at a lower level
+            if completed_process.stderr:
+                logger.debug(
+                    "ffmpeg stderr output during successful transcoding for %s: %s",
+                    input_path,
+                    completed_process.stderr,
+                )
+            return transcoded_path
+        except subprocess.CalledProcessError as e:
+            logger.error(
+                "ffmpeg transcoding failed for %s with return code %s. stderr: %s",
+                input_path,
+                e.returncode,
+                e.stderr,
+            )
+            # Cleanup partial file if transcoding fails
+            if os.path.exists(transcoded_path):
+                os.unlink(transcoded_path)
+            raise
+
+
     def process_video_from_bytes(
         self,
         video_bytes: bytes,
@@ -107,20 +184,59 @@ class Preprocessor:
         """Process video from uploaded bytes with automatic temp file cleanup."""
         logger.info("Starting preprocessing: video_id=%s, filename=%s", video_id, filename)
 
-        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=True) as temp_file:
-            temp_file.write(video_bytes)
-            temp_file.flush()
+        input_path = None
+        processing_path = None
 
-            try:
-                return self.process_video(
-                    video_path=temp_file.name,
-                    video_id=video_id,
-                    filename=filename,
-                    hashed_identifier=hashed_identifier
-                )
-            except Exception as e:
-                logger.error("Processing failed for video_id=%s: %s", video_id, e)
-                raise
+        try:
+            # Create a temp file for the original upload
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as input_temp:
+                input_path = input_temp.name
+                input_temp.write(video_bytes)
+                input_temp.flush()
+
+            processing_path = input_path
+
+            # Detect codec
+            codec = self._get_video_codec(input_path)
+            logger.info(f"Detected video codec: {codec}")
+
+            if codec != "h264":
+                processing_path = self._transcode_to_h264(input_path, codec)
+            else:
+                logger.info("Video is already H.264, skipping transcoding")
+            
+            return self.process_video(
+                video_path=processing_path,
+                video_id=video_id,
+                filename=filename,
+                hashed_identifier=hashed_identifier
+            )
+
+        except subprocess.CalledProcessError as e:
+            stderr_output = ""
+            if getattr(e, "stderr", None):
+                if isinstance(e.stderr, bytes):
+                    stderr_output = e.stderr.decode("utf-8", errors="replace")
+                else:
+                    stderr_output = str(e.stderr)
+            if stderr_output:
+                logger.error("FFmpeg transcoding failed. Stderr: %s", stderr_output)
+                error_message = f"Failed to process video codec. FFmpeg stderr: {stderr_output}"
+            else:
+                logger.error("FFmpeg transcoding failed: %s", e)
+                error_message = "Failed to process video codec"
+            raise RuntimeError(error_message) from e
+        except Exception as e:
+            logger.error("Processing failed for video_id=%s: %s", video_id, e)
+            raise
+        finally:
+            # Cleanup all temp files
+            if input_path and os.path.exists(input_path):
+                os.unlink(input_path)
+            
+            # If processing_path is different (transcoded), clean it up too
+            if processing_path and processing_path != input_path and os.path.exists(processing_path):
+                os.unlink(processing_path)
 
     def process_video(
         self,
@@ -198,7 +314,7 @@ class Preprocessor:
         Thread-safe for parallel execution.
         Returns None if processing fails.
         """
-        #TODO: Specifcy explicit return type and not just a dict in docstring
+        #TODO: Specify explicit return type and not just a dict in docstring
         try:
             # Extract frames with complexity analysis
             frames, sampling_fps, complexity_score = self.extractor.extract_frames(video_path, chunk)
