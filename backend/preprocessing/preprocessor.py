@@ -192,8 +192,19 @@ class Preprocessor:
             )
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg transcoding failed: {e}")
-            raise RuntimeError("Failed to process video codec") from e
+            stderr_output = ""
+            if getattr(e, "stderr", None):
+                if isinstance(e.stderr, bytes):
+                    stderr_output = e.stderr.decode("utf-8", errors="replace")
+                else:
+                    stderr_output = str(e.stderr)
+            if stderr_output:
+                logger.error("FFmpeg transcoding failed. Stderr: %s", stderr_output)
+                error_message = f"Failed to process video codec. FFmpeg stderr: {stderr_output}"
+            else:
+                logger.error("FFmpeg transcoding failed: %s", e)
+                error_message = "Failed to process video codec"
+            raise RuntimeError(error_message) from e
         except Exception as e:
             logger.error("Processing failed for video_id=%s: %s", video_id, e)
             raise
