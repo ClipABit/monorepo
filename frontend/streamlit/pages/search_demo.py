@@ -89,7 +89,7 @@ def upload_dialog():
                             else:
                                 st.error("Upload failed")
                         else:
-                            st.error(f"Upload failed with status {resp.status_code}")
+                            st.error(f"Upload failed with status {resp.status_code}. Message: {resp.text}")
                     except requests.RequestException as e:
                         st.error(f"Upload failed: {e}")
         
