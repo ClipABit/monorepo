@@ -147,9 +147,27 @@ class Preprocessor:
         ]
         
         try:
-            subprocess.run(cmd, check=True)
+            completed_process = subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            # Log any non-fatal stderr output for debugging at a lower level
+            if completed_process.stderr:
+                logger.debug(
+                    "ffmpeg stderr output during successful transcoding for %s: %s",
+                    input_path,
+                    completed_process.stderr,
+                )
             return transcoded_path
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            logger.error(
+                "ffmpeg transcoding failed for %s with return code %s. stderr: %s",
+                input_path,
+                e.returncode,
+                e.stderr,
+            )
             # Cleanup partial file if transcoding fails
             if os.path.exists(transcoded_path):
                 os.unlink(transcoded_path)
