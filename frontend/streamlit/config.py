@@ -25,14 +25,17 @@ class Config:
     print(f"Running in {ENVIRONMENT} environment")
 
     # Modal app name (matches backend app name)
-    APP_NAME = ENVIRONMENT
+    APP_NAME = f"clipabit-{ENVIRONMENT}"
+
+    # Determine url portion based on environment
+    url_portion = "" if ENVIRONMENT == "prod" else f"{ENVIRONMENT}-"
 
     # API Endpoints - dynamically constructed based on environment
     # Pattern: https://clipabit01--{env}-server-{endpoint}-{env}.modal.run
-    SEARCH_API_URL = f"https://clipabit01--{APP_NAME}-server-search-{APP_NAME}.modal.run"
-    UPLOAD_API_URL = f"https://clipabit01--{APP_NAME}-server-upload-{APP_NAME}.modal.run"
-    STATUS_API_URL = f"https://clipabit01--{APP_NAME}-server-status-{APP_NAME}.modal.run"
-    LIST_VIDEOS_API_URL = f"https://clipabit01--{APP_NAME}-server-list-videos-{APP_NAME}.modal.run"
+    SEARCH_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-search-{url_portion}.modal.run"
+    UPLOAD_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-upload-{url_portion}.modal.run"
+    STATUS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-status-{url_portion}.modal.run"
+    LIST_VIDEOS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-list-videos-{url_portion}.modal.run"
 
     # Namespace for Pinecone and R2 (web-demo for public demo)
     NAMESPACE = "web-demo"
