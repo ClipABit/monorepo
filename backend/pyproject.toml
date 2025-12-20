@@ -37,7 +37,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/unit", "tests/integration"]
 pythonpath = ["."]
 python_files = ["test_*.py"]
 markers = [

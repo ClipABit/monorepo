@@ -73,6 +73,54 @@ def sample_video_5s(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def sample_video_h264(tmp_path_factory) -> Path:
+    """1-second H.264 test video generated with ffmpeg."""
+    video_dir = tmp_path_factory.mktemp("test_videos_h264")
+    video_path = video_dir / "sample_h264.mp4"
+    
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
+        "-c:v", "libx264",
+        "-preset", "fast",
+        str(video_path)
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        pytest.skip(f"Failed to generate H.264 video: {e.stderr.decode()}")
+    except FileNotFoundError:
+        pytest.skip("ffmpeg not found, skipping H.264 test")
+        
+    return video_path
+
+
+@pytest.fixture(scope="session")
+def sample_video_vp9(tmp_path_factory) -> Path:
+    """1-second VP9 test video generated with ffmpeg."""
+    video_dir = tmp_path_factory.mktemp("test_videos_vp9")
+    video_path = video_dir / "sample_vp9.mp4"
+    
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
+        "-c:v", "libvpx-vp9",
+        "-b:v", "0", "-crf", "30",
+        str(video_path)
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        pytest.skip(f"Failed to generate VP9 video: {e.stderr.decode()}")
+    except FileNotFoundError:
+        pytest.skip("ffmpeg not found, skipping VP9 test")
+        
+    return video_path
+
+
+@pytest.fixture(scope="session")
 def sample_video_av1(tmp_path_factory) -> Path:
     """1-second AV1 test video generated with ffmpeg."""
     video_dir = tmp_path_factory.mktemp("test_videos_av1")
@@ -84,7 +132,7 @@ def sample_video_av1(tmp_path_factory) -> Path:
     cmd = [
         "ffmpeg", "-y",
         "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
-        "-c:v", "libsvtav1", 
+        "-c:v", "libsvtav1",
         "-preset", "8",
         "-crf", "50",
         str(video_path)
@@ -98,8 +146,6 @@ def sample_video_av1(tmp_path_factory) -> Path:
         pytest.skip("ffmpeg not found, skipping AV1 test")
         
     return video_path
-
-    
 
 
 @pytest.fixture(scope="session")
