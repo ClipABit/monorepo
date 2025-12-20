@@ -17,6 +17,7 @@ import numpy as np
 from pathlib import Path
 import tempfile
 import shutil
+import subprocess
 
 from preprocessing.chunker import Chunker
 from preprocessing.frame_extractor import FrameExtractor
@@ -48,6 +49,52 @@ def sample_video_5s(tmp_path_factory) -> Path:
 
     video_dir = tmp_path_factory.mktemp("test_videos")
     video_path = video_dir / "sample_5s.mp4"
+    
+    # Create a simple video using OpenCV
+    height, width = 480, 640
+    fps = 30
+    duration = 5
+    frames = duration * fps
+    
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(str(video_path), fourcc, fps, (width, height))
+    
+    for _ in range(frames):
+        # Create a frame with random noise/motion
+        frame = np.random.randint(0, 255, (height, width, 3), dtype=np.uint8)
+        out.write(frame)
+        
+    out.release()
+    
+    return video_path
+
+
+@pytest.fixture(scope="session")
+def sample_video_av1(tmp_path_factory) -> Path:
+    """1-second AV1 test video generated with ffmpeg."""
+    video_dir = tmp_path_factory.mktemp("test_videos_av1")
+    video_path = video_dir / "sample_av1.mp4"
+    
+    # Generate AV1 video using ffmpeg
+    # -f lavfi -i testsrc=duration=1:size=320x240:rate=30
+    # -c:v libsvtav1 -preset 8 -crf 50
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
+        "-c:v", "libsvtav1", 
+        "-preset", "8",
+        "-crf", "50",
+        str(video_path)
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        pytest.skip(f"Failed to generate AV1 video (ffmpeg might not support libsvtav1): {e.stderr.decode()}")
+    except FileNotFoundError:
+        pytest.skip("ffmpeg not found, skipping AV1 test")
+        
+    return video_path
 
     fps, duration = 30, 5
     width, height = 640, 480

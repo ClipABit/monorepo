@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+import os
 from preprocessing.preprocessor import Preprocessor
 
 
@@ -14,7 +15,7 @@ class TestEndToEndProcessing:
             filename="test.mp4",
             hashed_identifier="abc123"
         )
-
+        print(result)
         assert len(result) > 0
         assert all('chunk_id' in chunk for chunk in result)
         assert all('frames' in chunk for chunk in result)
@@ -208,13 +209,13 @@ class TestErrorHandling:
 
     def test_invalid_video_bytes_raises_error(self, preprocessor):
         """Verify invalid video data is handled gracefully."""
-        result = preprocessor.process_video_from_bytes(
-            video_bytes=b"not a video",
-            video_id="test",
-            filename="fake.mp4",
-            hashed_identifier=""
-        )
-        assert result == []  # Returns empty instead of crashing
+        with pytest.raises(RuntimeError):
+            preprocessor.process_video_from_bytes(
+                video_bytes=b"not a video",
+                video_id="test",
+                filename="fake.mp4",
+                hashed_identifier=""
+            )
 
     @pytest.mark.slow
     def test_corrupted_video_handles_gracefully(self, preprocessor, temp_dir):
@@ -230,3 +231,35 @@ class TestErrorHandling:
             hashed_identifier=""
         )
         assert result == []  # Returns empty instead of crashing
+
+
+class TestCodecSupport:
+    """Test codec detection and transcoding capabilities."""
+
+    def test_detects_av1_codec(self, preprocessor, sample_video_av1):
+        """Verify AV1 codec is correctly identified."""
+        # Ensure the file exists
+        assert os.path.exists(sample_video_av1)
+        
+        # Check codec detection
+        codec = preprocessor._get_video_codec(str(sample_video_av1))
+        assert codec == "av1"
+
+    def test_transcodes_av1_to_h264(self, preprocessor, sample_video_av1):
+        """Verify AV1 video is transcoded and processed."""
+        with open(sample_video_av1, "rb") as f:
+            video_bytes = f.read()
+
+        # Process video (should trigger transcoding)
+        result = preprocessor.process_video_from_bytes(
+            video_bytes=video_bytes,
+            video_id="test_av1",
+            filename="test_av1.mp4"
+        )
+        
+        # Verify we got chunks back
+        assert len(result) > 0
+        
+        # Verify chunks have frames
+        assert all(len(chunk['frames']) > 0 for chunk in result)
+

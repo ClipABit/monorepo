@@ -3,12 +3,6 @@ import logging
 from fastapi import UploadFile, HTTPException, Form
 import modal
 
-# Pinecone index names per environment
-PINECONE_INDEX_MAP = {
-    "dev": "chunks-index",
-    "prod": "prod-chunks"
-}
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -20,6 +14,7 @@ logger = logging.getLogger(__name__)
 # dependencies found in pyproject.toml
 image = (
             modal.Image.debian_slim(python_version="3.12")
+            .apt_install("ffmpeg", "libsm6", "libxext6") # for video processing
             .uv_sync(extra_options="--no-dev")  # exclude dev dependencies to avoid package conflicts
             .add_local_python_source(  # add all local modules here
                 "preprocessing",
@@ -91,7 +86,7 @@ class Server:
         logger.info(f"Running in environment: {ENVIRONMENT}")
 
         # Select Pinecone index based on environment
-        pinecone_index = PINECONE_INDEX_MAP[ENVIRONMENT]
+        pinecone_index = f"{ENVIRONMENT}-chunks"
         logger.info(f"Using Pinecone index: {pinecone_index}")
 
         # Instantiate classes
