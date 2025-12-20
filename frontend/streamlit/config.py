@@ -59,7 +59,6 @@ class Config:
         logger.info(f"  App Name: {config['app_name']}")
         logger.info(f"  Namespace: {config['namespace']}")
 
-    
     @classmethod
     def print_config_full(cls):
         """Print current configuration for debugging."""
