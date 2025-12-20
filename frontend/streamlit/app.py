@@ -14,6 +14,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-Config.print_config_partial()
+Config.print_config_full()
 
 pg.run()
