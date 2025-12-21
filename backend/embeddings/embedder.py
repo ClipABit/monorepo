@@ -24,7 +24,10 @@ class VideoEmbedder:
             self._clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(
                 self._device
             )
-            self._clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+            self._clip_processor = CLIPProcessor.from_pretrained(
+                "openai/clip-vit-base-patch32",
+                use_fast=True  # uses fast tokenizer implemented in Rust 
+            )
         return self._clip_model, self._clip_processor
    
     def _generate_clip_embedding(self, frames, num_frames: int = 8) -> torch.Tensor:

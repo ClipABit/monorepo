@@ -16,6 +16,7 @@ dependencies = [
     "transformers",
     "scenedetect",
     "boto3",
+    "torchvision"
 ]
 
 [project.scripts]
