@@ -268,3 +268,43 @@ class TestEdgeCases:
         assert call1_namespace == "namespace-1"
         assert call2_namespace == "namespace-2"
 
+
+class TestDeleteChunks:
+    """Test chunk deletion operations."""
+
+    def test_delete_chunks_success(self, mock_pinecone_connector):
+        """Verify successful chunk deletion."""
+        connector, mock_index, mock_client, _ = mock_pinecone_connector
+        
+        chunk_ids = ["chunk-1", "chunk-2"]
+        result = connector.delete_chunks(
+            chunk_ids=chunk_ids,
+            namespace="test-namespace"
+        )
+
+        assert result is True
+        mock_client.Index.assert_called_with("test-index")
+        mock_index.delete.assert_called_once_with(ids=chunk_ids, namespace="test-namespace")
+
+    def test_delete_chunks_empty_list(self, mock_pinecone_connector):
+        """Verify deletion returns True immediately for empty list."""
+        connector, mock_index, _, _ = mock_pinecone_connector
+        
+        result = connector.delete_chunks(chunk_ids=[])
+
+        assert result is True
+        mock_index.delete.assert_not_called()
+
+    def test_delete_chunks_exception(self, mock_pinecone_connector):
+        """Verify deletion handles exceptions gracefully."""
+        connector, mock_index, _, _ = mock_pinecone_connector
+        
+        mock_index.delete.side_effect = Exception("Pinecone error")
+        
+        result = connector.delete_chunks(
+            chunk_ids=["chunk-1"],
+            namespace="test-namespace"
+        )
+
+        assert result is False
+        mock_index.delete.assert_called_once()

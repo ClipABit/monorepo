@@ -18,6 +18,10 @@ from pathlib import Path
 import tempfile
 import shutil
 import subprocess
+from unittest.mock import MagicMock, patch
+import sys
+import importlib
+import os
 
 from preprocessing.chunker import Chunker
 from preprocessing.frame_extractor import FrameExtractor
@@ -25,6 +29,7 @@ from preprocessing.compressor import Compressor
 from preprocessing.preprocessor import Preprocessor
 from models.metadata import VideoChunk
 from database.pinecone_connector import PineconeConnector
+from database.r2_connector import R2Connector
 
 
 # ==============================================================================
@@ -292,6 +297,74 @@ def mock_pinecone_connector(mocker):
     connector = PineconeConnector(api_key="test-key", index_name="test-index")
     
     return connector, mock_index, mock_client, mock_pinecone
+
+
+@pytest.fixture
+def mock_r2_connector(mocker):
+    """Mock R2Connector with all necessary mocks set up"""
+    mock_boto3 = mocker.patch('database.r2_connector.boto3')
+    mock_client = mocker.MagicMock()
+    mock_boto3.client.return_value = mock_client
+    
+    connector = R2Connector(
+        account_id="test-account",
+        access_key_id="test-key",
+        secret_access_key="test-secret",
+        environment="dev"
+    )
+    
+    return connector, mock_client, mock_boto3
+
+
+@pytest.fixture
+def server_instance(mocker):
+    """
+    Creates a Server instance with all dependencies mocked.
+    We bypass the actual startup() logic and manually inject mocks.
+    """
+    # Create a mock for the modal module
+    mock_modal = MagicMock()
+    
+    # Configure the mock decorators to just return the original class/function
+    def identity_decorator(*args, **kwargs):
+        def wrapper(obj):
+            return obj
+        return wrapper
+    
+    # Handle @app.cls() -> returns decorator -> returns class
+    mock_modal.App.return_value.cls.side_effect = identity_decorator
+    
+    # Handle @modal.method() -> returns decorator -> returns function
+    mock_modal.method.side_effect = identity_decorator
+    
+    # Handle @modal.enter() -> returns decorator -> returns function
+    mock_modal.enter.side_effect = identity_decorator
+    
+    # Handle @modal.fastapi_endpoint() -> returns decorator -> returns function
+    mock_modal.fastapi_endpoint.side_effect = identity_decorator
+
+    # Patch sys.modules to use our mock_modal
+    with patch.dict(sys.modules, {'modal': mock_modal}):
+        # Now import main. It will use the mocked modal.
+        # We need to reload it if it was already imported
+        if 'main' in sys.modules:
+            import main
+            importlib.reload(main)
+        else:
+            import main
+        
+        # Now Server is a regular Python class, not a Modal wrapped one
+        server = main.Server()
+        
+        # Mock all the components that would be set in startup()
+        server.r2_connector = mocker.MagicMock()
+        server.pinecone_connector = mocker.MagicMock()
+        server.preprocessor = mocker.MagicMock()
+        server.video_embedder = mocker.MagicMock()
+        server.job_store = mocker.MagicMock()
+        server.searcher = mocker.MagicMock()
+        
+        yield server
 
 
 # ==============================================================================
