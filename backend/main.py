@@ -81,8 +81,8 @@ class Server:
             raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
         
         ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
-        if ENVIRONMENT not in ["dev", "prod"]:
-            raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod")
+        if ENVIRONMENT not in ["dev", "prod", "staging"]:
+            raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod, staging")
         logger.info(f"Running in environment: {ENVIRONMENT}")
 
         # Select Pinecone index based on environment

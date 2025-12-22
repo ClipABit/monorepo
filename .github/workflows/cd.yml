@@ -1,9 +1,12 @@
 name: cd
 
 on:
+  # Trigger Staging deployment on push to main
   push:
-    branches:
-      - main
+    branches: [ main ]
+  
+  # Trigger Prod deployment manually via GitHub UI
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -13,26 +16,72 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
-    name: deploy
+  # ------------------------------------------------------------------
+  # STAGING DEPLOYMENT (Runs on push to main)
+  # ------------------------------------------------------------------
+  deploy-staging:
+    name: Deploy Staging
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    env:
-      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
     defaults:
       run:
         working-directory: backend
-
     steps:
-      - name: checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
 
-      - name: setup uv
+      - name: Install uv
         uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
 
-      - name: deploy to modal
-        run: uv run modal deploy main.py
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Deploy to Modal (Staging)
         env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ENVIRONMENT: staging
+        run: uv run modal deploy main.py
+
+  # ------------------------------------------------------------------
+  # PRODUCTION DEPLOYMENT (Runs only when manually triggered)
+  # ------------------------------------------------------------------
+  deploy-prod:
+    name: Deploy Production
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Deploy Backend to Modal
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # Fetch all history for branch syncing
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Deploy to Modal (Prod)
+        working-directory: backend
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           ENVIRONMENT: prod
+        run: uv run modal deploy main.py
+
+      # 2. Sync Frontend Code to Production Branch
+      # This triggers Streamlit Cloud to update the Prod App
+      - name: Sync Main to Production Branch
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          git checkout production
+          git merge origin/main --ff-only
+          git push origin production
