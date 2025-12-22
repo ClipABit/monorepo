@@ -262,6 +262,36 @@ class R2Connector:
             logger.error(f"Error generating presigned URL: {e}")
             return None
 
+    def delete_video(self, identifier: str) -> bool:
+        """
+        Delete a video from R2 storage using its identifier.
+        
+        Args:
+            identifier: The base64-encoded identifier of the video
+        
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
+        try:
+            # Get object key from identifier
+            object_key = self._get_object_key_from_identifier(identifier)
+            if not object_key:
+                logger.warning(f"Cannot delete video: invalid identifier {identifier}")
+                return False
+            
+            # Delete the object
+            self.s3_client.delete_object(
+                Bucket=self.bucket_name,
+                Key=object_key
+            )
+            
+            logger.info(f"Deleted video with identifier: {identifier}")
+            return True
+            
+        except ClientError as e:
+            logger.error(f"Error deleting video from R2: {e}")
+            return False
+
     def fetch_all_video_data(self, namespace: str = "__default__", expiration: int = 3600) -> list[dict]:
         """
         Fetch all video data for a namespace, including filenames, identifiers, and presigned URLs.

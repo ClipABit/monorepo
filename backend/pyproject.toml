@@ -33,6 +33,7 @@ packages = ["cli.py"]
 dev = [
     "opencv-python",
     "pytest",
+    "pytest-asyncio>=1.3.0",
     "pytest-cov",
     "pytest-mock",
 ]
