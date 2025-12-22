@@ -1,11 +1,112 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, ANY
 
-class TestPipelineRollback:
+class TestPipeline:
     """
-    Integration tests for the video processing pipeline's atomic rollback logic.
-    Verifies that resources are cleaned up (rolled back) when failures occur at different stages.
+    Integration tests for the video processing pipeline.
+    Covers success paths, failure/rollback scenarios, and edge cases.
     """
+
+    # ==========================================================================
+    # SUCCESS SCENARIOS
+    # ==========================================================================
+
+    @pytest.mark.asyncio
+    async def test_process_video_success(self, server_instance, sample_video_bytes):
+        """
+        Scenario: Happy path - everything succeeds.
+        Expectation:
+            - R2 upload called.
+            - Preprocessing called.
+            - Embeddings generated.
+            - Pinecone upsert called for all chunks.
+            - Job marked completed.
+            - Result contains correct stats.
+        """
+        # Setup
+        hashed_id = "hash-success"
+        server_instance.r2_connector.upload_video.return_value = (True, hashed_id)
+        
+        # Mock Preprocessor output
+        chunks = [
+            {
+                "chunk_id": "c1", 
+                "frames": [1, 2], 
+                "metadata": {"frame_count": 10, "complexity_score": 0.5, "timestamp_range": [0.0, 5.0]}, 
+                "memory_mb": 1.0
+            },
+            {
+                "chunk_id": "c2", 
+                "frames": [3, 4], 
+                "metadata": {"frame_count": 15, "complexity_score": 0.8, "timestamp_range": [5.0, 10.0]}, 
+                "memory_mb": 1.5
+            }
+        ]
+        server_instance.preprocessor.process_video_from_bytes.return_value = chunks
+        
+        # Mock Embedder
+        mock_embedding = MagicMock()
+        mock_embedding.numpy.return_value = [0.1, 0.2]
+        server_instance.video_embedder._generate_clip_embedding.return_value = mock_embedding
+        
+        # Mock Pinecone success
+        server_instance.pinecone_connector.upsert_chunk.return_value = True
+
+        # Execute
+        result = await server_instance.process_video(
+            video_bytes=sample_video_bytes,
+            filename="success.mp4",
+            job_id="job-success",
+            namespace="test-ns"
+        )
+
+        # Verify Result
+        assert result["status"] == "completed"
+        assert result["hashed_identifier"] == hashed_id
+        assert result["chunks"] == 2
+        assert result["total_frames"] == 25
+        assert result["total_memory_mb"] == 2.5
+        
+        # Verify Interactions
+        server_instance.r2_connector.upload_video.assert_called_once()
+        server_instance.preprocessor.process_video_from_bytes.assert_called_once()
+        assert server_instance.video_embedder._generate_clip_embedding.call_count == 2
+        assert server_instance.pinecone_connector.upsert_chunk.call_count == 2
+        
+        # Verify Job Store Update
+        server_instance.job_store.set_job_completed.assert_called_once_with("job-success", result)
+
+    @pytest.mark.asyncio
+    async def test_process_video_empty_result(self, server_instance):
+        """
+        Scenario: Video processed but resulted in 0 chunks (e.g. too short).
+        Expectation:
+            - Job completes successfully with 0 chunks.
+            - No embeddings generated.
+            - No Pinecone upserts.
+        """
+        # Setup
+        server_instance.r2_connector.upload_video.return_value = (True, "hash-empty")
+        server_instance.preprocessor.process_video_from_bytes.return_value = [] # No chunks
+
+        # Execute
+        result = await server_instance.process_video(
+            video_bytes=b"short-video",
+            filename="short.mp4",
+            job_id="job-empty",
+            namespace="test-ns"
+        )
+
+        # Verify
+        assert result["status"] == "completed"
+        assert result["chunks"] == 0
+        
+        server_instance.video_embedder._generate_clip_embedding.assert_not_called()
+        server_instance.pinecone_connector.upsert_chunk.assert_not_called()
+
+    # ==========================================================================
+    # ROLLBACK / FAILURE SCENARIOS
+    # ==========================================================================
 
     @pytest.mark.asyncio
     async def test_rollback_on_r2_upload_failure(self, server_instance):
@@ -218,4 +319,58 @@ class TestPipelineRollback:
         
         # Verify result is still failed
         assert result["status"] == "failed"
+
+    # ==========================================================================
+    # METADATA HANDLING
+    # ==========================================================================
+
+    @pytest.mark.asyncio
+    async def test_metadata_transformation(self, server_instance):
+        """
+        Scenario: Metadata contains complex types (timestamp_range, file_info) that need flattening.
+        Expectation:
+            - timestamp_range is split into start_time_s and end_time_s.
+            - file_info is flattened into file_*.
+            - Null values are removed.
+        """
+        # Setup
+        server_instance.r2_connector.upload_video.return_value = (True, "hash-meta")
+        
+        raw_metadata = {
+            "frame_count": 10,
+            "complexity_score": 0.5,
+            "timestamp_range": [10.5, 20.5],
+            "file_info": {"size": 100, "type": "mp4"},
+            "optional_field": None
+        }
+        
+        chunks = [{
+            "chunk_id": "c1", 
+            "frames": [], 
+            "metadata": raw_metadata, 
+            "memory_mb": 1.0
+        }]
+        server_instance.preprocessor.process_video_from_bytes.return_value = chunks
+        
+        # Mock embedding
+        server_instance.video_embedder._generate_clip_embedding.return_value = MagicMock(numpy=lambda: [0.1])
+        server_instance.pinecone_connector.upsert_chunk.return_value = True
+
+        # Execute
+        await server_instance.process_video(b"data", "test.mp4", "job-meta", "ns")
+
+        # Verify Upsert Call Arguments
+        call_args = server_instance.pinecone_connector.upsert_chunk.call_args
+        upserted_metadata = call_args.kwargs['metadata']
+        
+        # Check transformations
+        assert upserted_metadata['start_time_s'] == 10.5
+        assert upserted_metadata['end_time_s'] == 20.5
+        assert upserted_metadata['file_size'] == 100
+        assert upserted_metadata['file_type'] == "mp4"
+        
+        # Check removals
+        assert 'timestamp_range' not in upserted_metadata
+        assert 'file_info' not in upserted_metadata
+        assert 'optional_field' not in upserted_metadata
 
