@@ -28,7 +28,7 @@ class Config:
     APP_NAME = f"clipabit-{ENVIRONMENT}"
 
     # Determine url portion based on environment
-    url_portion = "" if ENVIRONMENT == "prod" else f"-{ENVIRONMENT}"
+    url_portion = "" if ENVIRONMENT in ["prod", "staging"] else f"-{ENVIRONMENT}"
 
     # API Endpoints - dynamically constructed based on environment
     # Pattern: https://clipabit01--{env}-server-{endpoint}-{env}.modal.run
