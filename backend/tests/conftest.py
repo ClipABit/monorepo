@@ -21,7 +21,6 @@ import subprocess
 from unittest.mock import MagicMock, patch
 import sys
 import importlib
-import os
 
 from preprocessing.chunker import Chunker
 from preprocessing.frame_extractor import FrameExtractor
