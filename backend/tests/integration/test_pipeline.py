@@ -300,7 +300,7 @@ class TestPipeline:
         server_instance.pinecone_connector.upsert_chunk.side_effect = [True, False]
         
         # Setup failure in R2 cleanup
-        server_instance.r2_connector.delete_video.side_effect = Exception("R2 Delete Failed")
+        server_instance.r2_connector.delete_video.return_value = False
         
         # Execute
         result = await server_instance.process_video(
