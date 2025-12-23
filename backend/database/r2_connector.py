@@ -4,8 +4,20 @@ import boto3
 from botocore.exceptions import ClientError
 from typing import Optional, Tuple
 import base64
+from dataclasses import dataclass
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class R2DeletionResult:
+    """Result of R2 deletion operation."""
+    success: bool
+    bucket: str
+    key: str
+    file_existed: bool
+    error_message: Optional[str] = None
+    bytes_deleted: Optional[int] = None
 
 class R2Connector:
     """
@@ -322,3 +334,126 @@ class R2Connector:
         except ClientError as e:
             logger.error(f"Error listing objects for user {namespace}: {e}")
             return []
+
+    def delete_video_file(self, hashed_identifier: str) -> R2DeletionResult:
+        """
+        Delete video file from R2 storage using its hashed identifier.
+        
+        Args:
+            hashed_identifier: The base64-encoded identifier of the video
+        
+        Returns:
+            R2DeletionResult: Result of the deletion operation
+        """
+        try:
+            # Get object key from identifier
+            object_key = self._get_object_key_from_identifier(hashed_identifier)
+            if not object_key:
+                return R2DeletionResult(
+                    success=False,
+                    bucket=self.bucket_name,
+                    key="",
+                    file_existed=False,
+                    error_message=f"Invalid hashed identifier: {hashed_identifier}"
+                )
+            
+            # Check if file exists and get size before deletion
+            file_existed = False
+            bytes_deleted = None
+            try:
+                response = self.s3_client.head_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key
+                )
+                file_existed = True
+                bytes_deleted = response.get('ContentLength', 0)
+                logger.info(f"Found video file {object_key} ({bytes_deleted} bytes) for deletion")
+            except ClientError as e:
+                if e.response['Error']['Code'] == '404':
+                    logger.info(f"Video file {object_key} does not exist in R2")
+                    return R2DeletionResult(
+                        success=True,  # Not an error if file doesn't exist
+                        bucket=self.bucket_name,
+                        key=object_key,
+                        file_existed=False,
+                        error_message="File not found in R2 storage"
+                    )
+                else:
+                    raise e
+            
+            # Delete the object
+            self.s3_client.delete_object(
+                Bucket=self.bucket_name,
+                Key=object_key
+            )
+            
+            logger.info(f"Successfully deleted video file {object_key} from R2")
+            return R2DeletionResult(
+                success=True,
+                bucket=self.bucket_name,
+                key=object_key,
+                file_existed=file_existed,
+                bytes_deleted=bytes_deleted
+            )
+            
+        except ClientError as e:
+            error_msg = f"Error deleting video from R2: {e}"
+            logger.error(error_msg)
+            return R2DeletionResult(
+                success=False,
+                bucket=self.bucket_name,
+                key=object_key if 'object_key' in locals() else "",
+                file_existed=False,
+                error_message=error_msg
+            )
+        except Exception as e:
+            error_msg = f"Unexpected error during R2 deletion: {e}"
+            logger.error(error_msg)
+            return R2DeletionResult(
+                success=False,
+                bucket=self.bucket_name,
+                key="",
+                file_existed=False,
+                error_message=error_msg
+            )
+
+    def verify_deletion(self, hashed_identifier: str) -> bool:
+        """
+        Verify that a video file has been successfully deleted from R2 storage.
+        
+        Args:
+            hashed_identifier: The base64-encoded identifier of the video
+        
+        Returns:
+            bool: True if file is confirmed deleted (does not exist), False if file still exists or error
+        """
+        try:
+            # Get object key from identifier
+            object_key = self._get_object_key_from_identifier(hashed_identifier)
+            if not object_key:
+                logger.warning(f"Cannot verify deletion: invalid identifier {hashed_identifier}")
+                return False
+            
+            # Try to access the file - should fail if properly deleted
+            try:
+                self.s3_client.head_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key
+                )
+                # If we get here, file still exists
+                logger.warning(f"Verification failed: video file {object_key} still exists in R2")
+                return False
+                
+            except ClientError as e:
+                if e.response['Error']['Code'] == '404':
+                    # File not found - deletion verified
+                    logger.info(f"Deletion verified: video file {object_key} no longer exists in R2")
+                    return True
+                else:
+                    # Other error - cannot verify
+                    logger.error(f"Error verifying deletion of {object_key}: {e}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Unexpected error during deletion verification: {e}")
+            return False
