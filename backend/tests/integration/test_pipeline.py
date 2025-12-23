@@ -117,8 +117,7 @@ class TestPipeline:
             - No rollback actions (delete_video, delete_chunks) because nothing was created.
         """
         # Setup
-        server_instance.r2_connector.upload_video.return_value = (False, None) # Fail
-        # Or raise exception
+        # Raise exception
         server_instance.r2_connector.upload_video.side_effect = Exception("R2 Upload Error")
 
         # Execute
@@ -149,7 +148,6 @@ class TestPipeline:
         # Setup
         hashed_id = "hash-123"
         server_instance.r2_connector.upload_video.return_value = (True, hashed_id)
-        server_instance.r2_connector.upload_video.side_effect = None
         
         server_instance.preprocessor.process_video_from_bytes.side_effect = Exception("Preprocessing Failed")
 
@@ -181,7 +179,6 @@ class TestPipeline:
         # Setup
         hashed_id = "hash-456"
         server_instance.r2_connector.upload_video.return_value = (True, hashed_id)
-        server_instance.r2_connector.upload_video.side_effect = None
         
         # Mock preprocessor to return one chunk
         chunk = {
@@ -227,7 +224,6 @@ class TestPipeline:
         # Setup
         hashed_id = "hash-789"
         server_instance.r2_connector.upload_video.return_value = (True, hashed_id)
-        server_instance.r2_connector.upload_video.side_effect = None
         
         chunks = [
             {

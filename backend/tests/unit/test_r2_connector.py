@@ -9,7 +9,7 @@ class TestR2ConnectorInitialization:
         """Verify connector initializes with required parameters."""
         connector, mock_client, mock_boto3 = mock_r2_connector
 
-        assert connector.bucket_name == "dev"
+        assert connector.bucket_name == "test"
         assert connector.endpoint_url == "https://test-account.r2.cloudflarestorage.com"
         mock_boto3.client.assert_called_once()
         assert connector.s3_client == mock_client
@@ -32,7 +32,7 @@ class TestUploadVideo:
         
         # Verify put_object called correctly
         args = mock_client.put_object.call_args[1]
-        assert args['Bucket'] == "dev"
+        assert args['Bucket'] == "test"
         assert args['Body'] == video_data
         assert args['ContentType'] == "video/mp4"
         assert args['Key'].startswith("test-namespace/")
@@ -62,13 +62,13 @@ class TestFetchVideo:
         mock_client.get_object.return_value = {'Body': mock_body}
 
         # Create valid identifier
-        identifier = base64.urlsafe_b64encode(b"dev/ns/vid.mp4").decode('utf-8')
+        identifier = base64.urlsafe_b64encode(b"test/ns/vid.mp4").decode('utf-8')
 
         result = connector.fetch_video(identifier)
 
         assert result == b"video-content"
         mock_client.get_object.assert_called_once_with(
-            Bucket="dev",
+            Bucket="test",
             Key="ns/vid.mp4"
         )
 
@@ -83,7 +83,7 @@ class TestFetchVideo:
         connector, mock_client, _ = mock_r2_connector
         mock_client.get_object.side_effect = ClientError({'Error': {'Code': '404'}}, 'get_object')
         
-        identifier = base64.urlsafe_b64encode(b"dev/ns/vid.mp4").decode('utf-8')
+        identifier = base64.urlsafe_b64encode(b"test/ns/vid.mp4").decode('utf-8')
         result = connector.fetch_video(identifier)
         
         assert result is None
@@ -97,14 +97,14 @@ class TestGeneratePresignedURL:
         connector, mock_client, _ = mock_r2_connector
         mock_client.generate_presigned_url.return_value = "https://signed-url"
         
-        identifier = base64.urlsafe_b64encode(b"dev/ns/vid.mp4").decode('utf-8')
+        identifier = base64.urlsafe_b64encode(b"test/ns/vid.mp4").decode('utf-8')
         url = connector.generate_presigned_url(identifier)
 
         assert url == "https://signed-url"
         mock_client.generate_presigned_url.assert_called_once()
         args = mock_client.generate_presigned_url.call_args
         assert args[0][0] == 'get_object'
-        assert args[1]['Params']['Bucket'] == "dev"
+        assert args[1]['Params']['Bucket'] == "test"
         assert args[1]['Params']['Key'] == "ns/vid.mp4"
 
     def test_generate_url_bucket_mismatch(self, mock_r2_connector):
@@ -152,13 +152,13 @@ class TestDeleteVideo:
         """Verify successful video deletion."""
         connector, mock_client, _ = mock_r2_connector
         
-        identifier = base64.urlsafe_b64encode(b"dev/test-namespace/video.mp4").decode('utf-8')
+        identifier = base64.urlsafe_b64encode(b"test/test-namespace/video.mp4").decode('utf-8')
         
         result = connector.delete_video(identifier)
 
         assert result is True
         mock_client.delete_object.assert_called_once_with(
-            Bucket="dev",
+            Bucket="test",
             Key="test-namespace/video.mp4"
         )
 
@@ -187,7 +187,7 @@ class TestDeleteVideo:
         """Verify deletion handles client errors gracefully."""
         connector, mock_client, _ = mock_r2_connector
         
-        identifier = base64.urlsafe_b64encode(b"dev/test-namespace/video.mp4").decode('utf-8')
+        identifier = base64.urlsafe_b64encode(b"test/test-namespace/video.mp4").decode('utf-8')
         
         # Simulate ClientError
         error_response = {'Error': {'Code': '500', 'Message': 'Internal Error'}}

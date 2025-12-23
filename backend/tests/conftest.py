@@ -309,7 +309,7 @@ def mock_r2_connector(mocker):
         account_id="test-account",
         access_key_id="test-key",
         secret_access_key="test-secret",
-        environment="dev"
+        environment="test"
     )
     
     return connector, mock_client, mock_boto3
