@@ -128,9 +128,11 @@ class Server:
                 namespace=namespace
             )
             if not success:
+                # Capture error details returned in hashed_identifier before resetting it
+                upload_error_details = hashed_identifier
                 # Reset hashed_identifier if upload failed to avoid rollback attempting to delete it
                 hashed_identifier = None
-                raise Exception(f"Failed to upload video to R2 storage")
+                raise Exception(f"Failed to upload video to R2 storage: {upload_error_details}")
 
             # Process video through preprocessing pipeline
             processed_chunks = self.preprocessor.process_video_from_bytes(
