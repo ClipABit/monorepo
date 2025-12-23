@@ -1,4 +1,3 @@
-import pytest
 import base64
 from botocore.exceptions import ClientError
 from database.r2_connector import R2Connector
