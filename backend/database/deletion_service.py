@@ -5,7 +5,6 @@ This service coordinates deletion across multiple storage systems (R2 and Pineco
 while enforcing environment-based access controls and providing comprehensive logging.
 """
 
-import os
 import logging
 import asyncio
 from dataclasses import dataclass
