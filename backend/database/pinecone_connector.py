@@ -83,7 +83,7 @@ class PineconeConnector:
             query_embedding = query_embedding.tolist()
             response = self.index.query(vector=query_embedding, top_k=top_k, include_metadata=True, namespace=namespace)
 
-            logger.info(f"Queried top {top_k} chunks from index {self.index.name} with namespace {namespace}")
+            logger.info(f"Queried top {top_k} chunks from index {self.index_name} with namespace {namespace}")
             return response['matches']
         except Exception as e:
             logger.error(f"Error querying chunks from index {self.index_name} with namespace {namespace}: {e}")

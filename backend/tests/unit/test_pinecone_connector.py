@@ -15,6 +15,7 @@ class TestPineconeConnectorInitialization:
 
         assert connector.index_name == "test-index"
         mock_pinecone.assert_called_once_with(api_key="test-api-key")
+        mock_client.Index.assert_called_once_with("test-index")
         assert connector.client == mock_client
 
 
@@ -33,7 +34,6 @@ class TestUpsertChunk:
         )
 
         assert result is True
-        mock_client.Index.assert_called_once_with("test-index")
         mock_index.upsert.assert_called_once()
         call_args = mock_index.upsert.call_args
         assert call_args[1]['namespace'] == "test-namespace"
@@ -283,7 +283,6 @@ class TestDeleteChunks:
         )
 
         assert result is True
-        mock_client.Index.assert_called_with("test-index")
         mock_index.delete.assert_called_once_with(ids=chunk_ids, namespace="test-namespace")
 
     def test_delete_chunks_empty_list(self, mock_pinecone_connector):

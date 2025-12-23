@@ -121,7 +121,7 @@ class Server:
 
         try:
             # Upload original video to R2 bucket
-            # TODO: do this in parallel with processing and provide url once done
+            # TODO: do this in parallel with processing
             success, hashed_identifier = self.r2_connector.upload_video(
                 video_data=video_bytes,
                 filename=filename,
@@ -197,8 +197,6 @@ class Server:
                     "metadata": chunk['metadata'],
                     "memory_mb": chunk['memory_mb'],
                 })
-              
-            # TODO: Upload processed data to S3
 
             result = {
                 "job_id": job_id,
@@ -226,19 +224,17 @@ class Server:
             
             # 1. Delete video from R2
             if hashed_identifier:
-                try:
-                    logger.info(f"[Job {job_id}] Rolling back: Deleting video from R2 ({hashed_identifier})")
-                    self.r2_connector.delete_video(hashed_identifier)
-                except Exception as rollback_err:
-                    logger.error(f"[Job {job_id}] Rollback failed for R2 video deletion: {rollback_err}")
+                logger.info(f"[Job {job_id}] Rolling back: Deleting video from R2 ({hashed_identifier})")
+                success = self.r2_connector.delete_video(hashed_identifier)
+                if not success:
+                    logger.error(f"[Job {job_id}] Rollback failed for R2 video deletion: {hashed_identifier}")
             
             # 2. Delete chunks from Pinecone
             if upserted_chunk_ids:
-                try:
-                    logger.info(f"[Job {job_id}] Rolling back: Deleting {len(upserted_chunk_ids)} chunks from Pinecone")
-                    self.pinecone_connector.delete_chunks(upserted_chunk_ids, namespace=namespace)
-                except Exception as rollback_err:
-                    logger.error(f"[Job {job_id}] Rollback failed for Pinecone chunks deletion: {rollback_err}")
+                logger.info(f"[Job {job_id}] Rolling back: Deleting {len(upserted_chunk_ids)} chunks from Pinecone")
+                success = self.pinecone_connector.delete_chunks(upserted_chunk_ids, namespace=namespace)
+                if not success:
+                    logger.error(f"[Job {job_id}] Rollback failed for Pinecone chunks deletion: {len(upserted_chunk_ids)} chunks")
             
             logger.info(f"[Job {job_id}] Rollback complete.")
             # ----------------------
