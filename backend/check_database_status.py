@@ -6,16 +6,17 @@ Script to check the current state of the database after deletions.
 import os
 import sys
 from datetime import datetime
+
 from dotenv import load_dotenv
+
+from database.pinecone_connector import PineconeConnector
+from database.r2_connector import R2Connector
 
 # Add current directory to path
 sys.path.append('.')
 
 # Load environment variables from .env file
 load_dotenv()
-
-from database.pinecone_connector import PineconeConnector
-from database.r2_connector import R2Connector
 
 def check_database_status():
     """Check the current state of both R2 and Pinecone databases."""
@@ -70,7 +71,7 @@ def check_database_status():
     # Check Pinecone stats
     try:
         # Test basic connectivity by trying to get the index
-        index = pinecone_connector.client.Index(pinecone_index)
+        pinecone_connector.client.Index(pinecone_index)
         print("📊 PINECONE INDEX STATS:")
         print(f"   Index name: {pinecone_index}")
         print("   ✅ Successfully connected to index")

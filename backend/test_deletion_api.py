@@ -39,7 +39,7 @@ def test_deletion_api():
             response_data = response.json()
             print("📋 Response Body:")
             print(json.dumps(response_data, indent=2))
-        except:
+        except (json.JSONDecodeError, ValueError):
             print(f"📋 Response Text: {response.text}")
             
     except requests.RequestException as e:
