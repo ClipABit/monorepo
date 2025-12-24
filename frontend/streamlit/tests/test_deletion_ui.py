@@ -6,7 +6,7 @@ Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import requests
 import sys
 import os
@@ -115,7 +115,7 @@ class TestDeleteAPIIntegration:
         namespace = "web-demo"
         
         try:
-            response = requests.delete(
+            requests.delete(
                 f"{Config.DELETE_API_URL}",
                 params={"hashed_identifier": hashed_identifier, "namespace": namespace},
                 timeout=30
