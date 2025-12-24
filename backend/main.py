@@ -83,6 +83,7 @@ class Server:
         ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
         if ENVIRONMENT not in ["dev", "prod"]:
             raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod")
+        self.environment = ENVIRONMENT  # Store for use in other methods
         logger.info(f"Running in environment: {ENVIRONMENT}")
 
         # Select Pinecone index based on environment
@@ -106,14 +107,6 @@ class Server:
             api_key=PINECONE_API_KEY,
             index_name=pinecone_index,
             r2_connector=self.r2_connector
-        )
-
-        # Initialize deletion service
-        from database.deletion_service import VideoDeletionService
-        self.deletion_service = VideoDeletionService(
-            r2_connector=self.r2_connector,
-            pinecone_connector=self.pinecone_connector,
-            environment=ENVIRONMENT
         )
 
         logger.info("Container modules initialized and ready!")
@@ -358,171 +351,58 @@ class Server:
             logger.error(f"[List Videos] Error fetching videos: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def _delete_video_internal(self, hashed_identifier: str, namespace: str = "web-demo"):
-        """
-        Internal method for video deletion that can be called directly for testing.
-        This method contains the core deletion logic without FastAPI decorators.
-        """
-        logger.info(f"[Delete Video] Request: identifier={hashed_identifier}, namespace={namespace}")
+    async def _delete_video_internal(self, hashed_identifier: str, namespace: str = "__default__"):
+        """Delete a video and all associated chunks from R2 and Pinecone."""
+        logger.info(f"[Delete Video] {hashed_identifier} from namespace: {namespace}")
+
+        # Environment check - only allow deletion in dev
+        if self.environment != "dev":
+            raise HTTPException(
+                status_code=403,
+                detail="Deletion only allowed in dev environment"
+            )
+
+        # Validate identifier
+        if not hashed_identifier or not hashed_identifier.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="hashed_identifier is required"
+            )
 
         try:
-            # Validate hashed_identifier parameter
-            if not hashed_identifier or not hashed_identifier.strip():
-                logger.warning("[Delete Video] Invalid request: empty hashed_identifier")
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error": {
-                            "type": "ValidationError",
-                            "message": "hashed_identifier parameter is required and cannot be empty",
-                            "details": {
-                                "hashed_identifier": hashed_identifier,
-                                "namespace": namespace
-                            }
-                        }
-                    }
-                )
+            # Delete from both systems (connectors handle their own logic)
+            r2_result = self.r2_connector.delete_video_file(hashed_identifier)
+            pinecone_result = self.pinecone_connector.delete_by_metadata(
+                {"hashed_identifier": hashed_identifier},
+                namespace
+            )
 
-            # Execute deletion through service
-            deletion_result = await self.deletion_service.delete_video(hashed_identifier, namespace)
-
-            # Handle environment restriction (403 Forbidden)
-            if not deletion_result.success and deletion_result.error_message and "not allowed" in deletion_result.error_message:
-                logger.warning(f"[Delete Video] Unauthorized attempt: {deletion_result.error_message}")
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "error": {
-                            "type": "AuthorizationError", 
-                            "message": deletion_result.error_message,
-                            "details": {
-                                "hashed_identifier": hashed_identifier,
-                                "namespace": namespace,
-                                "environment": os.environ.get("ENVIRONMENT", "dev")
-                            }
-                        }
-                    }
-                )
-
-            # Handle validation errors (400 Bad Request)
-            if not deletion_result.success and deletion_result.error_message and "Invalid identifier" in deletion_result.error_message:
-                logger.warning(f"[Delete Video] Validation error: {deletion_result.error_message}")
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error": {
-                            "type": "ValidationError",
-                            "message": deletion_result.error_message,
-                            "details": {
-                                "hashed_identifier": hashed_identifier,
-                                "namespace": namespace
-                            }
-                        }
-                    }
-                )
-
-            # Handle not found (404 Not Found) - when both systems report no data
-            if (not deletion_result.r2_result.file_existed and 
-                deletion_result.pinecone_result.chunks_found == 0 and
-                deletion_result.success):
-                logger.info(f"[Delete Video] Video not found in either storage system: {hashed_identifier}")
+            # Check if video existed at all
+            if not r2_result.file_existed and pinecone_result.chunks_found == 0:
                 raise HTTPException(
                     status_code=404,
-                    detail={
-                        "error": {
-                            "type": "NotFoundError",
-                            "message": "Video not found in either storage system",
-                            "details": {
-                                "hashed_identifier": hashed_identifier,
-                                "namespace": namespace,
-                                "r2_status": "not_found",
-                                "pinecone_status": "not_found"
-                            }
-                        }
-                    }
+                    detail="Video not found in either storage system"
                 )
 
-            # Handle internal server errors (500 Internal Server Error)
-            if not deletion_result.success:
-                error_details = {
-                    "hashed_identifier": hashed_identifier,
-                    "namespace": namespace,
-                    "r2_status": "success" if deletion_result.r2_result.success else "failed",
-                    "pinecone_status": "success" if deletion_result.pinecone_result.success else "failed"
-                }
-
-                if deletion_result.r2_result.error_message:
-                    error_details["r2_error"] = deletion_result.r2_result.error_message
-                if deletion_result.pinecone_result.error_message:
-                    error_details["pinecone_error"] = deletion_result.pinecone_result.error_message
-
-                logger.error(f"[Delete Video] Internal error: {deletion_result.error_message}")
-                raise HTTPException(
-                    status_code=500,
-                    detail={
-                        "error": {
-                            "type": "StorageError",
-                            "message": deletion_result.error_message or "Deletion operation failed",
-                            "details": error_details
-                        }
-                    }
-                )
-
-            # Success response (200 OK)
-            response = {
-                "success": True,
+            # Return success response
+            return {
+                "success": r2_result.success and pinecone_result.success,
                 "hashed_identifier": hashed_identifier,
                 "namespace": namespace,
-                "message": "Video deleted successfully",
-                "details": {
-                    "r2": {
-                        "success": deletion_result.r2_result.success,
-                        "file_existed": deletion_result.r2_result.file_existed,
-                        "bytes_deleted": deletion_result.r2_result.bytes_deleted
-                    },
-                    "pinecone": {
-                        "success": deletion_result.pinecone_result.success,
-                        "chunks_found": deletion_result.pinecone_result.chunks_found,
-                        "chunks_deleted": deletion_result.pinecone_result.chunks_deleted
-                    }
+                "r2": {
+                    "deleted": r2_result.file_existed,
+                    "bytes": r2_result.bytes_deleted
                 },
-                "timestamp": deletion_result.timestamp.isoformat() if deletion_result.timestamp else None
+                "pinecone": {
+                    "chunks_deleted": pinecone_result.chunks_deleted
+                }
             }
 
-            # Add verification details if available
-            if deletion_result.verification_result:
-                response["verification"] = {
-                    "r2_verified": deletion_result.verification_result.r2_verified,
-                    "pinecone_verified": deletion_result.verification_result.pinecone_verified,
-                    "errors": deletion_result.verification_result.verification_errors
-                }
-
-            logger.info(f"[Delete Video] Success: {hashed_identifier} - R2: {deletion_result.r2_result.success}, Pinecone: {deletion_result.pinecone_result.success}")
-            return response
-
         except HTTPException:
-            # Re-raise HTTP exceptions (they're already properly formatted)
             raise
         except Exception as e:
-            # Handle unexpected errors
-            logger.error(f"[Delete Video] Unexpected error: {e}")
-            import traceback
-            traceback.print_exc()
-            
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": {
-                        "type": "InternalError",
-                        "message": "An unexpected error occurred during video deletion",
-                        "details": {
-                            "hashed_identifier": hashed_identifier,
-                            "namespace": namespace,
-                            "specific_error": str(e)
-                        }
-                    }
-                }
-            )
+            logger.error(f"[Delete Video] Error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     @modal.fastapi_endpoint(method="DELETE")
     async def delete_video(self, hashed_identifier: str, namespace: str = "web-demo"):
