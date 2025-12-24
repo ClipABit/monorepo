@@ -13,6 +13,7 @@ class PineconeConnector:
     def __init__(self, api_key: str, index_name: str):
         self.client = Pinecone(api_key=api_key)
         self.index_name = index_name
+        self.index = self.client.Index(index_name)
 
     def upsert_chunk(self, chunk_id: str, chunk_embedding: np.ndarray, namespace: str = "__default__", metadata: dict = None) -> bool:
         """
@@ -27,19 +28,42 @@ class PineconeConnector:
         Returns:
             bool: True if upsert was successful, False otherwise
         """
-        index = self.client.Index(self.index_name)
+        
         
         if metadata is None:
             metadata = {}
 
         try:
             chunk_embedding = chunk_embedding.tolist()
-            index.upsert(vectors=[(chunk_id, chunk_embedding, metadata)], namespace=namespace)
+            self.index.upsert(vectors=[(chunk_id, chunk_embedding, metadata)], namespace=namespace)
 
             logger.info(f"Upserted chunk {chunk_id} into index {self.index_name} with namespace {namespace}")
             return True
         except Exception as e:
             logger.error(f"Error upserting chunk {chunk_id} into index {self.index_name}: {e}")
+            return False
+
+    def delete_chunks(self, chunk_ids: list[str], namespace: str = "__default__") -> bool:
+        """
+        Delete chunks from the Pinecone index.
+
+        Args:
+            chunk_ids: List of chunk IDs to delete
+            namespace: The namespace to delete chunks from (default is "__default__")
+
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
+        
+        try:
+            if not chunk_ids:
+                return True
+                
+            self.index.delete(ids=chunk_ids, namespace=namespace)
+            logger.info(f"Deleted {len(chunk_ids)} chunks from index {self.index_name} with namespace {namespace}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting chunks from index {self.index_name}: {e}")
             return False
 
     def query_chunks(self, query_embedding: np.ndarray, namespace: str = "__default__", top_k: int = 5) -> list:
@@ -54,11 +78,10 @@ class PineconeConnector:
         Returns:
             list: List of top_k similar chunks with their metadata
         """
-        index = self.client.Index(self.index_name)
         
         try:
             query_embedding = query_embedding.tolist()
-            response = index.query(vector=query_embedding, top_k=top_k, include_metadata=True, namespace=namespace)
+            response = self.index.query(vector=query_embedding, top_k=top_k, include_metadata=True, namespace=namespace)
 
             logger.info(f"Queried top {top_k} chunks from index {self.index_name} with namespace {namespace}")
             return response['matches']

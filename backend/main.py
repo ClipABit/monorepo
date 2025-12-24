@@ -116,16 +116,23 @@ class Server:
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = ""):
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}'")
         
+        hashed_identifier = None
+        upserted_chunk_ids = []
+
         try:
             # Upload original video to R2 bucket
-            # TODO: do this in parallel with processing and provide url once done
+            # TODO: do this in parallel with processing
             success, hashed_identifier = self.r2_connector.upload_video(
                 video_data=video_bytes,
                 filename=filename,
                 namespace=namespace
             )
             if not success:
-                raise Exception(f"Failed to upload video to R2 storage: {hashed_identifier}")
+                # Capture error details returned in hashed_identifier before resetting it
+                upload_error_details = hashed_identifier
+                # Reset hashed_identifier if upload failed to avoid rollback attempting to delete it
+                hashed_identifier = None
+                raise Exception(f"Failed to upload video to R2 storage: {upload_error_details}")
 
             # Process video through preprocessing pipeline
             processed_chunks = self.preprocessor.process_video_from_bytes(
@@ -173,20 +180,23 @@ class Server:
                     del chunk['metadata'][k]
               
                
-                self.pinecone_connector.upsert_chunk(
+                success = self.pinecone_connector.upsert_chunk(
                     chunk_id=chunk['chunk_id'],
                     chunk_embedding=embedding.numpy(),
                     namespace=namespace,
                     metadata=chunk['metadata']
                 )            
                 
+                if success:
+                    upserted_chunk_ids.append(chunk['chunk_id'])
+                else:
+                    raise Exception(f"Failed to upsert chunk {chunk['chunk_id']} to Pinecone")
+
                 chunk_details.append({
                     "chunk_id": chunk['chunk_id'],
                     "metadata": chunk['metadata'],
                     "memory_mb": chunk['memory_mb'],
                 })
-              
-            # TODO: Upload processed data to S3
 
             result = {
                 "job_id": job_id,
@@ -208,6 +218,26 @@ class Server:
 
         except Exception as e:
             logger.error(f"[Job {job_id}] Processing failed: {e}")
+
+            # --- ROLLBACK LOGIC ---
+            logger.warning(f"[Job {job_id}] Initiating rollback due to failure...")
+            
+            # 1. Delete video from R2
+            if hashed_identifier:
+                logger.info(f"[Job {job_id}] Rolling back: Deleting video from R2 ({hashed_identifier})")
+                success = self.r2_connector.delete_video(hashed_identifier)
+                if not success:
+                    logger.error(f"[Job {job_id}] Rollback failed for R2 video deletion: {hashed_identifier}")
+            
+            # 2. Delete chunks from Pinecone
+            if upserted_chunk_ids:
+                logger.info(f"[Job {job_id}] Rolling back: Deleting {len(upserted_chunk_ids)} chunks from Pinecone")
+                success = self.pinecone_connector.delete_chunks(upserted_chunk_ids, namespace=namespace)
+                if not success:
+                    logger.error(f"[Job {job_id}] Rollback failed for Pinecone chunks deletion: {len(upserted_chunk_ids)} chunks")
+            
+            logger.info(f"[Job {job_id}] Rollback complete.")
+            # ----------------------
 
             import traceback
             traceback.print_exc()  # Print full stack trace for debugging
