@@ -1,4 +1,0 @@
-# file: C:\Users\ethan\OneDrive\Documents\GitHub\monorepo\backend\models\metadata.py
-# hypothesis_version: 6.148.7
-
-['chunk_id', 'complexity_score', 'duration', 'file_info', 'filename', 'frame_count', 'hashed_identifier', 'processed_at', 'sampling_fps', 'timestamp_range', 'type', 'video_id']

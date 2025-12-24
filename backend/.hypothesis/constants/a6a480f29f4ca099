@@ -1,4 +1,0 @@
-# file: C:\Users\ethan\OneDrive\Documents\GitHub\monorepo\backend\database\r2_connector.py
-# hypothesis_version: 6.148.7
-
-[3600, '.avi', '.mkv', '.mov', '.mp4', '.webm', '/', '404', '=', 'Body', 'Bucket', 'Code', 'ContentLength', 'Contents', 'Error', 'Key', '_', '__default__', 'auto', 'dev', 'file_name', 'get_object', 'hashed_identifier', 'list_objects_v2', 'object_key', 'presigned_url', 's3', 'utf-8', 'video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska', 'video/x-msvideo']
