@@ -1,0 +1,4 @@
+# file: C:\Users\ethan\OneDrive\Documents\GitHub\monorepo\backend\database\job_store_connector.py
+# hypothesis_version: 6.148.7
+
+['clipabit-jobs', 'completed', 'error', 'failed', 'status']

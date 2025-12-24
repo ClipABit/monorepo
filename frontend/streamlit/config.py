@@ -36,9 +36,13 @@ class Config:
     UPLOAD_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-upload{url_portion}.modal.run"
     STATUS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-status{url_portion}.modal.run"
     LIST_VIDEOS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-list-videos{url_portion}.modal.run"
+    DELETE_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-delete-video{url_portion}.modal.run"
 
     # Namespace for Pinecone and R2 (web-demo for public demo)
     NAMESPACE = "web-demo"
+
+    # Environment-based feature flags
+    SHOW_DELETE_BUTTONS = ENVIRONMENT == "dev"
 
     @classmethod
     def get_config(cls):
@@ -50,7 +54,9 @@ class Config:
             "upload_api_url": cls.UPLOAD_API_URL,
             "status_api_url": cls.STATUS_API_URL,
             "list_videos_api_url": cls.LIST_VIDEOS_API_URL,
+            "delete_api_url": cls.DELETE_API_URL,
             "namespace": cls.NAMESPACE,
+            "show_delete_buttons": cls.SHOW_DELETE_BUTTONS,
         }
 
     @classmethod
