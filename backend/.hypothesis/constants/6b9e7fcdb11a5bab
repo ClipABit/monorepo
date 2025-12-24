@@ -1,0 +1,4 @@
+# file: C:\Users\ethan\OneDrive\Documents\GitHub\monorepo\backend\models\__init__.py
+# hypothesis_version: 6.148.7
+
+['ChunkMetadata', 'ProcessedChunk', 'VideoChunk']

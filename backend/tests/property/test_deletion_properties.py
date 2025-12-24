@@ -6,16 +6,13 @@ correctness properties hold across all valid inputs. Each property test
 runs a minimum of 100 iterations to ensure comprehensive coverage.
 """
 
-import numpy as np
 import pytest
 import base64
-import json
 from hypothesis import given, strategies as st, settings
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
-from database.pinecone_connector import PineconeConnector, PineconeDeletionResult
-from database.deletion_service import VideoDeletionService, DeletionResult
-from database.r2_connector import R2DeletionResult
+from database.pinecone_connector import PineconeConnector
+from database.deletion_service import VideoDeletionService
 
 
 class TestPineconeDeletionProperties:
@@ -384,7 +381,6 @@ class TestBatchDeleteChunksProperties:
             mock_index.delete.assert_not_called()
 
 
-import base64
 
 # Strategy for generating valid base64 hashed identifiers
 def valid_hashed_identifier():
@@ -561,7 +557,6 @@ class TestDeletionVerificationProperties:
             )
             
             # Mock successful deletion operations but verification shows incomplete deletion
-            from botocore.exceptions import ClientError
             
             # For R2: file exists during deletion, gets deleted, but still exists during verification
             mock_s3_client.head_object.side_effect = [

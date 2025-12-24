@@ -6,8 +6,7 @@ of the PineconeConnector class, including property-based tests for deletion oper
 """
 
 import numpy as np
-from hypothesis import given, strategies as st
-from database.pinecone_connector import PineconeConnector, PineconeDeletionResult
+from database.pinecone_connector import PineconeConnector
 
 
 class TestPineconeConnectorInitialization:

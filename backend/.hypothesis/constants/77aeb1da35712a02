@@ -1,0 +1,4 @@
+# file: C:\Users\ethan\OneDrive\Documents\GitHub\monorepo\backend\preprocessing\preprocessor.py
+# hypothesis_version: 6.148.7
+
+[0.5, 2.0, 5.0, 13.0, 20.0, 25.0, 30.0, 480, 640, 1024, '-c:a', '-c:v', '-i', '-of', '-preset', '-select_streams', '-show_entries', '-v', '-y', '.', '.mp4', 'Chunk %s failed: %s', 'Created %d chunks', 'aac', 'avg_chunk_duration', 'avg_complexity', 'avg_frames_per_chunk', 'avg_sampling_fps', 'chunk_id', 'complexity_range', 'complexity_score', 'duration', 'error', 'fast', 'ffmpeg', 'ffprobe', 'fps', 'frame_count', 'frames', 'h264', 'libx264', 'memory_mb', 'metadata', 'mp4', 'replace', 'sampling_fps', 'stderr', 'stream=codec_name', 'total_chunks', 'total_duration', 'total_frames', 'total_memory_mb', 'unknown', 'utf-8', 'v:0']

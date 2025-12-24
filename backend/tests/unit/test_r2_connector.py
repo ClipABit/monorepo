@@ -8,7 +8,7 @@ of the R2Connector class, including property-based tests for deletion operations
 import pytest
 from botocore.exceptions import ClientError
 from hypothesis import given, strategies as st
-from database.r2_connector import R2Connector, R2DeletionResult
+from database.r2_connector import R2Connector
 
 
 class TestR2ConnectorInitialization:

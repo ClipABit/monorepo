@@ -9,7 +9,7 @@ import logging
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple
 
 from database.r2_connector import R2Connector, R2DeletionResult
 from database.pinecone_connector import PineconeConnector, PineconeDeletionResult
@@ -81,7 +81,7 @@ class VideoDeletionService:
         
         # Log security event for production environment access attempts
         if not is_dev:
-            logger.warning(f"Production environment access attempt blocked for deletion operations")
+            logger.warning("Production environment access attempt blocked for deletion operations")
             
         return is_dev
 

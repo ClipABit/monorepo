@@ -5,12 +5,11 @@ These tests verify the core correctness properties of the video deletion orchest
 including dual system confirmation, environment access controls, and error handling.
 """
 
-import pytest
 import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock
 from hypothesis import given, strategies as st, settings
 
-from database.deletion_service import VideoDeletionService, DeletionResult
+from database.deletion_service import VideoDeletionService
 from database.r2_connector import R2DeletionResult
 from database.pinecone_connector import PineconeDeletionResult
 
