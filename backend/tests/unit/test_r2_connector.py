@@ -48,6 +48,40 @@ class TestUploadVideo:
         assert success is False
         assert "500" in identifier  # Error message returned in identifier field
 
+class TestUploadImage:
+    """Test image upload operations."""
+
+    def test_upload_image_success(self, mock_r2_connector, sample_image_jpg):
+
+        """Verify successful image upload."""
+        connector, mock_client, _ = mock_r2_connector
+        image_data = sample_image_jpg.read_bytes()
+        filename = "test image.png"
+        namespace = "test_images_namespace"
+
+        success, identifier = connector.upload_image(image_data, filename, namespace)
+
+        assert success is True
+        assert identifier is not None
+        
+        # Verify put_object called correctly
+        args = mock_client.put_object.call_args[1]
+        assert args['Bucket'] == "test"
+        assert args['Body'] == image_data
+        assert args['ContentType'] == "image/png"
+        assert args['Key'].startswith("test_images_namespace/")
+        assert args['Key'].endswith("_test_image.png")
+
+    def test_upload_image_client_error(self, mock_r2_connector):
+        """Verify upload handles client errors."""
+        connector, mock_client, _ = mock_r2_connector
+        mock_client.put_object.side_effect = ClientError({'Error': {'Code': '500'}}, 'put_object')
+
+        success, identifier = connector.upload_image(b"data", "test.png")
+
+        assert success is False
+        assert "500" in identifier  # Error message returned in identifier field
+
 
 class TestFetchVideo:
     """Test video fetch operations."""

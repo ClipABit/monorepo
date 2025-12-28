@@ -182,6 +182,30 @@ def sample_video_bytes(sample_video_5s) -> bytes:
     """Video file as bytes for upload testing."""
     return sample_video_5s.read_bytes()
 
+# ==============================================================================
+# IMAGE FIXTURES
+# ==============================================================================
+@pytest.fixture(scope="session")
+def sample_image_jpg(tmp_path_factory) -> Path:
+    """Sample image file for testing."""
+    import cv2
+
+    image_dir = tmp_path_factory.mktemp("test_images")
+    image_path = image_dir / "sample_image.jpg"
+
+    # Create a simple image using OpenCV
+    width, height = 640, 480
+    image = np.zeros((height, width, 3), dtype=np.uint8)
+    cv2.putText(image, 'Test Image', (50, height // 2), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3)
+
+    cv2.imwrite(str(image_path), image)
+    return image_path
+
+@pytest.fixture
+def sample_image_jpg_bytes(sample_image_jpg) -> bytes:
+    """Image file as bytes for upload testing."""
+    return sample_image_jpg.read_bytes()
+
 
 # ==============================================================================
 # DATA FIXTURES
