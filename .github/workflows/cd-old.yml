@@ -1,38 +1,38 @@
-name: cd
+# name: cd
 
-on:
-  push:
-    branches:
-      - main
+# on:
+#   push:
+#     branches:
+#       - main
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+# concurrency:
+#   group: ${{ github.workflow }}-${{ github.ref }}
+#   cancel-in-progress: false
   
-permissions:
-  contents: read
+# permissions:
+#   contents: read
 
-jobs:
-  deploy:
-    name: deploy
-    runs-on: ubuntu-latest
-    env:
-      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-    defaults:
-      run:
-        working-directory: backend
+# jobs:
+#   deploy:
+#     name: deploy
+#     runs-on: ubuntu-latest
+#     env:
+#       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+#       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+#     defaults:
+#       run:
+#         working-directory: backend
 
-    steps:
-      - name: checkout
-        uses: actions/checkout@v5
+#     steps:
+#       - name: checkout
+#         uses: actions/checkout@v5
 
-      - name: setup uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
+#       - name: setup uv
+#         uses: astral-sh/setup-uv@v6
+#         with:
+#           enable-cache: true
 
-      - name: deploy to modal
-        run: uv run modal deploy main.py
-        env:
-          ENVIRONMENT: prod
+#       - name: deploy to modal
+#         run: uv run modal deploy main.py
+#         env:
+#           ENVIRONMENT: prod

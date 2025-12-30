@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
   
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   # ------------------------------------------------------------------
@@ -21,8 +21,8 @@ jobs:
   # ------------------------------------------------------------------
   deploy-staging:
     name: Deploy Staging
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    environment: staging # for GitHub Actions
     defaults:
       run:
         working-directory: backend
@@ -31,6 +31,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
 
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
@@ -42,7 +44,7 @@ jobs:
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-          ENVIRONMENT: staging
+          ENVIRONMENT: staging # for OS
         run: uv run modal deploy main.py
 
   # ------------------------------------------------------------------
@@ -50,8 +52,9 @@ jobs:
   # ------------------------------------------------------------------
   deploy-prod:
     name: Deploy Production
-    if: github.event_name == 'workflow_dispatch'
+    needs: deploy-staging # Rule 1: needs staging to finish
     runs-on: ubuntu-latest
+    environment: production # Rule 2: waits for manual approval (from repository environment settings)
     steps:
       # 1. Deploy Backend to Modal
       - uses: actions/checkout@v5
@@ -60,9 +63,13 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
 
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        with:
+          enable-cache: true
 
       - name: Install dependencies
         working-directory: backend
