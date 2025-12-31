@@ -26,7 +26,7 @@ class Config:
 
     # Modal app name (matches backend app name)
     APP_NAME = f"clipabit-{ENVIRONMENT}"
-
+    
     # Determine url portion based on environment
     url_portion = "" if ENVIRONMENT in ["prod", "staging"] else f"-{ENVIRONMENT}"
 
