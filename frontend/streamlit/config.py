@@ -19,8 +19,8 @@ class Config:
     ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
 
     # Validate environment
-    if ENVIRONMENT not in ["dev", "prod"]:
-        raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod")
+    if ENVIRONMENT not in ["dev", "prod", "staging"]:
+        raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod, staging")
     
     print(f"Running in {ENVIRONMENT} environment")
 
