@@ -1,12 +1,9 @@
 name: cd
 
 on:
-  # Trigger Staging deployment on push to main
+  # Trigger deployment on push to staging, main
   push:
-    branches: [ main ]
-  
-  # Trigger Prod deployment manually via GitHub UI
-  workflow_dispatch:
+    branches: [ staging, main ]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,10 +14,11 @@ permissions:
 
 jobs:
   # ------------------------------------------------------------------
-  # STAGING DEPLOYMENT (Runs on push to main)
+  # STAGING DEPLOYMENT (Runs on push to 'staging')
   # ------------------------------------------------------------------
   deploy-staging:
     name: Deploy Staging
+    if: github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
     environment: staging # for GitHub Actions
     defaults:
@@ -52,14 +50,13 @@ jobs:
   # ------------------------------------------------------------------
   deploy-prod:
     name: Deploy Production
-    needs: deploy-staging # Rule 1: needs staging to finish
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: production # Rule 2: waits for manual approval (from repository environment settings)
+    defaults:
+      run:
+        working-directory: backend
     steps:
-      # 1. Deploy Backend to Modal
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0 # Fetch all history for branch syncing
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -70,23 +67,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Install dependencies
-        working-directory: backend
         run: uv sync --frozen
 
       - name: Deploy to Modal (Prod)
-        working-directory: backend
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           ENVIRONMENT: prod
         run: uv run modal deploy main.py
-
-      # 2. Sync Frontend Code to Production Branch
-      # This triggers Streamlit Cloud to update the Prod App
-      - name: Sync Main to Production Branch
-        run: |
-          git config --global user.name 'GitHub Actions'
-          git config --global user.email 'actions@github.com'
-          git checkout production
-          git merge origin/main --ff-only
-          git push origin production
