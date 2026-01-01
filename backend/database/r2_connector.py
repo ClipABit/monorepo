@@ -445,3 +445,43 @@ class R2Connector:
                 file_existed=False,
                 error_message=error_msg
             )
+
+    def verify_deletion(self, hashed_identifier: str) -> bool:
+        """
+        Verify that a video file has been deleted from R2 storage.
+
+        Args:
+            hashed_identifier: The base64-encoded identifier of the video
+
+        Returns:
+            bool: True if file does not exist (deletion verified), False otherwise
+        """
+        try:
+            # Get object key from identifier
+            object_key = self._get_object_key_from_identifier(hashed_identifier)
+            if not object_key:
+                logger.warning(f"Invalid identifier for deletion verification: {hashed_identifier}")
+                return False
+
+            # Try to check if file exists
+            self.s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=object_key
+            )
+
+            # If head_object succeeds, file still exists
+            logger.info(f"File {object_key} still exists in R2")
+            return False
+
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                # File not found - deletion verified
+                logger.info(f"Verified deletion: file {object_key} does not exist in R2")
+                return True
+            else:
+                # Other error occurred
+                logger.error(f"Error verifying deletion for {object_key}: {e}")
+                return False
+        except Exception as e:
+            logger.error(f"Unexpected error verifying deletion: {e}")
+            return False
