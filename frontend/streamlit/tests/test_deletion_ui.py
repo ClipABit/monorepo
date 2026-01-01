@@ -32,7 +32,7 @@ class TestDeleteButtonRendering:
             assert config.Config.SHOW_DELETE_BUTTONS is True
             assert config.Config.ENVIRONMENT == "dev"
     
-    def test_delete_buttons_hidden_in_prod_environment(self):
+    def test_delete_buttons_hidden_in_non_dev_environment(self):
         """Test that delete buttons are hidden when SHOW_DELETE_BUTTONS is False."""
         # Requirements: 5.6
         with patch.dict(os.environ, {"ENVIRONMENT": "prod"}):
@@ -40,7 +40,7 @@ class TestDeleteButtonRendering:
             import importlib
             import config
             importlib.reload(config)
-            
+
             assert config.Config.SHOW_DELETE_BUTTONS is False
             assert config.Config.ENVIRONMENT == "prod"
 
