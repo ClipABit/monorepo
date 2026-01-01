@@ -158,12 +158,17 @@ up_col1, up_col2, up_col3 = st.columns([1, 1, 6])
 # with up_col1:
 #     if st.button("Upload", disabled=True, width="stretch"):
 #         upload_dialog()
-with up_col1:
+
+upload_enabled = (ENVIRONMENT != "prod")
+if upload_enabled:
+    with up_col1:
         # upload disabled in prod env
-    upload_enabled = (ENVIRONMENT == "dev")
-    upload_enabled = True  # temporarily enable upload in prod for uploading demo videos
-    if st.button("Upload", disabled=(not upload_enabled), width="stretch"):
-        upload_dialog()
+        if st.button("Upload", disabled=(False), width="stretch"):
+            upload_dialog()
+else:
+    st.text("The repository below mimics the footage you would have in your video editor's media pool. "
+            "Try searching for specific actions, settings, objects in the videos using natural language! "
+            "We'd appreciate any feedback you may have.")
 # with up_col2:
 #     if st.button("Feedback", width="stretch"):
 #         st.switch_page("pages/feedback.py")
@@ -178,7 +183,7 @@ col1, col2, col3 = st.columns([6, 1, 1])
 with col1:
     search_query = st.text_input(
         "Search",
-        placeholder="Search for video content...",
+        placeholder="Type to search...",
         label_visibility="collapsed"
     )
 

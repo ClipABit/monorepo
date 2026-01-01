@@ -206,7 +206,7 @@ class R2Connector:
             logger.info(f"Uploaded {filename} to R2 with identifier: {identifier}")
             return True, identifier
             
-        except ClientError as e:
+        except Exception as e:
             logger.error(f"Error uploading video to R2: {e}")
             return False, str(e)
     
@@ -236,7 +236,7 @@ class R2Connector:
             logger.info(f"Fetched video with identifier {identifier}: ({len(video_data)} bytes)")
             return video_data
             
-        except ClientError as e:
+        except Exception as e:
             logger.error(f"Error fetching video from R2: {e}")
             return None
     
@@ -269,9 +269,39 @@ class R2Connector:
             logger.info(f"Generated presigned URL for identifier: {identifier}")
             return presigned_url
             
-        except ClientError as e:
+        except Exception as e:
             logger.error(f"Error generating presigned URL: {e}")
             return None
+
+    def delete_video(self, identifier: str) -> bool:
+        """
+        Delete a video from R2 storage using its identifier.
+        
+        Args:
+            identifier: The base64-encoded identifier of the video
+        
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
+        try:
+            # Get object key from identifier
+            object_key = self._get_object_key_from_identifier(identifier)
+            if not object_key:
+                logger.warning(f"Cannot delete video: invalid identifier {identifier}")
+                return False
+            
+            # Delete the object
+            self.s3_client.delete_object(
+                Bucket=self.bucket_name,
+                Key=object_key
+            )
+            
+            logger.info(f"Deleted video with identifier: {identifier}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error deleting video from R2: {e}")
+            return False
 
     def fetch_all_video_data(self, namespace: str = "__default__", expiration: int = 3600) -> list[dict]:
         """
@@ -330,7 +360,7 @@ class R2Connector:
             logger.info(f"Fetched data for {len(video_data_list)} videos for user {namespace}")
             return video_data_list
             
-        except ClientError as e:
+        except Exception as e:
             logger.error(f"Error listing objects for user {namespace}: {e}")
             return []
 

@@ -19,16 +19,16 @@ class Config:
     ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
 
     # Validate environment
-    if ENVIRONMENT not in ["dev", "prod"]:
-        raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod")
+    if ENVIRONMENT not in ["dev", "prod", "staging"]:
+        raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod, staging")
     
     print(f"Running in {ENVIRONMENT} environment")
 
     # Modal app name (matches backend app name)
     APP_NAME = f"clipabit-{ENVIRONMENT}"
-
+    
     # Determine url portion based on environment
-    url_portion = "" if ENVIRONMENT == "prod" else f"-{ENVIRONMENT}"
+    url_portion = "" if ENVIRONMENT in ["prod", "staging"] else f"-{ENVIRONMENT}"
 
     # API Endpoints - dynamically constructed based on environment
     # Pattern: https://clipabit01--{env}-server-{endpoint}-{env}.modal.run
