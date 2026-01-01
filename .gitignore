@@ -1,7 +1,15 @@
 .venv/
 venv/
+*_venv/
+data_processing_venv/
 
 __pycache__
+
+# Hypothesis testing cache
+.hypothesis/
+
+# Kiro specs (if not needed)
+.kiro/
 
 .env
 .env.*

@@ -13,8 +13,10 @@ SEARCH_API_URL = Config.SEARCH_API_URL
 UPLOAD_API_URL = Config.UPLOAD_API_URL
 STATUS_API_URL = Config.STATUS_API_URL
 LIST_VIDEOS_API_URL = Config.LIST_VIDEOS_API_URL
+DELETE_API_URL = Config.DELETE_API_URL
 NAMESPACE = Config.NAMESPACE
 ENVIRONMENT = Config.ENVIRONMENT
+SHOW_DELETE_BUTTONS = Config.SHOW_DELETE_BUTTONS
 
 
 def search_videos(query: str):
@@ -29,7 +31,43 @@ def search_videos(query: str):
         return {"error": str(e)}
 
 
-@st.cache_data(ttl=60, show_spinner="Fetching all videos in repository...")
+def delete_video(hashed_identifier: str, filename: str):
+    """Delete video via API call."""
+    # Only allow deletion in dev environment
+    if ENVIRONMENT != "dev":
+        st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
+        return
+
+    try:
+        resp = requests.delete(
+            DELETE_API_URL,
+            params={"hashed_identifier": hashed_identifier, "namespace": NAMESPACE},
+            timeout=30
+        )
+        if resp.status_code == 200:
+            result = resp.json()
+            if result.get("success"):
+                st.toast(f"✅ Video '{filename}' deleted successfully!", icon="✅")
+                # Clear search results to refresh the display
+                st.session_state.search_results = None
+                # Clear the video cache immediately to force refresh
+                fetch_all_videos.clear()
+                # Force immediate rerun to refresh the UI
+                st.rerun()
+            else:
+                error_msg = result.get("error", {}).get("message", "Unknown error")
+                st.toast(f"❌ Failed to delete '{filename}': {error_msg}", icon="❌")
+        elif resp.status_code == 404:
+            st.toast(f"⚠️ Video '{filename}' not found", icon="⚠️")
+        elif resp.status_code == 403:
+            st.toast(f"🚫 Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
+        else:
+            st.toast(f"❌ Delete failed with status {resp.status_code}", icon="❌")
+    except requests.RequestException as e:
+        st.toast(f"❌ Network error: {str(e)}", icon="❌")
+
+
+@st.cache_data(ttl=5, show_spinner="Fetching all videos in repository...")
 def fetch_all_videos():
     """Fetch all videos from the backend."""
     try:
@@ -50,35 +88,53 @@ def upload_file_to_backend(file_bytes: bytes, filename: str, content_type: str |
     return resp
 
 
+# Delete confirmation dialog
+@st.dialog("Delete Video")
+def delete_confirmation_dialog(hashed_identifier: str, filename: str):
+    """Show delete confirmation dialog."""
+    st.write(f"Are you sure you want to delete **{filename}**?")
+    st.warning("⚠️ This action cannot be undone!")
+
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        if st.button("Cancel", use_container_width=True):
+            st.rerun()
+
+    with col2:
+        if st.button("Delete", type="primary", use_container_width=True):
+            delete_video(hashed_identifier, filename)
+
+
 # Upload dialog
 @st.fragment
 @st.dialog("Upload Video")
 def upload_dialog():
     st.write("Upload a video to add it to the searchable database.")
-    
+
     uploaded = st.file_uploader("Choose a video file", type=["mp4", "mov", "avi", "mkv", "webm"])
-    
+
     if uploaded is not None:
         uploaded_bytes = uploaded.read()
-        
+
         # Show video preview
         try:
             st.video(io.BytesIO(uploaded_bytes))
         except Exception:
             st.info("Preview not available for this format.")
-        
+
         # File metadata
         st.write(f"**Filename:** {uploaded.name}")
         st.write(f"**Size:** {len(uploaded_bytes):,} bytes ({len(uploaded_bytes) / 1024 / 1024:.2f} MB)")
-        
+
         col1, col2 = st.columns([1, 1])
-        
+
         with col1:
             if st.button("Upload", type="primary", width="stretch"):
                 with st.spinner("Uploading..."):
                     try:
                         resp = upload_file_to_backend(uploaded_bytes, uploaded.name, uploaded.type)
-                        
+
                         if resp.status_code == 200:
                             data = resp.json()
                             if data.get("status") == "processing":
@@ -92,7 +148,7 @@ def upload_dialog():
                             st.error(f"Upload failed with status {resp.status_code}. Message: {resp.text}")
                     except requests.RequestException as e:
                         st.error(f"Upload failed: {e}")
-        
+
         with col2:
             if st.button("Cancel", use_container_width=True):
                 st.rerun()
@@ -121,7 +177,7 @@ else:
 # with up_col2:
 #     if st.button("Feedback", width="stretch"):
 #         st.switch_page("pages/feedback.py")
-        
+
 # insert vertical spaces
 st.write("")
 st.write("")
@@ -166,9 +222,9 @@ st.markdown("""
 # Display results or repository
 if st.session_state.search_results:
     st.subheader(f"Search Results for: '{search_query}'")
-    
+
     results_data = st.session_state.search_results
-    
+
     if "error" in results_data:
         st.error(f"Error: {results_data['error']}")
     elif "results" in results_data:
@@ -180,31 +236,52 @@ if st.session_state.search_results:
                 presigned_url = metadata.get("presigned_url")
                 start_time = metadata.get("start_time_s", 0)
                 filename = metadata.get("file_filename", "Unknown Video")
+                hashed_identifier = metadata.get("hashed_identifier", "")
                 score = result.get("score", 0)
-                
+
                 if presigned_url:
                     with cols[idx % 3]:
-                        with st.expander("Info"):
-                            st.write(f"**File:** {filename}")
-                            st.write(f"**Score:** {score:.2f}")
+                        # Video info and delete button row
+                        info_col, delete_col = st.columns([3, 1])
+
+                        with info_col:
+                            with st.expander("Info"):
+                                st.write(f"**File:** {filename}")
+                                st.write(f"**Score:** {score:.2f}")
+
+                        with delete_col:
+                            if SHOW_DELETE_BUTTONS and hashed_identifier:
+                                if st.button("🗑️", key=f"delete_search_{idx}", help=f"Delete {filename}"):
+                                    delete_confirmation_dialog(hashed_identifier, filename)
+
                         st.video(presigned_url, start_time=int(start_time))
         else:
             st.info("No matching videos found.")
 
 else:
     st.subheader("Video Repository")
-    
+
     # Fetch and display videos
     videos = fetch_all_videos()
 
-    
+
     if videos:
         # Create a grid of videos
         cols = st.columns(3)
         for idx, video in enumerate(videos):
             with cols[idx % 3]:
-                with st.expander("Info"):
-                    st.write(f"**File:** {video['file_name']}")
+                # Video info and delete button row
+                info_col, delete_col = st.columns([3, 1])
+
+                with info_col:
+                    with st.expander("Info"):
+                        st.write(f"**File:** {video['file_name']}")
+
+                with delete_col:
+                    if SHOW_DELETE_BUTTONS and video.get('hashed_identifier'):
+                        if st.button("🗑️", key=f"delete_repo_{idx}", help=f"Delete {video['file_name']}"):
+                            delete_confirmation_dialog(video['hashed_identifier'], video['file_name'])
+
                 st.video(video['presigned_url'])
     else:
         st.info("No videos found in the repository.")
