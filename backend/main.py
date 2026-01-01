@@ -380,10 +380,77 @@ class Server:
             logger.error(f"[List Videos] Error fetching videos: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def _delete_video_internal(self, hashed_identifier: str, namespace: str = "__default__"):
-        """Delete a video and all associated chunks from R2 and Pinecone."""
-        logger.info(f"[Delete Video] {hashed_identifier} from namespace: {namespace}")
+    @modal.method()
+    async def delete_video_background(self, job_id: str, hashed_identifier: str, namespace: str = "web-demo"):
+        """Background method to delete a video and all associated chunks from R2 and Pinecone."""
+        logger.info(f"[Job {job_id}] Deletion started: {hashed_identifier} | namespace='{namespace}'")
 
+        try:
+            # Delete from both systems (connectors handle their own logic)
+            r2_result = self.r2_connector.delete_video_file(hashed_identifier)
+            pinecone_result = self.pinecone_connector.delete_by_metadata(
+                {"hashed_identifier": hashed_identifier},
+                namespace
+            )
+
+            # Check if video existed at all
+            if not r2_result.file_existed and pinecone_result.chunks_found == 0:
+                error_msg = "Video not found in either storage system"
+                logger.warning(f"[Job {job_id}] {error_msg}")
+                self.job_store.set_job_failed(job_id, error_msg)
+                return {"job_id": job_id, "status": "failed", "error": error_msg}
+
+            # Build success response
+            result = {
+                "job_id": job_id,
+                "status": "completed",
+                "success": r2_result.success and pinecone_result.success,
+                "hashed_identifier": hashed_identifier,
+                "namespace": namespace,
+                "r2": {
+                    "deleted": r2_result.file_existed,
+                    "bytes": r2_result.bytes_deleted
+                },
+                "pinecone": {
+                    "chunks_deleted": pinecone_result.chunks_deleted
+                }
+            }
+
+            logger.info(f"[Job {job_id}] Deletion completed: R2={r2_result.file_existed}, Pinecone chunks={pinecone_result.chunks_deleted}")
+
+            # Store result for polling endpoint
+            self.job_store.set_job_completed(job_id, result)
+            return result
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"[Job {job_id}] Deletion failed: {error_msg}")
+
+            import traceback
+            traceback.print_exc()
+
+            # Store error result
+            self.job_store.set_job_failed(job_id, error_msg)
+            return {"job_id": job_id, "status": "failed", "error": error_msg}
+
+    @modal.fastapi_endpoint(method="DELETE")
+    async def delete_video(self, hashed_identifier: str, namespace: str = "web-demo"):
+        """
+        Delete a video and all associated data from both R2 storage and Pinecone database.
+        Processing happens in background, returns immediately with job_id.
+
+        Args:
+            hashed_identifier (str): Base64-encoded identifier of the video to delete
+            namespace (str, optional): Namespace for data partitioning (default: "web-demo")
+
+        Returns:
+            dict: Contains job_id, status, and message
+
+        Raises:
+            HTTPException:
+                - 400 for invalid hashed_identifier format
+                - 403 for unauthorized deletion attempts (non-dev environment)
+        """
         # Environment check - only allow deletion in dev
         if self.environment != "dev":
             raise HTTPException(
@@ -398,58 +465,24 @@ class Server:
                 detail="hashed_identifier is required"
             )
 
-        try:
-            # Delete from both systems (connectors handle their own logic)
-            r2_result = self.r2_connector.delete_video_file(hashed_identifier)
-            pinecone_result = self.pinecone_connector.delete_by_metadata(
-                {"hashed_identifier": hashed_identifier},
-                namespace
-            )
+        # Create job
+        import uuid
+        job_id = str(uuid.uuid4())
+        self.job_store.create_job(job_id, {
+            "job_id": job_id,
+            "hashed_identifier": hashed_identifier,
+            "namespace": namespace,
+            "status": "processing",
+            "operation": "delete"
+        })
 
-            # Check if video existed at all
-            if not r2_result.file_existed and pinecone_result.chunks_found == 0:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Video not found in either storage system"
-                )
+        # Spawn background deletion (non-blocking - returns immediately)
+        self.delete_video_background.spawn(job_id, hashed_identifier, namespace)
 
-            # Return success response
-            return {
-                "success": r2_result.success and pinecone_result.success,
-                "hashed_identifier": hashed_identifier,
-                "namespace": namespace,
-                "r2": {
-                    "deleted": r2_result.file_existed,
-                    "bytes": r2_result.bytes_deleted
-                },
-                "pinecone": {
-                    "chunks_deleted": pinecone_result.chunks_deleted
-                }
-            }
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"[Delete Video] Error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    @modal.fastapi_endpoint(method="DELETE")
-    async def delete_video(self, hashed_identifier: str, namespace: str = "web-demo"):
-        """
-        Delete a video and all associated data from both R2 storage and Pinecone database.
-
-        Args:
-            hashed_identifier (str): Base64-encoded identifier of the video to delete
-            namespace (str, optional): Namespace for data partitioning (default: "web-demo")
-
-        Returns:
-            dict: Contains deletion results, status, and detailed information about the operation
-
-        Raises:
-            HTTPException: 
-                - 400 for invalid hashed_identifier format
-                - 403 for unauthorized deletion attempts (production environment)
-                - 404 when video is not found in either storage system
-                - 500 for internal server errors
-        """
-        return await self._delete_video_internal(hashed_identifier, namespace)
+        return {
+            "job_id": job_id,
+            "hashed_identifier": hashed_identifier,
+            "namespace": namespace,
+            "status": "processing",
+            "message": "Video deletion started, processing in background"
+        }
