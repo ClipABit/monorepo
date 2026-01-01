@@ -115,7 +115,7 @@ if upload_enabled:
         if st.button("Upload", disabled=(False), width="stretch"):
             upload_dialog()
 else:
-    st.text("The repository below mimics the footage you would have in video editor's media pool. "
+    st.text("The repository below mimics the footage you would have in your video editor's media pool. "
             "Try searching for specific actions, settings, objects in the videos using natural language! "
             "We'd appreciate any feedback you may have.")
 # with up_col2:
