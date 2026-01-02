@@ -113,8 +113,8 @@ class Server:
         print(f"[Container] Started at {self.start_time.isoformat()}")
 
     @modal.method()
-    async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = ""):
-        logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}'")
+    async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = "", parent_batch_id: str = None):
+        logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}' | batch={parent_batch_id or 'None'}'")
         
         hashed_identifier = None
         upserted_chunk_ids = []
