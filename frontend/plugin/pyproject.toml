@@ -4,8 +4,8 @@ version = "0.0.1"
 requires-python = ">=3.12"
 dependencies = [
     "pyqt6>=6.10.0",
-    "requests",
-    "watchdog",
+    "requests>=2.31.0",
+    "watchdog>=3.0.0",
 ]
 
 [dependency-groups]

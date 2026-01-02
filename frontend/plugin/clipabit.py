@@ -4,18 +4,93 @@ import requests
 import uuid
 import hashlib
 import platform
+import json
+import time
+import io
 from pathlib import Path
+from typing import Dict, List, Optional, Any
 
 # Try to import PyQt6
 try:
-    from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, 
-                                 QLabel, QPushButton, QMessageBox)
-    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+                                 QLabel, QPushButton, QMessageBox, QLineEdit,
+                                 QScrollArea, QFrame, QProgressBar, QTextEdit,
+                                 QSplitter, QListWidget, QListWidgetItem)
+    from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
+    from PyQt6.QtGui import QPixmap, QFont
 except ImportError:
     print("Error: PyQt6 not found. Please run 'pip install PyQt6'")
     sys.exit(1)
 
-# --- 1. Setup Resolve API ---
+# --- Configuration ---
+class Config:
+    """Configuration for ClipABit plugin."""
+    
+    # Environment (can be overridden via environment variable)
+    ENVIRONMENT = os.environ.get("CLIPABIT_ENVIRONMENT", "dev")
+    
+    # API Endpoints - dynamically constructed based on environment
+    url_portion = "" if ENVIRONMENT in ["prod", "staging"] else f"-{ENVIRONMENT}"
+    
+    SEARCH_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-search{url_portion}.modal.run"
+    UPLOAD_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-upload{url_portion}.modal.run"
+    STATUS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-status{url_portion}.modal.run"
+    LIST_VIDEOS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-list-videos{url_portion}.modal.run"
+    
+    # Default namespace (will be overridden by device-specific namespace)
+    DEFAULT_NAMESPACE = "resolve-plugin"
+
+# --- Background Job Tracker Thread ---
+class JobTracker(QThread):
+    """Background thread to track upload job status."""
+    
+    job_completed = pyqtSignal(str, dict)  # job_id, result
+    job_failed = pyqtSignal(str, str)      # job_id, error
+    
+    def __init__(self):
+        super().__init__()
+        self.jobs_to_track = {}  # job_id -> job_info
+        self.running = True
+        
+    def add_job(self, job_id: str, job_info: dict):
+        """Add a job to track."""
+        self.jobs_to_track[job_id] = job_info
+        
+    def run(self):
+        """Main tracking loop."""
+        while self.running:
+            jobs_to_remove = []
+            
+            for job_id, job_info in self.jobs_to_track.items():
+                try:
+                    response = requests.get(Config.STATUS_API_URL, params={"job_id": job_id}, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        status = data.get("status", "processing")
+                        
+                        if status == "completed":
+                            self.job_completed.emit(job_id, data)
+                            jobs_to_remove.append(job_id)
+                        elif status == "failed":
+                            error = data.get("error", "Unknown error")
+                            self.job_failed.emit(job_id, error)
+                            jobs_to_remove.append(job_id)
+                        # If still processing, continue tracking
+                        
+                except Exception as e:
+                    print(f"Error checking job {job_id}: {e}")
+                    
+            # Remove completed/failed jobs
+            for job_id in jobs_to_remove:
+                del self.jobs_to_track[job_id]
+                
+            time.sleep(2)  # Check every 2 seconds
+            
+    def stop(self):
+        """Stop the tracking thread."""
+        self.running = False
+    
+# --- Setup Resolve API ---
 # We use a try-block so this script doesn't crash if you test it outside of Resolve
 try:
     resolve = app.GetResolve()
@@ -26,47 +101,552 @@ try:
 except NameError:
     print("Warning: Resolve API not found. Running in simulation mode (external).")
     resolve, project, media_pool, = None, None, None
-    
-clip_map = {}
-    
+
 class ClipABitApp(QWidget):
     def __init__(self):
         super().__init__()
         
-        clip_map = self._build_clip_map()  # Pre-build clip map on initialization
-        print(clip_map)
+        # Initialize data
+        self.clip_map = {}
+        self.processed_files = self._load_processed_files()
+        self.current_jobs = {}  # job_id -> job_info
+        self.search_results = []
         
+        # Initialize job tracker
+        self.job_tracker = JobTracker()
+        self.job_tracker.job_completed.connect(self._on_job_completed)
+        self.job_tracker.job_failed.connect(self._on_job_failed)
+        self.job_tracker.start()
+        
+        # Build clip map and check for new files
+        self.clip_map = self._build_clip_map()
+        print(f"Found {len(self.clip_map)} clips in media pool")
+        
+        # Setup UI
         self.setWindowTitle("ClipABit Plugin (Resolve 20)")
-        self.resize(300, 250)
+        self.resize(800, 600)
+        self.init_ui()
         
-        self.init_ui() 
+        # Setup refresh timer
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self._refresh_media_pool)
+        self.refresh_timer.start(5000)  # Refresh every 5 seconds
         
     def init_ui(self):
-        # Layout container (Vertical Box)
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
+        # Main layout
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(15, 15, 15, 15)
         
-        # 1. Label
-        self.lbl_instruction = QLabel("<h3>ClipABit Actions</h3>")
-        self.lbl_instruction.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.lbl_instruction)
-
-        # 3. Button: Append
-        self.btn_append = QPushButton("Append Chunk to Timeline")
-        self.btn_append.setMinimumHeight(40)
-        self.btn_append.clicked.connect(self._action_append_chunk)
-        layout.addWidget(self.btn_append)
-
-        # Status Label (optional feedback)
-        self.lbl_status = QLabel("Ready")
-        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_status.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(self.lbl_status)
-
-        self.setLayout(layout)
-    
-    def _ensure_timeline(self):
+        # Title
+        title_label = QLabel("<h2>ClipABit - Semantic Video Search</h2>")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(title_label)
+        
+        # Create splitter for main content
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # Left panel - Upload and Jobs
+        left_panel = self._create_left_panel()
+        splitter.addWidget(left_panel)
+        
+        # Right panel - Search and Results
+        right_panel = self._create_right_panel()
+        splitter.addWidget(right_panel)
+        
+        # Set splitter proportions
+        splitter.setSizes([300, 500])
+        main_layout.addWidget(splitter)
+        
+        # Status bar
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("color: gray; font-size: 10px; padding: 5px;")
+        main_layout.addWidget(self.status_label)
+        
+        self.setLayout(main_layout)
+        
+    def _create_left_panel(self):
+        """Create the left panel with upload and job tracking."""
+        panel = QWidget()
+        layout = QVBoxLayout()
+        
+        # Upload section
+        upload_frame = QFrame()
+        upload_frame.setFrameStyle(QFrame.Shape.Box)
+        upload_layout = QVBoxLayout()
+        
+        upload_title = QLabel("<b>Upload Media</b>")
+        upload_layout.addWidget(upload_title)
+        
+        # Upload buttons
+        self.btn_upload_new = QPushButton("Upload New Files")
+        self.btn_upload_new.setMinimumHeight(35)
+        self.btn_upload_new.clicked.connect(self._upload_new_files)
+        upload_layout.addWidget(self.btn_upload_new)
+        
+        self.btn_upload_all = QPushButton("Upload All Files")
+        self.btn_upload_all.setMinimumHeight(35)
+        self.btn_upload_all.clicked.connect(self._upload_all_files)
+        upload_layout.addWidget(self.btn_upload_all)
+        
+        # File status
+        self.file_status_label = QLabel("Checking media pool...")
+        upload_layout.addWidget(self.file_status_label)
+        
+        upload_frame.setLayout(upload_layout)
+        layout.addWidget(upload_frame)
+        
+        # Jobs section
+        jobs_frame = QFrame()
+        jobs_frame.setFrameStyle(QFrame.Shape.Box)
+        jobs_layout = QVBoxLayout()
+        
+        jobs_title = QLabel("<b>Active Jobs</b>")
+        jobs_layout.addWidget(jobs_title)
+        
+        # Jobs list
+        self.jobs_list = QListWidget()
+        self.jobs_list.setMaximumHeight(200)
+        jobs_layout.addWidget(self.jobs_list)
+        
+        jobs_frame.setLayout(jobs_layout)
+        layout.addWidget(jobs_frame)
+        
+        layout.addStretch()
+        panel.setLayout(layout)
+        return panel
+        
+    def _create_right_panel(self):
+        """Create the right panel with search and results."""
+        panel = QWidget()
+        layout = QVBoxLayout()
+        
+        # Search section
+        search_frame = QFrame()
+        search_frame.setFrameStyle(QFrame.Shape.Box)
+        search_layout = QVBoxLayout()
+        
+        search_title = QLabel("<b>Search Videos</b>")
+        search_layout.addWidget(search_title)
+        
+        # Search input
+        search_input_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Enter search query (e.g., 'woman walking', 'car driving')")
+        self.search_input.returnPressed.connect(self._perform_search)
+        search_input_layout.addWidget(self.search_input)
+        
+        self.btn_search = QPushButton("Search")
+        self.btn_search.clicked.connect(self._perform_search)
+        search_input_layout.addWidget(self.btn_search)
+        
+        search_layout.addLayout(search_input_layout)
+        search_frame.setLayout(search_layout)
+        layout.addWidget(search_frame)
+        
+        # Results section
+        results_frame = QFrame()
+        results_frame.setFrameStyle(QFrame.Shape.Box)
+        results_layout = QVBoxLayout()
+        
+        results_title = QLabel("<b>Search Results</b>")
+        results_layout.addWidget(results_title)
+        
+        # Results scroll area
+        self.results_scroll = QScrollArea()
+        self.results_scroll.setWidgetResizable(True)
+        self.results_widget = QWidget()
+        self.results_layout = QVBoxLayout()
+        self.results_widget.setLayout(self.results_layout)
+        self.results_scroll.setWidget(self.results_widget)
+        
+        results_layout.addWidget(self.results_scroll)
+        results_frame.setLayout(results_layout)
+        layout.addWidget(results_frame)
+        
+        panel.setLayout(layout)
+        return panel
+    def _get_storage_path(self) -> Path:
+        """Get path for local storage."""
+        device_path = self._get_device_id_path()
+        return device_path.parent / "processed_files.json"
+        
+    def _load_processed_files(self) -> Dict[str, Dict]:
+        """Load list of processed files from local storage."""
+        storage_path = self._get_storage_path()
+        try:
+            if storage_path.exists():
+                with open(storage_path, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Error loading processed files: {e}")
+        return {}
+        
+    def _save_processed_files(self):
+        """Save processed files to local storage."""
+        storage_path = self._get_storage_path()
+        try:
+            storage_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(storage_path, 'w') as f:
+                json.dump(self.processed_files, f, indent=2)
+        except Exception as e:
+            print(f"Error saving processed files: {e}")
+            
+    def _get_file_hash(self, filepath: str) -> str:
+        """Generate hash for file to track changes."""
+        try:
+            stat = os.stat(filepath)
+            # Use file path, size, and modification time for hash
+            content = f"{filepath}:{stat.st_size}:{stat.st_mtime}"
+            return hashlib.md5(content.encode()).hexdigest()
+        except Exception:
+            return hashlib.md5(filepath.encode()).hexdigest()
+            
+    def _refresh_media_pool(self):
+        """Refresh media pool and update file status."""
+        if not resolve:
+            return
+            
+        self.clip_map = self._build_clip_map()
+        self._update_file_status()
+        
+    def _update_file_status(self):
+        """Update the file status display."""
+        total_files = len(self.clip_map)
+        processed_count = 0
+        new_files = []
+        
+        for filename, clip_info in self.clip_map.items():
+            if isinstance(clip_info, list):
+                # Handle multiple clips with same filename
+                for clip in clip_info:
+                    filepath = clip.get('filepath')
+                    if filepath:
+                        file_hash = self._get_file_hash(filepath)
+                        if file_hash in self.processed_files:
+                            processed_count += 1
+                        else:
+                            new_files.append(filename)
+            else:
+                filepath = clip_info.get('filepath')
+                if filepath:
+                    file_hash = self._get_file_hash(filepath)
+                    if file_hash in self.processed_files:
+                        processed_count += 1
+                    else:
+                        new_files.append(filename)
+        
+        new_count = len(set(new_files))
+        status_text = f"Files: {total_files} total, {processed_count} processed, {new_count} new"
+        self.file_status_label.setText(status_text)
+        
+        # Update button states
+        self.btn_upload_new.setEnabled(new_count > 0)
+        self.btn_upload_all.setEnabled(total_files > 0)
+        
+    def _upload_new_files(self):
+        """Upload only new/unprocessed files."""
+        self._upload_files(new_only=True)
+        
+    def _upload_all_files(self):
+        """Upload all files in media pool."""
+        self._upload_files(new_only=False)
+        
+    def _upload_files(self, new_only: bool = True):
+        """Upload files to backend."""
+        if not resolve:
+            QMessageBox.warning(self, "Error", "Resolve API not available.")
+            return
+            
+        files_to_upload = []
+        
+        for filename, clip_info in self.clip_map.items():
+            clips = clip_info if isinstance(clip_info, list) else [clip_info]
+            
+            for clip in clips:
+                filepath = clip.get('filepath')
+                if not filepath or not os.path.exists(filepath):
+                    continue
+                    
+                file_hash = self._get_file_hash(filepath)
+                
+                if new_only and file_hash in self.processed_files:
+                    continue  # Skip already processed files
+                    
+                files_to_upload.append({
+                    'filepath': filepath,
+                    'filename': filename,
+                    'hash': file_hash,
+                    'clip_info': clip
+                })
+        
+        if not files_to_upload:
+            msg = "No new files to upload" if new_only else "No files to upload"
+            QMessageBox.information(self, "Info", msg)
+            return
+            
+        # Get namespace
+        device_id = self.get_or_create_device_id()
+        project_name = self.get_project_name() or "unknown_project"
+        namespace = f"{device_id}:{project_name}"
+        
+        # Upload files
+        for file_info in files_to_upload:
+            self._upload_single_file(file_info, namespace)
+            
+    def _upload_single_file(self, file_info: Dict, namespace: str):
+        """Upload a single file to the backend."""
+        filepath = file_info['filepath']
+        filename = file_info['filename']
+        file_hash = file_info['hash']
+        
+        try:
+            # Read file
+            with open(filepath, 'rb') as f:
+                file_bytes = f.read()
+                
+            # Upload to backend
+            files = {"file": (filename, io.BytesIO(file_bytes), "video/mp4")}
+            data = {"namespace": namespace}
+            
+            self.status_label.setText(f"Uploading {filename}...")
+            
+            response = requests.post(Config.UPLOAD_API_URL, files=files, data=data, timeout=300)
+            
+            if response.status_code == 200:
+                result = response.json()
+                job_id = result.get("job_id")
+                
+                if job_id:
+                    # Track the job
+                    job_info = {
+                        'filename': filename,
+                        'filepath': filepath,
+                        'file_hash': file_hash,
+                        'status': 'processing',
+                        'namespace': namespace
+                    }
+                    
+                    self.current_jobs[job_id] = job_info
+                    self.job_tracker.add_job(job_id, job_info)
+                    self._update_jobs_display()
+                    
+                    self.status_label.setText(f"Upload started: {filename}")
+                else:
+                    QMessageBox.warning(self, "Error", f"Upload failed for {filename}: No job ID returned")
+            else:
+                QMessageBox.warning(self, "Error", f"Upload failed for {filename}: {response.status_code}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to upload {filename}: {str(e)}")
+            
+    def _on_job_completed(self, job_id: str, result: dict):
+        """Handle job completion."""
+        if job_id in self.current_jobs:
+            job_info = self.current_jobs[job_id]
+            filename = job_info['filename']
+            file_hash = job_info['file_hash']
+            
+            # Mark file as processed
+            self.processed_files[file_hash] = {
+                'filename': filename,
+                'job_id': job_id,
+                'processed_at': time.time(),
+                'result': result
+            }
+            self._save_processed_files()
+            
+            # Remove from current jobs
+            del self.current_jobs[job_id]
+            self._update_jobs_display()
+            self._update_file_status()
+            
+            self.status_label.setText(f"Completed: {filename}")
+            
+    def _on_job_failed(self, job_id: str, error: str):
+        """Handle job failure."""
+        if job_id in self.current_jobs:
+            job_info = self.current_jobs[job_id]
+            filename = job_info['filename']
+            
+            # Remove from current jobs
+            del self.current_jobs[job_id]
+            self._update_jobs_display()
+            
+            self.status_label.setText(f"Failed: {filename}")
+            QMessageBox.warning(self, "Upload Failed", f"Processing failed for {filename}:\n{error}")
+            
+    def _update_jobs_display(self):
+        """Update the jobs list display."""
+        self.jobs_list.clear()
+        
+        for job_id, job_info in self.current_jobs.items():
+            filename = job_info['filename']
+            status = job_info.get('status', 'processing')
+            
+            item_text = f"{filename} - {status}"
+            item = QListWidgetItem(item_text)
+            self.jobs_list.addItem(item)
+            
+    def _perform_search(self):
+        """Perform semantic search."""
+        query = self.search_input.text().strip()
+        if not query:
+            QMessageBox.warning(self, "Error", "Please enter a search query")
+            return
+            
+        # Get namespace
+        device_id = self.get_or_create_device_id()
+        project_name = self.get_project_name() or "unknown_project"
+        namespace = f"{device_id}:{project_name}"
+        
+        self.status_label.setText(f"Searching for: {query}")
+        self.btn_search.setEnabled(False)
+        
+        try:
+            # Perform search
+            params = {"query": query, "namespace": namespace}
+            response = requests.get(Config.SEARCH_API_URL, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                results = result.get("results", [])
+                self._display_search_results(results, query)
+                self.status_label.setText(f"Found {len(results)} results for: {query}")
+            else:
+                QMessageBox.warning(self, "Search Error", f"Search failed: {response.status_code}")
+                self.status_label.setText("Search failed")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Search failed: {str(e)}")
+            self.status_label.setText("Search error")
+        finally:
+            self.btn_search.setEnabled(True)
+            
+    def _display_search_results(self, results: List[Dict], query: str):
+        """Display search results."""
+        # Clear previous results
+        for i in reversed(range(self.results_layout.count())):
+            child = self.results_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+                
+        if not results:
+            no_results = QLabel("No results found")
+            no_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.results_layout.addWidget(no_results)
+            return
+            
+        # Display results
+        for i, result in enumerate(results[:10]):  # Limit to top 10
+            result_widget = self._create_result_widget(result, i)
+            self.results_layout.addWidget(result_widget)
+            
+        # Add stretch to push results to top
+        self.results_layout.addStretch()
+        
+    def _create_result_widget(self, result: Dict, index: int) -> QWidget:
+        """Create a widget for a single search result."""
+        widget = QFrame()
+        widget.setFrameStyle(QFrame.Shape.Box)
+        widget.setMaximumHeight(120)
+        
+        layout = QHBoxLayout()
+        
+        # Result info
+        info_layout = QVBoxLayout()
+        
+        metadata = result.get('metadata', {})
+        filename = metadata.get('file_filename', 'Unknown')
+        score = result.get('score', 0)
+        start_time = metadata.get('start_time_s', 0)
+        end_time = metadata.get('end_time_s', 0)
+        
+        # Title
+        title_label = QLabel(f"<b>{filename}</b>")
+        info_layout.addWidget(title_label)
+        
+        # Details
+        details = f"Score: {score:.3f} | Time: {start_time:.1f}s - {end_time:.1f}s"
+        details_label = QLabel(details)
+        details_label.setStyleSheet("color: gray; font-size: 10px;")
+        info_layout.addWidget(details_label)
+        
+        # Add to timeline button
+        btn_add = QPushButton("Add to Timeline")
+        btn_add.setMaximumWidth(120)
+        btn_add.clicked.connect(lambda: self._add_result_to_timeline(result))
+        
+        layout.addLayout(info_layout)
+        layout.addStretch()
+        layout.addWidget(btn_add)
+        
+        widget.setLayout(layout)
+        return widget
+        
+    def _add_result_to_timeline(self, result: Dict):
+        """Add a search result to the timeline."""
+        if not resolve:
+            QMessageBox.warning(self, "Error", "Resolve API not available.")
+            return
+            
+        metadata = result.get('metadata', {})
+        filename = metadata.get('file_filename', 'Unknown')
+        start_time = metadata.get('start_time_s', 0)
+        end_time = metadata.get('end_time_s', 0)
+        
+        # Find the clip in media pool
+        matching_clip = None
+        for clip_filename, clip_info in self.clip_map.items():
+            if filename in clip_filename or clip_filename in filename:
+                if isinstance(clip_info, list):
+                    matching_clip = clip_info[0]['media_pool_item']
+                else:
+                    matching_clip = clip_info['media_pool_item']
+                break
+                
+        if not matching_clip:
+            QMessageBox.warning(self, "Error", f"Could not find {filename} in media pool")
+            return
+            
+        # Ensure timeline exists
+        if not self._ensure_timeline():
+            return
+            
+        # Convert seconds to frames (assuming 24fps, should get from clip)
+        fps = 24  # Default fallback
+        if isinstance(clip_info, dict):
+            fps = clip_info.get('fps', 24) or 24
+        elif isinstance(clip_info, list) and clip_info:
+            fps = clip_info[0].get('fps', 24) or 24
+            
+        start_frame = int(start_time * fps)
+        end_frame = int(end_time * fps)
+        
+        # Add to timeline
+        try:
+            result = media_pool.AppendToTimeline([{
+                "mediaPoolItem": matching_clip,
+                "startFrame": start_frame,
+                "endFrame": end_frame
+            }])
+            
+            if result:
+                self.status_label.setText(f"Added {filename} ({start_time:.1f}s-{end_time:.1f}s) to timeline")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to add clip to timeline")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to add clip: {str(e)}")
+            
+    def closeEvent(self, event):
+        """Handle window close event."""
+        if hasattr(self, 'job_tracker'):
+            self.job_tracker.stop()
+            self.job_tracker.wait()
+        if hasattr(self, 'refresh_timer'):
+            self.refresh_timer.stop()
+        event.accept()
         if not resolve:
             QMessageBox.warning(self, "Error", "Resolve API not available. Cannot perform action.")
             return False
