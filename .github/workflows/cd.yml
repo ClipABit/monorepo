@@ -1,0 +1,77 @@
+name: cd
+
+on:
+  # Trigger deployment on push to staging, main
+  push:
+    branches: [ staging, main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+  
+permissions:
+  contents: write
+
+jobs:
+  # ------------------------------------------------------------------
+  # STAGING DEPLOYMENT (Runs on push to 'staging')
+  # ------------------------------------------------------------------
+  deploy-staging:
+    name: Deploy Staging
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment: staging # for GitHub Actions
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Deploy to Modal (Staging)
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ENVIRONMENT: staging # for OS
+        run: uv run modal deploy main.py
+
+  # ------------------------------------------------------------------
+  # PRODUCTION DEPLOYMENT (Runs only when manually triggered)
+  # ------------------------------------------------------------------
+  deploy-prod:
+    name: Deploy Production
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Deploy to Modal (Prod)
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ENVIRONMENT: prod
+        run: uv run modal deploy main.py

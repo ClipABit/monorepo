@@ -1,0 +1,23 @@
+name: "Main Branch Protection Check"
+
+on:
+  pull_request:
+    branches:
+      - main
+      - staging
+    types: [opened, reopened, synchronize, edited]
+
+jobs:
+  check-source-branch:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Staging to Main
+        run: |
+          echo "Checking PR source branch..."
+          if [[ "${{ github.head_ref }}" != "staging" ]]; then
+            echo "ERROR: Pull requests to 'main' must originate from 'staging'."
+            echo "Current source branch is: ${{ github.head_ref }}"
+            exit 1
+          fi
+          echo "Success: PR is from 'staging'."

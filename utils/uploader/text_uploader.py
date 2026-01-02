@@ -48,7 +48,10 @@ def load_clip_model():
     """
 
     model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(_DEVICE)
-    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+    processor = CLIPProcessor.from_pretrained(
+        "openai/clip-vit-base-patch32",
+        use_fast=True
+    )
 
     print(f"Loaded CLIP model on {_DEVICE}")
     return model, processor
