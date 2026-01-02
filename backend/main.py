@@ -214,6 +214,16 @@ class Server:
 
             # Store result for polling endpoint in shared storage
             self.job_store.set_job_completed(job_id, result)
+
+            # Update parent batch if exists
+            if parent_batch_id:
+                self.job_store.update_batch_on_child_completion(
+                    parent_batch_id,
+                    job_id,
+                    result
+                )
+                logger.info(f"[Job {job_id}] Updated parent batch {parent_batch_id}")
+
             return result
 
         except Exception as e:
