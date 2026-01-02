@@ -275,24 +275,49 @@ class Server:
         return job_data
 
     @modal.fastapi_endpoint(method="POST")
-    async def upload(self, file: UploadFile = None, namespace: str = Form("")):
+    async def upload(self, files: list[UploadFile] = None, namespace: str = Form("")):
         """
         Handle video file upload and start background processing.
+        Supports both single and batch uploads.
 
         Args:
-            file (UploadFile): The uploaded video file.
+            files (list[UploadFile]): The uploaded video file(s). FastAPI wraps single file in list.
             namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
 
         Returns:
-            dict: Contains job_id, filename, content_type, size_bytes, status, and message.
+            dict: For single upload: job_id, filename, etc.
+                  For batch upload: batch_job_id, total_videos, child_jobs, etc.
         """
-        # TODO: Add error handling for file types and sizes
+        # Validation
+        if not files:
+            raise HTTPException(status_code=400, detail="No files provided")
+
+        MAX_BATCH_SIZE = 200
+        if len(files) > MAX_BATCH_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Batch size ({len(files)}) exceeds maximum ({MAX_BATCH_SIZE})"
+            )
+
+        # Single file upload (backward compatible)
+        if len(files) == 1:
+            return await self._handle_single_upload(files[0], namespace)
+
+        # Batch upload
+        else:
+            return await self._handle_batch_upload(files, namespace)
+
+    async def _handle_single_upload(self, file: UploadFile, namespace: str) -> dict:
+        """Handle single file upload (existing logic, backward compatible)."""
         import uuid
         job_id = str(uuid.uuid4())
         contents = await file.read()
         file_size = len(contents)
+
         self.job_store.create_job(job_id, {
             "job_id": job_id,
+            "job_type": "video",
+            "parent_batch_id": None,
             "filename": file.filename,
             "status": "processing",
             "size_bytes": file_size,
@@ -301,7 +326,7 @@ class Server:
         })
 
         # Spawn background processing (non-blocking - returns immediately)
-        self.process_video.spawn(contents, file.filename, job_id, namespace)
+        self.process_video.spawn(contents, file.filename, job_id, namespace, None)
 
         return {
             "job_id": job_id,
@@ -310,6 +335,72 @@ class Server:
             "size_bytes": file_size,
             "status": "processing",
             "message": "Video uploaded successfully, processing in background"
+        }
+
+    async def _handle_batch_upload(self, files: list[UploadFile], namespace: str) -> dict:
+        """Handle batch file upload."""
+        import uuid
+
+        # Generate batch job ID
+        batch_job_id = f"batch-{uuid.uuid4()}"
+
+        # Read all files and create child jobs
+        child_jobs = []
+        total_size = 0
+
+        for file in files:
+            job_id = str(uuid.uuid4())
+            contents = await file.read()
+            file_size = len(contents)
+            total_size += file_size
+
+            # Create individual job entry
+            self.job_store.create_job(job_id, {
+                "job_id": job_id,
+                "job_type": "video",
+                "parent_batch_id": batch_job_id,
+                "filename": file.filename,
+                "status": "processing",
+                "size_bytes": file_size,
+                "content_type": file.content_type,
+                "namespace": namespace
+            })
+
+            # Spawn background processing (Modal handles parallel execution)
+            self.process_video.spawn(
+                contents,
+                file.filename,
+                job_id,
+                namespace,
+                batch_job_id  # Pass parent ID for callback
+            )
+
+            child_jobs.append({
+                "job_id": job_id,
+                "filename": file.filename,
+                "size_bytes": file_size
+            })
+
+        # Create batch job entry
+        self.job_store.create_batch_job(
+            batch_job_id=batch_job_id,
+            child_job_ids=[job["job_id"] for job in child_jobs],
+            namespace=namespace
+        )
+
+        logger.info(
+            f"[Batch {batch_job_id}] Created with {len(files)} videos, "
+            f"total size: {total_size / 1024 / 1024:.2f} MB"
+        )
+
+        return {
+            "batch_job_id": batch_job_id,
+            "total_videos": len(files),
+            "total_size_bytes": total_size,
+            "status": "processing",
+            "namespace": namespace,
+            "child_jobs": child_jobs,
+            "message": f"Batch upload started with {len(files)} videos"
         }
 
     
