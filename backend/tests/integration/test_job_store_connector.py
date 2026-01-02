@@ -179,3 +179,233 @@ class TestConcurrentOperations:
         job_data = connector2.get_job("job-123")
         assert job_data is not None
         assert job_data["status"] == "processing"
+
+
+class TestBatchJobOperations:
+    """Test batch job creation and management."""
+
+    def test_create_batch_job(self, mock_modal_dict):
+        """Verify batch job creation with child references."""
+        connector = JobStoreConnector("test-jobs")
+
+        child_ids = ["job-1", "job-2", "job-3"]
+        result = connector.create_batch_job("batch-123", child_ids, "web-demo")
+
+        assert result is True
+        batch_data = connector.get_job("batch-123")
+        assert batch_data["job_type"] == "batch"
+        assert batch_data["total_videos"] == 3
+        assert batch_data["child_jobs"] == child_ids
+        assert batch_data["status"] == "processing"
+        assert batch_data["completed_count"] == 0
+        assert batch_data["failed_count"] == 0
+        assert batch_data["processing_count"] == 3
+
+    def test_update_batch_on_child_completion_success(self, mock_modal_dict):
+        """Verify batch updates when child completes successfully."""
+        connector = JobStoreConnector("test-jobs")
+
+        # Setup batch
+        connector.create_batch_job("batch-123", ["job-1", "job-2"], "web-demo")
+
+        # Complete first child
+        child_result = {
+            "job_id": "job-1",
+            "status": "completed",
+            "filename": "video1.mp4",
+            "chunks": 5,
+            "total_frames": 42,
+            "total_memory_mb": 100.0,
+            "avg_complexity": 0.5
+        }
+
+        connector.update_batch_on_child_completion("batch-123", "job-1", child_result)
+
+        batch = connector.get_job("batch-123")
+        assert batch["completed_count"] == 1
+        assert batch["failed_count"] == 0
+        assert batch["processing_count"] == 1
+        assert batch["total_chunks"] == 5
+        assert batch["total_frames"] == 42
+        assert batch["avg_complexity"] == 0.5
+        assert batch["status"] == "processing"  # Still has 1 processing
+
+    def test_update_batch_on_child_completion_failure(self, mock_modal_dict):
+        """Verify batch updates when child fails."""
+        connector = JobStoreConnector("test-jobs")
+
+        # Setup batch
+        connector.create_batch_job("batch-123", ["job-1", "job-2"], "web-demo")
+
+        # Fail first child
+        child_result = {
+            "job_id": "job-1",
+            "status": "failed",
+            "filename": "video1.mp4",
+            "error": "Scene detection failed"
+        }
+
+        connector.update_batch_on_child_completion("batch-123", "job-1", child_result)
+
+        batch = connector.get_job("batch-123")
+        assert batch["completed_count"] == 0
+        assert batch["failed_count"] == 1
+        assert batch["processing_count"] == 1
+        assert len(batch["failed_jobs"]) == 1
+        assert batch["failed_jobs"][0]["error"] == "Scene detection failed"
+
+    def test_batch_status_all_completed(self, mock_modal_dict):
+        """Verify batch status when all children complete successfully."""
+        connector = JobStoreConnector("test-jobs")
+        connector.create_batch_job("batch-123", ["job-1", "job-2"], "web-demo")
+
+        # Complete both children
+        for job_id in ["job-1", "job-2"]:
+            result = {
+                "job_id": job_id,
+                "status": "completed",
+                "filename": f"{job_id}.mp4",
+                "chunks": 5,
+                "total_frames": 50,
+                "total_memory_mb": 100.0,
+                "avg_complexity": 0.5
+            }
+            connector.update_batch_on_child_completion("batch-123", job_id, result)
+
+        batch = connector.get_job("batch-123")
+        assert batch["status"] == "completed"
+        assert batch["completed_count"] == 2
+        assert batch["failed_count"] == 0
+        assert batch["processing_count"] == 0
+
+    def test_batch_status_partial(self, mock_modal_dict):
+        """Verify batch status with mixed success/failure."""
+        connector = JobStoreConnector("test-jobs")
+        connector.create_batch_job("batch-123", ["job-1", "job-2"], "web-demo")
+
+        # Complete one, fail one
+        success_result = {
+            "job_id": "job-1",
+            "status": "completed",
+            "filename": "video1.mp4",
+            "chunks": 5,
+            "total_frames": 50,
+            "total_memory_mb": 100.0,
+            "avg_complexity": 0.5
+        }
+        connector.update_batch_on_child_completion("batch-123", "job-1", success_result)
+
+        failure_result = {
+            "job_id": "job-2",
+            "status": "failed",
+            "filename": "video2.mp4",
+            "error": "Scene detection failed"
+        }
+        connector.update_batch_on_child_completion("batch-123", "job-2", failure_result)
+
+        batch = connector.get_job("batch-123")
+        assert batch["status"] == "partial"
+        assert batch["completed_count"] == 1
+        assert batch["failed_count"] == 1
+        assert len(batch["failed_jobs"]) == 1
+
+    def test_batch_status_all_failed(self, mock_modal_dict):
+        """Verify batch status when all children fail."""
+        connector = JobStoreConnector("test-jobs")
+        connector.create_batch_job("batch-123", ["job-1", "job-2"], "web-demo")
+
+        # Fail both children
+        for job_id in ["job-1", "job-2"]:
+            result = {
+                "job_id": job_id,
+                "status": "failed",
+                "filename": f"{job_id}.mp4",
+                "error": "Processing failed"
+            }
+            connector.update_batch_on_child_completion("batch-123", job_id, result)
+
+        batch = connector.get_job("batch-123")
+        assert batch["status"] == "failed"
+        assert batch["completed_count"] == 0
+        assert batch["failed_count"] == 2
+        assert batch["processing_count"] == 0
+
+    def test_get_batch_child_jobs(self, mock_modal_dict):
+        """Verify retrieving all child job data."""
+        connector = JobStoreConnector("test-jobs")
+
+        # Create batch and children
+        connector.create_batch_job("batch-123", ["job-1", "job-2"], "web-demo")
+        connector.create_job("job-1", {"job_id": "job-1", "status": "completed"})
+        connector.create_job("job-2", {"job_id": "job-2", "status": "processing"})
+
+        children = connector.get_batch_child_jobs("batch-123")
+
+        assert len(children) == 2
+        assert children[0]["job_id"] == "job-1"
+        assert children[1]["job_id"] == "job-2"
+
+    def test_get_batch_child_jobs_nonexistent_batch(self, mock_modal_dict):
+        """Verify get_batch_child_jobs returns empty list for non-existent batch."""
+        connector = JobStoreConnector("test-jobs")
+
+        children = connector.get_batch_child_jobs("nonexistent")
+
+        assert children == []
+
+    def test_get_batch_progress(self, mock_modal_dict):
+        """Verify batch progress summary."""
+        connector = JobStoreConnector("test-jobs")
+        connector.create_batch_job("batch-123", ["job-1", "job-2", "job-3"], "web-demo")
+
+        # Complete one job
+        result = {
+            "job_id": "job-1",
+            "status": "completed",
+            "filename": "video1.mp4",
+            "chunks": 5,
+            "total_frames": 50,
+            "total_memory_mb": 100.0,
+            "avg_complexity": 0.5
+        }
+        connector.update_batch_on_child_completion("batch-123", "job-1", result)
+
+        progress = connector.get_batch_progress("batch-123")
+
+        assert progress["batch_job_id"] == "batch-123"
+        assert progress["total_videos"] == 3
+        assert progress["completed"] == 1
+        assert progress["failed"] == 0
+        assert progress["processing"] == 2
+        assert progress["progress_percent"] == (1/3 * 100)
+
+    def test_get_batch_progress_nonexistent_batch(self, mock_modal_dict):
+        """Verify get_batch_progress returns None for non-existent batch."""
+        connector = JobStoreConnector("test-jobs")
+
+        progress = connector.get_batch_progress("nonexistent")
+
+        assert progress is None
+
+    def test_average_complexity_calculation(self, mock_modal_dict):
+        """Verify running average complexity calculation."""
+        connector = JobStoreConnector("test-jobs")
+        connector.create_batch_job("batch-123", ["job-1", "job-2", "job-3"], "web-demo")
+
+        # Complete three jobs with different complexities
+        complexities = [0.3, 0.5, 0.7]
+        for idx, job_id in enumerate(["job-1", "job-2", "job-3"]):
+            result = {
+                "job_id": job_id,
+                "status": "completed",
+                "filename": f"video{idx}.mp4",
+                "chunks": 5,
+                "total_frames": 50,
+                "total_memory_mb": 100.0,
+                "avg_complexity": complexities[idx]
+            }
+            connector.update_batch_on_child_completion("batch-123", job_id, result)
+
+        batch = connector.get_job("batch-123")
+        expected_avg = sum(complexities) / len(complexities)
+        assert abs(batch["avg_complexity"] - expected_avg) < 0.001  # Float comparison with tolerance
