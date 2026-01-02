@@ -102,3 +102,132 @@ class JobStoreConnector:
             "error": error
         }
         return self.update_job(job_id, error_data)
+
+    def create_batch_job(
+        self,
+        batch_job_id: str,
+        child_job_ids: List[str],
+        namespace: str
+    ) -> bool:
+        """Create a new batch job entry."""
+        batch_data = {
+            "batch_job_id": batch_job_id,
+            "job_type": "batch",
+            "status": "processing",
+            "namespace": namespace,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "total_videos": len(child_job_ids),
+            "child_jobs": child_job_ids,
+            "completed_count": 0,
+            "failed_count": 0,
+            "processing_count": len(child_job_ids),
+            "total_chunks": 0,
+            "total_frames": 0,
+            "total_memory_mb": 0.0,
+            "avg_complexity": 0.0,
+            "failed_jobs": [],
+            "completed_jobs": []
+        }
+        return self.create_job(batch_job_id, batch_data)
+
+    def update_batch_on_child_completion(
+        self,
+        batch_job_id: str,
+        child_job_id: str,
+        child_result: Dict[str, Any]
+    ) -> bool:
+        """Update batch job when a child completes (success or failure)."""
+        batch_job = self.get_job(batch_job_id)
+        if not batch_job:
+            logger.error(f"Batch job {batch_job_id} not found")
+            return False
+
+        # Update counts
+        child_status = child_result.get("status")
+
+        if child_status == "completed":
+            batch_job["completed_count"] += 1
+            batch_job["processing_count"] -= 1
+
+            # Aggregate metrics
+            batch_job["total_chunks"] += child_result.get("chunks", 0)
+            batch_job["total_frames"] += child_result.get("total_frames", 0)
+            batch_job["total_memory_mb"] += child_result.get("total_memory_mb", 0.0)
+
+            # Update average complexity (running average)
+            prev_avg = batch_job["avg_complexity"]
+            n = batch_job["completed_count"]
+            new_complexity = child_result.get("avg_complexity", 0.0)
+            batch_job["avg_complexity"] = (prev_avg * (n - 1) + new_complexity) / n
+
+            # Track completed job summary
+            batch_job["completed_jobs"].append({
+                "job_id": child_job_id,
+                "filename": child_result.get("filename"),
+                "chunks": child_result.get("chunks", 0),
+                "frames": child_result.get("total_frames", 0)
+            })
+
+        elif child_status == "failed":
+            batch_job["failed_count"] += 1
+            batch_job["processing_count"] -= 1
+
+            # Track failed job details
+            batch_job["failed_jobs"].append({
+                "job_id": child_job_id,
+                "filename": child_result.get("filename"),
+                "error": child_result.get("error", "Unknown error")
+            })
+
+        # Update batch status
+        total = batch_job["total_videos"]
+        completed = batch_job["completed_count"]
+        failed = batch_job["failed_count"]
+
+        if completed + failed == total:
+            # All jobs finished
+            if failed == 0:
+                batch_job["status"] = "completed"
+            elif completed == 0:
+                batch_job["status"] = "failed"
+            else:
+                batch_job["status"] = "partial"
+
+        batch_job["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        return self.update_job(batch_job_id, batch_job)
+
+    def get_batch_child_jobs(self, batch_job_id: str) -> List[Dict[str, Any]]:
+        """Retrieve all child job data for a batch."""
+        batch_job = self.get_job(batch_job_id)
+        if not batch_job or batch_job.get("job_type") != "batch":
+            return []
+
+        child_job_ids = batch_job.get("child_jobs", [])
+        child_jobs = []
+        for child_id in child_job_ids:
+            child_data = self.get_job(child_id)
+            if child_data:
+                child_jobs.append(child_data)
+
+        return child_jobs
+
+    def get_batch_progress(self, batch_job_id: str) -> Optional[Dict[str, Any]]:
+        """Get simplified batch progress summary."""
+        batch_job = self.get_job(batch_job_id)
+        if not batch_job or batch_job.get("job_type") != "batch":
+            return None
+
+        return {
+            "batch_job_id": batch_job_id,
+            "status": batch_job["status"],
+            "total_videos": batch_job["total_videos"],
+            "completed": batch_job["completed_count"],
+            "failed": batch_job["failed_count"],
+            "processing": batch_job["processing_count"],
+            "progress_percent": (
+                (batch_job["completed_count"] + batch_job["failed_count"])
+                / batch_job["total_videos"] * 100
+            )
+        }
