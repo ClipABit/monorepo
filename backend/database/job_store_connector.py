@@ -1,5 +1,6 @@
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+from datetime import datetime, timezone
 import modal
 
 logging.basicConfig(level=logging.INFO)
@@ -24,6 +25,12 @@ class JobStoreConnector:
     def create_job(self, job_id: str, initial_data: Dict[str, Any]) -> bool:
         """Create new job entry in store."""
         try:
+            # Add backward compatible fields if not present
+            if "job_type" not in initial_data:
+                initial_data["job_type"] = "video"
+            if "parent_batch_id" not in initial_data:
+                initial_data["parent_batch_id"] = None
+
             self.job_store[job_id] = initial_data
             logger.info(f"Created job {job_id} with status: {initial_data.get('status', 'unknown')}")
             return True
