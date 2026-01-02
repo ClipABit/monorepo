@@ -273,19 +273,17 @@ class Server:
             return {"job_id": job_id, "status": "failed", "error": str(e)}
 
     @modal.fastapi_endpoint(method="GET")
-    async def status(self, job_id: str):
+    async def status(self, job_id: str, include_children: bool = False):
         """
-        Check the status of a video processing job.
+        Check the status of a video processing job or batch job.
 
         Args:
-            job_id (str): The unique identifier for the video processing job.
+            job_id (str): The unique identifier for the video processing job or batch job.
+            include_children (bool): If True and job is a batch, include full child job details.
 
         Returns:
-            dict: Contains:
-                - job_id (str): The job identifier
-                - status (str): 'processing', 'completed', or 'failed'
-                - message (str, optional): If still processing or not found
-                - result (dict, optional): Full job result if completed
+            dict: For video jobs: job_id, status, and result data
+                  For batch jobs: batch_job_id, status, progress, metrics, etc.
 
         This endpoint allows clients (e.g., frontend) to poll for job progress and retrieve results when ready.
         """
@@ -298,7 +296,57 @@ class Server:
                 "message": "Job is still processing or not found"
             }
 
-        return job_data
+        job_type = job_data.get("job_type", "video")
+
+        # Individual video job - return as-is
+        if job_type == "video":
+            return job_data
+
+        # Batch job - return batch-specific format
+        elif job_type == "batch":
+            response = {
+                "batch_job_id": job_data["batch_job_id"],
+                "status": job_data["status"],
+                "total_videos": job_data["total_videos"],
+                "completed_count": job_data["completed_count"],
+                "failed_count": job_data["failed_count"],
+                "processing_count": job_data["processing_count"],
+                "progress_percent": (
+                    (job_data["completed_count"] + job_data["failed_count"])
+                    / job_data["total_videos"] * 100
+                ),
+                "namespace": job_data["namespace"],
+                "created_at": job_data["created_at"],
+                "updated_at": job_data["updated_at"]
+            }
+
+            # Include aggregated metrics if available
+            if job_data["completed_count"] > 0:
+                response["metrics"] = {
+                    "total_chunks": job_data["total_chunks"],
+                    "total_frames": job_data["total_frames"],
+                    "total_memory_mb": job_data["total_memory_mb"],
+                    "avg_complexity": job_data["avg_complexity"]
+                }
+
+            # Include failed job summaries if any
+            if job_data["failed_count"] > 0:
+                response["failed_jobs"] = job_data["failed_jobs"]
+
+            # Include child details if requested
+            if include_children:
+                response["child_jobs"] = self.job_store.get_batch_child_jobs(job_id)
+            else:
+                # Just include job IDs for reference
+                response["child_job_ids"] = job_data["child_jobs"]
+
+            return response
+
+        else:
+            return {
+                "job_id": job_id,
+                "error": f"Unknown job type: {job_type}"
+            }
 
     @modal.fastapi_endpoint(method="POST")
     async def upload(self, files: list[UploadFile] = None, namespace: str = Form("")):
