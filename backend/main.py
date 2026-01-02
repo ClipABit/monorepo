@@ -254,6 +254,22 @@ class Server:
 
             # Store error result for polling endpoint in shared storage
             self.job_store.set_job_failed(job_id, str(e))
+
+            # Update parent batch if exists
+            if parent_batch_id:
+                error_result = {
+                    "job_id": job_id,
+                    "status": "failed",
+                    "filename": filename,
+                    "error": str(e)
+                }
+                self.job_store.update_batch_on_child_completion(
+                    parent_batch_id,
+                    job_id,
+                    error_result
+                )
+                logger.info(f"[Job {job_id}] Updated parent batch {parent_batch_id} with failure status")
+
             return {"job_id": job_id, "status": "failed", "error": str(e)}
 
     @modal.fastapi_endpoint(method="GET")
