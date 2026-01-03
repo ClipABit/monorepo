@@ -307,3 +307,44 @@ class TestDeleteChunks:
 
         assert result is False
         mock_index.delete.assert_called_once()
+
+
+class TestDeleteByIdentifier:
+    """Test delete by identifier operations."""
+
+    def test_delete_by_identifier_success(self, mock_pinecone_connector):
+        """Verify successful deletion by identifier."""
+        connector, mock_index, _, _ = mock_pinecone_connector
+        
+        result = connector.delete_by_identifier(
+            hashed_identifier="test-hash",
+            namespace="test-namespace"
+        )
+
+        assert result is True
+        mock_index.delete.assert_called_once_with(
+            filter={"file_hashed_identifier": {"$eq": "test-hash"}},
+            namespace="test-namespace"
+        )
+
+    def test_delete_by_identifier_empty_hash(self, mock_pinecone_connector):
+        """Verify deletion returns False for empty hash."""
+        connector, mock_index, _, _ = mock_pinecone_connector
+        
+        result = connector.delete_by_identifier(hashed_identifier="")
+
+        assert result is False
+        mock_index.delete.assert_not_called()
+
+    def test_delete_by_identifier_exception(self, mock_pinecone_connector):
+        """Verify deletion handles exceptions gracefully."""
+        connector, mock_index, _, _ = mock_pinecone_connector
+        mock_index.delete.side_effect = Exception("Pinecone error")
+        
+        result = connector.delete_by_identifier(
+            hashed_identifier="test-hash",
+            namespace="test-namespace"
+        )
+
+        assert result is False
+        mock_index.delete.assert_called_once()

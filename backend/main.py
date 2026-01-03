@@ -259,7 +259,7 @@ class Server:
 
         try:
             # Delete chunks from Pinecone
-            pinecone_success = self.pinecone_connector.delete_by_indentifier(
+            pinecone_success = self.pinecone_connector.delete_by_identifier(
                 hashed_identifier=hashed_identifier,
                 namespace=namespace
             )

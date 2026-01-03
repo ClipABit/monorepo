@@ -89,12 +89,12 @@ class PineconeConnector:
             logger.error(f"Error querying chunks from index {self.index_name} with namespace {namespace}: {e}")
             return []
         
-    def delete_by_indentifier(self, hashed_identifier: str, namespace: str = "__default__") -> bool:
+    def delete_by_identifier(self, hashed_identifier: str, namespace: str = "__default__") -> bool:
         """
         Delete chunks from the Pinecone index based on metadata filter.
 
         Args:
-            filter: Metadata filter dictionary
+            hashed_identifier: The hashed identifier of the video
             namespace: The namespace to delete chunks from (default is "__default__")
 
         Returns:
