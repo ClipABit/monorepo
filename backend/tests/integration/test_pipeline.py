@@ -53,7 +53,7 @@ class TestPipeline:
         server_instance.pinecone_connector.upsert_chunk.return_value = True
 
         # Execute
-        result = await server_instance.process_video(
+        result = await server_instance.process_video_background(
             video_bytes=sample_video_bytes,
             filename="success.mp4",
             job_id="job-success",
@@ -90,7 +90,7 @@ class TestPipeline:
         server_instance.preprocessor.process_video_from_bytes.return_value = [] # No chunks
 
         # Execute
-        result = await server_instance.process_video(
+        result = await server_instance.process_video_background(
             video_bytes=b"short-video",
             filename="short.mp4",
             job_id="job-empty",
@@ -121,7 +121,7 @@ class TestPipeline:
         server_instance.r2_connector.upload_video.side_effect = Exception("R2 Upload Error")
 
         # Execute
-        result = await server_instance.process_video(
+        result = await server_instance.process_video_background(
             video_bytes=b"fake-video-data",
             filename="test.mp4",
             job_id="job-1",
@@ -152,7 +152,7 @@ class TestPipeline:
         server_instance.preprocessor.process_video_from_bytes.side_effect = Exception("Preprocessing Failed")
 
         # Execute
-        result = await server_instance.process_video(
+        result = await server_instance.process_video_background(
             video_bytes=b"fake-video-data",
             filename="test.mp4",
             job_id="job-2",
@@ -193,7 +193,7 @@ class TestPipeline:
         server_instance.video_embedder._generate_clip_embedding.side_effect = Exception("Embedding Model Error")
 
         # Execute
-        result = await server_instance.process_video(
+        result = await server_instance.process_video_background(
             video_bytes=b"fake-video-data",
             filename="test.mp4",
             job_id="job-3",
@@ -256,7 +256,7 @@ class TestPipeline:
         server_instance.pinecone_connector.upsert_chunk.side_effect = [True, False]
 
         # Execute
-        result = await server_instance.process_video(
+        result = await server_instance.process_video_background(
             video_bytes=b"fake-video-data",
             filename="test.mp4",
             job_id="job-4",
@@ -303,7 +303,7 @@ class TestPipeline:
         server_instance.r2_connector.delete_video.return_value = False
         
         # Execute
-        result = await server_instance.process_video(
+        result = await server_instance.process_video_background(
             video_bytes=b"data", filename="test.mp4", job_id="job-5", namespace="ns"
         )
             
@@ -353,7 +353,7 @@ class TestPipeline:
         server_instance.pinecone_connector.upsert_chunk.return_value = True
 
         # Execute
-        await server_instance.process_video(b"data", "test.mp4", "job-meta", "ns")
+        await server_instance.process_video_background(b"data", "test.mp4", "job-meta", "ns")
 
         # Verify Upsert Call Arguments
         call_args = server_instance.pinecone_connector.upsert_chunk.call_args
