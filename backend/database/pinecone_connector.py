@@ -54,13 +54,13 @@ class PineconeConnector:
         Returns:
             bool: True if deletion was successful, False otherwise
         """
+        if len(chunk_ids) == 0:
+            return True
         
         try:
-            if not chunk_ids:
-                return True
-                
             self.index.delete(ids=chunk_ids, namespace=namespace)
             logger.info(f"Deleted {len(chunk_ids)} chunks from index {self.index_name} with namespace {namespace}")
+            
             return True
         except Exception as e:
             logger.error(f"Error deleting chunks from index {self.index_name}: {e}")
@@ -88,3 +88,61 @@ class PineconeConnector:
         except Exception as e:
             logger.error(f"Error querying chunks from index {self.index_name} with namespace {namespace}: {e}")
             return []
+        
+    def delete_by_identifier(self, hashed_identifier: str, namespace: str = "__default__") -> bool:
+        """
+        Delete chunks from the Pinecone index based on metadata filter.
+
+        Args:
+            hashed_identifier: The hashed identifier of the video
+            namespace: The namespace to delete chunks from (default is "__default__")
+
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
+
+        logger.info(f"Deleting chunks by metadata filter from index {self.index_name} with namespace {namespace}")
+
+        if not hashed_identifier:
+            return False
+
+        filter = {"file_hashed_identifier": {"$eq": hashed_identifier}}
+
+        try:
+            response = self.index.delete(filter=filter, namespace=namespace)
+            print(response)
+            logger.info(f"Deleted chunks by metadata filter from index {self.index_name} with namespace {namespace}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting chunks by metadata from index {self.index_name}: {e}")
+            return False
+        
+# NOTE: This is from old deletion implementation. Left here in case needed later
+# def batch_delete_chunks(self, chunk_ids: List[str], namespace: str = "__default__") -> bool:
+#         """
+#         Delete multiple chunks by their IDs in batch.
+#         Args:
+#             chunk_ids: List of chunk IDs to delete
+#             namespace: The namespace to delete from (default is "__default__")
+#         Returns:
+#             bool: True if batch deletion was successful, False otherwise
+#         """
+#         if not chunk_ids:
+#             logger.info("No chunk IDs provided for deletion")
+#             return True
+
+#         index = self.client.Index(self.index_name)
+
+#         try:
+#             # Pinecone supports batch deletion up to 1000 IDs at a time
+#             batch_size = 1000
+#             for i in range(0, len(chunk_ids), batch_size):
+#                 batch = chunk_ids[i:i + batch_size]
+#                 index.delete(ids=batch, namespace=namespace)
+#                 logger.info(f"Deleted batch of {len(batch)} chunks from namespace {namespace}")
+
+#             logger.info(f"Successfully deleted {len(chunk_ids)} chunks from index {self.index_name} with namespace {namespace}")
+#             return True
+#         except Exception as e:
+#             logger.error(f"Error batch deleting chunks from index {self.index_name} with namespace {namespace}: {e}")
+#             return False
