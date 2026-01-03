@@ -230,10 +230,11 @@ if st.session_state.search_results:
                 # Video info and delete button row
                 info_col, delete_col = st.columns([3, 1])
 
-                with info_col:
+                with cols[idx%3]:
                     with st.expander("Info"):
                         st.write(f"**File:** {filename}")
                         st.write(f"**Score:** {score:.2f}")
+                    st.video(presigned_url, start_time=int(start_time))
 
                 with delete_col:
                     if IS_INTERNAL_ENV and hashed_identifier:
