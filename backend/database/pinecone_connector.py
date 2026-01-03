@@ -54,13 +54,13 @@ class PineconeConnector:
         Returns:
             bool: True if deletion was successful, False otherwise
         """
+        if len(chunk_ids) == 0:
+            return True
         
         try:
-            if not chunk_ids:
-                return True
-                
             self.index.delete(ids=chunk_ids, namespace=namespace)
             logger.info(f"Deleted {len(chunk_ids)} chunks from index {self.index_name} with namespace {namespace}")
+            
             return True
         except Exception as e:
             logger.error(f"Error deleting chunks from index {self.index_name}: {e}")
@@ -88,3 +88,31 @@ class PineconeConnector:
         except Exception as e:
             logger.error(f"Error querying chunks from index {self.index_name} with namespace {namespace}: {e}")
             return []
+        
+    def delete_by_indentifier(self, hashed_identifier: str, namespace: str = "__default__") -> bool:
+        """
+        Delete chunks from the Pinecone index based on metadata filter.
+
+        Args:
+            filter: Metadata filter dictionary
+            namespace: The namespace to delete chunks from (default is "__default__")
+
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
+
+        logger.info(f"Deleting chunks by metadata filter from index {self.index_name} with namespace {namespace}")
+
+        if not hashed_identifier:
+            return False
+
+        filter = {"file_hashed_identifier": {"$eq": hashed_identifier}}
+
+        try:
+            response = self.index.delete(filter=filter, namespace=namespace)
+            print(response)
+            logger.info(f"Deleted chunks by metadata filter from index {self.index_name} with namespace {namespace}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting chunks by metadata from index {self.index_name}: {e}")
+            return False

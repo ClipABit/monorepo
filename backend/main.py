@@ -27,6 +27,11 @@ image = (
 
 # Environment: "dev" (default) or "prod" (set via ENVIRONMENT variable)
 env = os.environ.get("ENVIRONMENT", "dev")
+if env not in ["dev", "prod", "staging"]:
+    raise ValueError(f"Invalid ENVIRONMENT value: {env}. Must be one of: dev, prod, staging")
+logger.info(f"Starting Modal app in '{env}' environment")
+
+IS_INTERNAL_ENV = env in ["dev", "staging"]
 
 # Create Modal app
 app = modal.App(
@@ -113,7 +118,7 @@ class Server:
         print(f"[Container] Started at {self.start_time.isoformat()}")
 
     @modal.method()
-    async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = ""):
+    async def process_video_background(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = ""):
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}'")
         
         hashed_identifier = None
@@ -246,6 +251,60 @@ class Server:
             self.job_store.set_job_failed(job_id, str(e))
             return {"job_id": job_id, "status": "failed", "error": str(e)}
 
+
+    @modal.method()
+    async def delete_video_background(self, job_id: str, hashed_identifier: str, namespace: str = ""):
+        """Background method to delete a video and all associated chunks from R2 and Pinecone."""
+        logger.info(f"[Job {job_id}] Deletion started: {hashed_identifier} | namespace='{namespace}'")
+
+        try:
+            # Delete chunks from Pinecone
+            pinecone_success = self.pinecone_connector.delete_by_indentifier(
+                hashed_identifier=hashed_identifier,
+                namespace=namespace
+            )
+
+            # NOTE: idk if we acc need to raise exception here because this isn't a critical failure
+            if not pinecone_success:
+                raise Exception("Failed to delete chunks from Pinecone")
+            
+            # Delete from R2. If this fails, chunks are gone but video remains - notify client.
+            r2_success = self.r2_connector.delete_video(hashed_identifier)
+            if not r2_success:
+                logger.critical(f"[Job {job_id}] INCONSISTENCY: Chunks deleted but R2 deletion failed for {hashed_identifier}")
+                raise Exception("Failed to delete video from R2 after deleting chunks. System may be inconsistent.")
+
+            # Build success response
+            result = {
+                "job_id": job_id,
+                "status": "completed",
+                "hashed_identifier": hashed_identifier,
+                "namespace": namespace,
+                "r2": {
+                    "deleted": r2_success
+                },
+                "pinecone": {
+                    "deleted": pinecone_success
+                }
+            }
+
+            logger.info(f"[Job {job_id}] Deletion completed: R2={r2_success}, Pinecone chunks={pinecone_success}")
+
+            # Store result for polling endpoint
+            self.job_store.set_job_completed(job_id, result)
+            return result
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"[Job {job_id}] Deletion failed: {error_msg}")
+
+            import traceback
+            traceback.print_exc()
+
+            # Store error result
+            self.job_store.set_job_failed(job_id, error_msg)
+            return {"job_id": job_id, "status": "failed", "error": error_msg}
+
     @modal.fastapi_endpoint(method="GET")
     async def status(self, job_id: str):
         """
@@ -301,7 +360,7 @@ class Server:
         })
 
         # Spawn background processing (non-blocking - returns immediately)
-        self.process_video.spawn(contents, file.filename, job_id, namespace)
+        self.process_video_background.spawn(contents, file.filename, job_id, namespace)
 
         return {
             "job_id": job_id,
@@ -325,6 +384,7 @@ class Server:
 
         Returns: dict with 'query', 'results', and 'timing'.
         """
+
         try:
             import time
             t_start = time.perf_counter()
@@ -361,6 +421,7 @@ class Server:
             logger.error(f"[Search] Error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    
     @modal.fastapi_endpoint(method="GET")
     async def list_videos(self, namespace: str = "__default__"):
         """
@@ -379,3 +440,55 @@ class Server:
         except Exception as e:
             logger.error(f"[List Videos] Error fetching videos: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+        
+    @modal.fastapi_endpoint(method="DELETE")
+    async def delete_video(self, hashed_identifier: str, filename: str, namespace: str = ""):
+        """
+        Delete a video and its associated chunks from storage and database.
+
+        Args:
+            hashed_identifier (str): The unique identifier of the video in R2 storage.
+            filename (str): The original filename of the video.
+            namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
+
+        Returns:
+            dict: Contains status and message about deletion result.
+        
+        Raises:
+            HTTPException: If deletion fails at any step.
+                - 500 Internal Server Error with details.
+                - 400 Bad Request if parameters are missing.
+                - 404 Not Found if video does not exist.
+                - 403 Forbidden if deletion is not allowed.
+
+        """
+
+        logger.info(f"[Delete Video] Request to delete video: {filename} ({hashed_identifier}) | namespace='{namespace}'")
+        if not hashed_identifier or not filename:
+            raise HTTPException(status_code=400, detail="Missing parameters: 'hashed_identifier' and 'filename' are required.")
+        
+        if not IS_INTERNAL_ENV:
+            raise HTTPException(status_code=403, detail="Video deletion is not allowed in the current environment.")
+
+
+       # Create job
+        import uuid
+        job_id = str(uuid.uuid4())
+        self.job_store.create_job(job_id, {
+            "job_id": job_id,
+            "hashed_identifier": hashed_identifier,
+            "namespace": namespace,
+            "status": "processing",
+            "operation": "delete"
+        })
+
+        # Spawn background deletion (non-blocking - returns immediately)
+        self.delete_video_background.spawn(job_id, hashed_identifier, namespace)
+
+        return {
+            "job_id": job_id,
+            "hashed_identifier": hashed_identifier,
+            "namespace": namespace,
+            "status": "processing",
+            "message": "Video deletion started, processing in background"
+        }
