@@ -36,21 +36,32 @@ class Config:
     UPLOAD_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-upload{url_portion}.modal.run"
     STATUS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-status{url_portion}.modal.run"
     LIST_VIDEOS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-list-videos{url_portion}.modal.run"
+    DELETE_VIDEO_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-delete-video{url_portion}.modal.run"
 
     # Namespace for Pinecone and R2 (web-demo for public demo)
     NAMESPACE = "web-demo"
+
+    # Flag to indicate if running in internal environment
+    IS_INTERNAL_ENV = ENVIRONMENT in ["dev", "staging"]
 
     @classmethod
     def get_config(cls):
         """Get configuration as a dictionary."""
         return {
+            # General settings
             "environment": cls.ENVIRONMENT,
             "app_name": cls.APP_NAME,
+            "namespace": cls.NAMESPACE,
+
+            # Flags
+            "is_internal_env": cls.IS_INTERNAL_ENV,
+
+            # API Endpoints
             "search_api_url": cls.SEARCH_API_URL,
             "upload_api_url": cls.UPLOAD_API_URL,
             "status_api_url": cls.STATUS_API_URL,
             "list_videos_api_url": cls.LIST_VIDEOS_API_URL,
-            "namespace": cls.NAMESPACE,
+            "delete_video_api_url": cls.DELETE_VIDEO_API_URL,
         }
 
     @classmethod
