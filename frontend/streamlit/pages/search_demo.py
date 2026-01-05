@@ -52,7 +52,7 @@ def upload_file_to_backend(file_bytes: bytes, filename: str, content_type: str |
     return resp
 
 
-def delete_video(hashed_identifier: str, filename: str): 
+def delete_video(hashed_identifier: str, filename: str):
     """Delete video via API call."""
 
     if not IS_INTERNAL_ENV:
