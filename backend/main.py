@@ -514,7 +514,7 @@ class Server:
             raise HTTPException(status_code=403, detail="Video deletion is not allowed in the current environment.")
 
 
-       # Create job
+        # Create job
         import uuid
         job_id = str(uuid.uuid4())
         self.job_store.create_job(job_id, {
