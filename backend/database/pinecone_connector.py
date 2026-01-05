@@ -54,7 +54,7 @@ class PineconeConnector:
         Returns:
             bool: True if deletion was successful, False otherwise
         """
-        if len(chunk_ids) == 0:
+        if not chunk_ids:
             return True
         
         try:
