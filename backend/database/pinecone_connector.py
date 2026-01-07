@@ -106,11 +106,10 @@ class PineconeConnector:
         if not hashed_identifier:
             return False
 
-        filter = {"file_hashed_identifier": {"$eq": hashed_identifier}}
+        metadata_filter = {"file_hashed_identifier": {"$eq": hashed_identifier}}
 
         try:
-            response = self.index.delete(filter=filter, namespace=namespace)
-            print(response)
+            self.index.delete(filter=metadata_filter, namespace=namespace)
             logger.info(f"Deleted chunks by metadata filter from index {self.index_name} with namespace {namespace}")
             return True
         except Exception as e:

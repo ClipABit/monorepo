@@ -370,3 +370,115 @@ class TestPipeline:
         assert 'file_info' not in upserted_metadata
         assert 'optional_field' not in upserted_metadata
 
+    # ==========================================================================
+    # DELETION SCENARIOS
+    # ==========================================================================
+
+    @pytest.mark.asyncio
+    async def test_delete_video_success(self, server_instance):
+        """
+        Scenario: Happy path for deletion - everything succeeds.
+        Expectation:
+            - Pinecone delete_by_identifier is called.
+            - R2 delete_video is called.
+            - Job is marked as completed.
+        """
+        # Setup
+        hashed_id = "hash-to-delete"
+        job_id = "job-delete-success"
+        namespace = "test-ns"
+
+        server_instance.pinecone_connector.delete_by_identifier.return_value = True
+        server_instance.r2_connector.delete_video.return_value = True
+
+        # Execute
+        result = await server_instance.delete_video_background(
+            job_id=job_id,
+            hashed_identifier=hashed_id,
+            namespace=namespace
+        )
+
+        # Verify Result
+        assert result["status"] == "completed"
+        assert result["hashed_identifier"] == hashed_id
+        assert result["r2"]["deleted"] is True
+        assert result["pinecone"]["deleted"] is True
+
+        # Verify Interactions
+        server_instance.pinecone_connector.delete_by_identifier.assert_called_once_with(
+            hashed_identifier=hashed_id,
+            namespace=namespace
+        )
+        server_instance.r2_connector.delete_video.assert_called_once_with(hashed_id)
+
+        # Verify Job Store Update
+        server_instance.job_store.set_job_completed.assert_called_once_with(job_id, result)
+
+    @pytest.mark.asyncio
+    async def test_delete_video_pinecone_failure(self, server_instance):
+        """
+        Scenario: Pinecone deletion fails.
+        Expectation:
+            - Job is marked as failed.
+            - R2 deletion is NOT called.
+        """
+        # Setup
+        hashed_id = "hash-pinecone-fail"
+        job_id = "job-delete-pinecone-fail"
+        namespace = "test-ns"
+
+        server_instance.pinecone_connector.delete_by_identifier.return_value = False
+
+        # Execute
+        result = await server_instance.delete_video_background(
+            job_id=job_id,
+            hashed_identifier=hashed_id,
+            namespace=namespace
+        )
+
+        # Verify Result
+        assert result["status"] == "failed"
+        assert "Failed to delete chunks from Pinecone" in result["error"]
+
+        # Verify Interactions
+        server_instance.pinecone_connector.delete_by_identifier.assert_called_once()
+        server_instance.r2_connector.delete_video.assert_not_called()
+
+        # Verify Job Store Update
+        server_instance.job_store.set_job_failed.assert_called_once_with(job_id, "Failed to delete chunks from Pinecone")
+
+    @pytest.mark.asyncio
+    async def test_delete_video_r2_failure(self, server_instance):
+        """
+        Scenario: Pinecone deletion succeeds, but R2 deletion fails.
+        Expectation:
+            - Job is marked as failed.
+            - A critical log should indicate the inconsistency.
+        """
+        # Setup
+        hashed_id = "hash-r2-fail"
+        job_id = "job-delete-r2-fail"
+        namespace = "test-ns"
+
+        server_instance.pinecone_connector.delete_by_identifier.return_value = True
+        server_instance.r2_connector.delete_video.return_value = False
+
+        # Execute
+        result = await server_instance.delete_video_background(
+            job_id=job_id,
+            hashed_identifier=hashed_id,
+            namespace=namespace
+        )
+
+        # Verify Result
+        assert result["status"] == "failed"
+        assert "Failed to delete video from R2" in result["error"]
+
+        # Verify Interactions
+        server_instance.pinecone_connector.delete_by_identifier.assert_called_once()
+        server_instance.r2_connector.delete_video.assert_called_once_with(hashed_id)
+
+        # Verify Job Store Update
+        error_msg = "Failed to delete video from R2 after deleting chunks. System may be inconsistent."
+        server_instance.job_store.set_job_failed.assert_called_once_with(job_id, error_msg)
+
