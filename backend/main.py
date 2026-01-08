@@ -304,17 +304,24 @@ class Server:
 
         # Batch job - return batch-specific format
         elif job_type == "batch":
+            # Calculate progress percentage, handling empty batch case
+            total_videos = job_data["total_videos"]
+            if total_videos > 0:
+                progress_percent = (
+                    (job_data["completed_count"] + job_data["failed_count"])
+                    / total_videos * 100
+                )
+            else:
+                progress_percent = 0.0
+
             response = {
                 "batch_job_id": job_data["batch_job_id"],
                 "status": job_data["status"],
-                "total_videos": job_data["total_videos"],
+                "total_videos": total_videos,
                 "completed_count": job_data["completed_count"],
                 "failed_count": job_data["failed_count"],
                 "processing_count": job_data["processing_count"],
-                "progress_percent": (
-                    (job_data["completed_count"] + job_data["failed_count"])
-                    / job_data["total_videos"] * 100
-                ),
+                "progress_percent": progress_percent,
                 "namespace": job_data["namespace"],
                 "created_at": job_data["created_at"],
                 "updated_at": job_data["updated_at"]
