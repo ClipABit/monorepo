@@ -127,7 +127,8 @@ class JobStoreConnector:
             "total_memory_mb": 0.0,
             "avg_complexity": 0.0,
             "failed_jobs": [],
-            "completed_jobs": []
+            "completed_jobs": [],
+            "_version": 0  # Optimistic locking version
         }
         return self.create_job(batch_job_id, batch_data)
 
@@ -135,68 +136,109 @@ class JobStoreConnector:
         self,
         batch_job_id: str,
         child_job_id: str,
-        child_result: Dict[str, Any]
+        child_result: Dict[str, Any],
+        max_retries: int = 10
     ) -> bool:
-        """Update batch job when a child completes (success or failure)."""
-        batch_job = self.get_job(batch_job_id)
-        if not batch_job:
-            logger.error(f"Batch job {batch_job_id} not found")
-            return False
+        """
+        Update batch job when a child completes (success or failure).
 
-        # Update counts
-        child_status = child_result.get("status")
+        Uses optimistic locking with version-based retries to prevent race conditions
+        when multiple child jobs complete simultaneously.
+        """
+        for attempt in range(max_retries):
+            # Read current batch state
+            batch_job = self.get_job(batch_job_id)
+            if not batch_job:
+                logger.error(f"Batch job {batch_job_id} not found")
+                return False
 
-        if child_status == "completed":
-            batch_job["completed_count"] += 1
-            batch_job["processing_count"] -= 1
+            # Get current version for optimistic locking
+            expected_version = batch_job.get("_version", 0)
 
-            # Aggregate metrics
-            batch_job["total_chunks"] += child_result.get("chunks", 0)
-            batch_job["total_frames"] += child_result.get("total_frames", 0)
-            batch_job["total_memory_mb"] += child_result.get("total_memory_mb", 0.0)
+            # Update counts
+            child_status = child_result.get("status")
 
-            # Update average complexity (running average)
-            prev_avg = batch_job["avg_complexity"]
-            n = batch_job["completed_count"]
-            new_complexity = child_result.get("avg_complexity", 0.0)
-            batch_job["avg_complexity"] = (prev_avg * (n - 1) + new_complexity) / n
+            if child_status == "completed":
+                batch_job["completed_count"] += 1
+                batch_job["processing_count"] -= 1
 
-            # Track completed job summary
-            batch_job["completed_jobs"].append({
-                "job_id": child_job_id,
-                "filename": child_result.get("filename"),
-                "chunks": child_result.get("chunks", 0),
-                "frames": child_result.get("total_frames", 0)
-            })
+                # Aggregate metrics
+                batch_job["total_chunks"] += child_result.get("chunks", 0)
+                batch_job["total_frames"] += child_result.get("total_frames", 0)
+                batch_job["total_memory_mb"] += child_result.get("total_memory_mb", 0.0)
 
-        elif child_status == "failed":
-            batch_job["failed_count"] += 1
-            batch_job["processing_count"] -= 1
+                # Update average complexity (running average)
+                prev_avg = batch_job["avg_complexity"]
+                n = batch_job["completed_count"]
+                new_complexity = child_result.get("avg_complexity", 0.0)
+                batch_job["avg_complexity"] = (prev_avg * (n - 1) + new_complexity) / n
 
-            # Track failed job details
-            batch_job["failed_jobs"].append({
-                "job_id": child_job_id,
-                "filename": child_result.get("filename"),
-                "error": child_result.get("error", "Unknown error")
-            })
+                # Track completed job summary
+                batch_job["completed_jobs"].append({
+                    "job_id": child_job_id,
+                    "filename": child_result.get("filename"),
+                    "chunks": child_result.get("chunks", 0),
+                    "frames": child_result.get("total_frames", 0)
+                })
 
-        # Update batch status
-        total = batch_job["total_videos"]
-        completed = batch_job["completed_count"]
-        failed = batch_job["failed_count"]
+            elif child_status == "failed":
+                batch_job["failed_count"] += 1
+                batch_job["processing_count"] -= 1
 
-        if completed + failed == total:
-            # All jobs finished
-            if failed == 0:
-                batch_job["status"] = "completed"
-            elif completed == 0:
-                batch_job["status"] = "failed"
-            else:
-                batch_job["status"] = "partial"
+                # Track failed job details
+                batch_job["failed_jobs"].append({
+                    "job_id": child_job_id,
+                    "filename": child_result.get("filename"),
+                    "error": child_result.get("error", "Unknown error")
+                })
 
-        batch_job["updated_at"] = datetime.now(timezone.utc).isoformat()
+            # Update batch status
+            total = batch_job["total_videos"]
+            completed = batch_job["completed_count"]
+            failed = batch_job["failed_count"]
 
-        return self.update_job(batch_job_id, batch_job)
+            if completed + failed == total:
+                # All jobs finished
+                if failed == 0:
+                    batch_job["status"] = "completed"
+                elif completed == 0:
+                    batch_job["status"] = "failed"
+                else:
+                    batch_job["status"] = "partial"
+
+            batch_job["updated_at"] = datetime.now(timezone.utc).isoformat()
+            batch_job["_version"] = expected_version + 1
+
+            # Attempt atomic update with version check
+            try:
+                # Verify version hasn't changed (optimistic locking)
+                current_batch = self.get_job(batch_job_id)
+                if current_batch and current_batch.get("_version", 0) == expected_version:
+                    # Version matches, safe to update
+                    self.job_store[batch_job_id] = batch_job
+                    logger.info(
+                        f"Updated batch {batch_job_id} for child {child_job_id} "
+                        f"(attempt {attempt + 1}, version {expected_version} -> {expected_version + 1})"
+                    )
+                    return True
+                else:
+                    # Version mismatch, retry
+                    logger.warning(
+                        f"Version mismatch for batch {batch_job_id} "
+                        f"(expected {expected_version}, got {current_batch.get('_version', 0)}). "
+                        f"Retrying... (attempt {attempt + 1}/{max_retries})"
+                    )
+                    continue
+            except Exception as e:
+                logger.error(f"Error updating batch {batch_job_id}: {e}")
+                return False
+
+        # Max retries exceeded
+        logger.error(
+            f"Failed to update batch {batch_job_id} after {max_retries} attempts. "
+            f"Concurrent updates are too frequent."
+        )
+        return False
 
     def get_batch_child_jobs(self, batch_job_id: str) -> List[Dict[str, Any]]:
         """Retrieve all child job data for a batch."""
