@@ -591,3 +591,54 @@ class TestConcurrentBatchUpdates:
         assert batch["status"] == "partial"
         assert len(batch["completed_jobs"]) == 4
         assert len(batch["failed_jobs"]) == 2
+
+    def test_unexpected_child_status_handled(self, mock_modal_dict):
+        """Verify unexpected child status values are handled gracefully."""
+        connector = JobStoreConnector("test-jobs")
+        connector.create_batch_job("batch-123", ["job-1", "job-2", "job-3"], "web-demo")
+
+        # Test with None status
+        result_none = {
+            "job_id": "job-1",
+            "status": None,
+            "filename": "video1.mp4"
+        }
+        connector.update_batch_on_child_completion("batch-123", "job-1", result_none)
+
+        batch = connector.get_job("batch-123")
+        assert batch["failed_count"] == 1  # Treated as failure
+        assert batch["processing_count"] == 2  # Decremented correctly
+        assert len(batch["failed_jobs"]) == 1
+        assert "Invalid status: None" in batch["failed_jobs"][0]["error"]
+
+        # Test with unexpected string status
+        result_invalid = {
+            "job_id": "job-2",
+            "status": "processing",  # Should never be passed to this method
+            "filename": "video2.mp4"
+        }
+        connector.update_batch_on_child_completion("batch-123", "job-2", result_invalid)
+
+        batch = connector.get_job("batch-123")
+        assert batch["failed_count"] == 2  # Both treated as failures
+        assert batch["processing_count"] == 1  # Decremented correctly
+        assert len(batch["failed_jobs"]) == 2
+        assert "Invalid status: processing" in batch["failed_jobs"][1]["error"]
+
+        # Complete the last job normally
+        result_success = {
+            "job_id": "job-3",
+            "status": "completed",
+            "filename": "video3.mp4",
+            "chunks": 5,
+            "total_frames": 50,
+            "total_memory_mb": 100.0,
+            "avg_complexity": 0.5
+        }
+        connector.update_batch_on_child_completion("batch-123", "job-3", result_success)
+
+        batch = connector.get_job("batch-123")
+        assert batch["completed_count"] == 1
+        assert batch["failed_count"] == 2
+        assert batch["processing_count"] == 0  # All jobs accounted for
+        assert batch["status"] == "partial"
