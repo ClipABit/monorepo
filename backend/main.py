@@ -429,89 +429,163 @@ class Server:
 
         # Generate batch job ID
         batch_job_id = f"batch-{uuid.uuid4()}"
+        batch_created = False
+        successfully_spawned = []
 
-        # Step 1: Collect metadata only (no file reading yet)
-        file_metadata = []
-        child_job_ids = []
+        try:
+            # Step 1: Collect metadata only (no file reading yet)
+            file_metadata = []
+            child_job_ids = []
 
-        for file in files:
-            job_id = str(uuid.uuid4())
-            file_metadata.append({
-                "job_id": job_id,
-                "file": file,  # Keep reference to UploadFile, don't read yet
-                "filename": file.filename,
-                "content_type": file.content_type
-            })
-            child_job_ids.append(job_id)
+            for file in files:
+                job_id = str(uuid.uuid4())
+                file_metadata.append({
+                    "job_id": job_id,
+                    "file": file,
+                    "filename": file.filename,
+                    "content_type": file.content_type
+                })
+                child_job_ids.append(job_id)
 
-        logger.info(
-            f"[Batch {batch_job_id}] Starting batch upload with {len(files)} videos"
-        )
-
-        # Step 2: Create batch job entry FIRST (before spawning any children)
-        self.job_store.create_batch_job(
-            batch_job_id=batch_job_id,
-            child_job_ids=child_job_ids,
-            namespace=namespace
-        )
-
-        logger.info(
-            f"[Batch {batch_job_id}] Created parent job entry with {len(files)} children"
-        )
-
-        # Step 3: Process files one at a time
-        # Only ONE file in memory at a time
-        child_jobs = []
-        total_size = 0
-
-        for metadata in file_metadata:
-            # Read file NOW - processed and discarded immediately
-            contents = await metadata["file"].read()
-            file_size = len(contents)
-            total_size += file_size
-
-            # Create individual job entry
-            self.job_store.create_job(metadata["job_id"], {
-                "job_id": metadata["job_id"],
-                "job_type": "video",
-                "parent_batch_id": batch_job_id,
-                "filename": metadata["filename"],
-                "status": "processing",
-                "size_bytes": file_size,
-                "content_type": metadata["content_type"],
-                "namespace": namespace
-            })
-
-            # Spawn background processing
-            self.process_video.spawn(
-                contents,  # File contents sent to Modal and discarded from memory
-                metadata["filename"],
-                metadata["job_id"],
-                namespace,
-                batch_job_id  # Pass parent ID for callback
+            logger.info(
+                f"[Batch {batch_job_id}] Starting batch upload with {len(files)} videos"
             )
 
-            # Track for response
-            child_jobs.append({
-                "job_id": metadata["job_id"],
-                "filename": metadata["filename"],
-                "size_bytes": file_size
-            })
+            # Step 2: Create batch job entry FIRST
+            try:
+                self.job_store.create_batch_job(
+                    batch_job_id=batch_job_id,
+                    child_job_ids=child_job_ids,
+                    namespace=namespace
+                )
+                batch_created = True
+                logger.info(
+                    f"[Batch {batch_job_id}] Created parent job entry with {len(files)} children"
+                )
+            except Exception as e:
+                logger.error(f"[Batch {batch_job_id}] Failed to create batch job: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to initialize batch job: {str(e)}"
+                )
 
-        logger.info(
-            f"[Batch {batch_job_id}] Created with {len(files)} videos, "
-            f"total size: {total_size / 1024 / 1024:.2f} MB"
-        )
+            # Step 3: Process files one at a time
+            child_jobs = []
+            total_size = 0
 
-        return {
-            "batch_job_id": batch_job_id,
-            "total_videos": len(files),
-            "total_size_bytes": total_size,
-            "status": "processing",
-            "namespace": namespace,
-            "child_jobs": child_jobs,
-            "message": f"Batch upload started with {len(files)} videos"
-        }
+            for idx, metadata in enumerate(file_metadata):
+                try:
+                    contents = await metadata["file"].read()
+                    file_size = len(contents)
+                    total_size += file_size
+
+                    self.job_store.create_job(metadata["job_id"], {
+                        "job_id": metadata["job_id"],
+                        "job_type": "video",
+                        "parent_batch_id": batch_job_id,
+                        "filename": metadata["filename"],
+                        "status": "processing",
+                        "size_bytes": file_size,
+                        "content_type": metadata["content_type"],
+                        "namespace": namespace
+                    })
+
+                    self.process_video.spawn(
+                        contents,
+                        metadata["filename"],
+                        metadata["job_id"],
+                        namespace,
+                        batch_job_id
+                    )
+
+                    successfully_spawned.append(metadata["job_id"])
+
+                    child_jobs.append({
+                        "job_id": metadata["job_id"],
+                        "filename": metadata["filename"],
+                        "size_bytes": file_size
+                    })
+
+                except Exception as e:
+                    logger.error(
+                        f"[Batch {batch_job_id}] Failed to process file {metadata['filename']} "
+                        f"(#{idx + 1}/{len(file_metadata)}): {e}"
+                    )
+
+                    # Mark job as failed and update parent batch
+                    try:
+                        self.job_store.set_job_failed(
+                            metadata["job_id"],
+                            f"Upload failed: {str(e)}"
+                        )
+                        self.job_store.update_batch_on_child_completion(
+                            batch_job_id,
+                            metadata["job_id"],
+                            {
+                                "job_id": metadata["job_id"],
+                                "status": "failed",
+                                "filename": metadata["filename"],
+                                "error": f"Upload failed: {str(e)}"
+                            }
+                        )
+                    except Exception as update_error:
+                        logger.error(
+                            f"[Batch {batch_job_id}] Failed to update job status: {update_error}"
+                        )
+
+            # Check if any jobs succeeded
+            if len(successfully_spawned) == 0:
+                logger.error(f"[Batch {batch_job_id}] All {len(files)} jobs failed")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Batch upload failed: All {len(files)} videos failed to process"
+                )
+            elif len(successfully_spawned) < len(files):
+                logger.warning(
+                    f"[Batch {batch_job_id}] Partial success: {len(successfully_spawned)}/{len(files)}"
+                )
+
+            logger.info(
+                f"[Batch {batch_job_id}] Spawned {len(successfully_spawned)}/{len(files)} videos, "
+                f"total size: {total_size / 1024 / 1024:.2f} MB"
+            )
+
+            return {
+                "batch_job_id": batch_job_id,
+                "total_videos": len(files),
+                "successfully_spawned": len(successfully_spawned),
+                "failed_count": len(files) - len(successfully_spawned),
+                "total_size_bytes": total_size,
+                "status": "processing" if len(successfully_spawned) == len(files) else "partial",
+                "namespace": namespace,
+                "child_jobs": child_jobs,
+                "message": (
+                    f"Batch upload started with {len(successfully_spawned)}/{len(files)} videos" +
+                    (f" ({len(files) - len(successfully_spawned)} failed during upload)"
+                     if len(successfully_spawned) < len(files) else "")
+                )
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[Batch {batch_job_id}] Unexpected error: {e}")
+
+            # Mark batch as failed if it was created
+            if batch_created:
+                try:
+                    batch_job = self.job_store.get_job(batch_job_id)
+                    if batch_job:
+                        batch_job["status"] = "failed"
+                        batch_job["error"] = str(e)
+                        self.job_store.update_job(batch_job_id, batch_job)
+                except Exception as cleanup_error:
+                    logger.error(f"[Batch {batch_job_id}] Failed cleanup: {cleanup_error}")
+
+            raise HTTPException(
+                status_code=500,
+                detail=f"Batch upload failed unexpectedly: {str(e)}"
+            )
 
 
     @modal.fastapi_endpoint(method="GET")
