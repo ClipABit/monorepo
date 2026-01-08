@@ -418,8 +418,9 @@ class Server:
         # Generate batch job ID
         batch_job_id = f"batch-{uuid.uuid4()}"
 
-        # Read all files and create child jobs
-        child_jobs = []
+        # Step 1: Collect all file data and generate child job IDs
+        file_data = []
+        child_job_ids = []
         total_size = 0
 
         for file in files:
@@ -428,39 +429,55 @@ class Server:
             file_size = len(contents)
             total_size += file_size
 
-            # Create individual job entry
-            self.job_store.create_job(job_id, {
+            file_data.append({
                 "job_id": job_id,
+                "contents": contents,
+                "filename": file.filename,
+                "size_bytes": file_size,
+                "content_type": file.content_type
+            })
+            child_job_ids.append(job_id)
+
+        # Step 2: Create batch job entry FIRST (before spawning any children)
+        self.job_store.create_batch_job(
+            batch_job_id=batch_job_id,
+            child_job_ids=child_job_ids,
+            namespace=namespace
+        )
+
+        logger.info(
+            f"[Batch {batch_job_id}] Created parent job entry with {len(files)} children"
+        )
+
+        # Step 3: Create individual child job entries and spawn processing
+        child_jobs = []
+        for data in file_data:
+            # Create individual job entry
+            self.job_store.create_job(data["job_id"], {
+                "job_id": data["job_id"],
                 "job_type": "video",
                 "parent_batch_id": batch_job_id,
-                "filename": file.filename,
+                "filename": data["filename"],
                 "status": "processing",
-                "size_bytes": file_size,
-                "content_type": file.content_type,
+                "size_bytes": data["size_bytes"],
+                "content_type": data["content_type"],
                 "namespace": namespace
             })
 
             # Spawn background processing (Modal handles parallel execution)
             self.process_video.spawn(
-                contents,
-                file.filename,
-                job_id,
+                data["contents"],
+                data["filename"],
+                data["job_id"],
                 namespace,
                 batch_job_id  # Pass parent ID for callback
             )
 
             child_jobs.append({
-                "job_id": job_id,
-                "filename": file.filename,
-                "size_bytes": file_size
+                "job_id": data["job_id"],
+                "filename": data["filename"],
+                "size_bytes": data["size_bytes"]
             })
-
-        # Create batch job entry
-        self.job_store.create_batch_job(
-            batch_job_id=batch_job_id,
-            child_job_ids=[job["job_id"] for job in child_jobs],
-            namespace=namespace
-        )
 
         logger.info(
             f"[Batch {batch_job_id}] Created with {len(files)} videos, "
