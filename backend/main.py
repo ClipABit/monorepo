@@ -388,12 +388,89 @@ class Server:
         else:
             return await self._handle_batch_upload(files, namespace)
 
+    def _validate_file(self, file: UploadFile, file_contents: bytes = None) -> tuple[bool, str]:
+        """
+        Validate uploaded file for security and compatibility.
+
+        Args:
+            file: The UploadFile object to validate
+            file_contents: Optional file contents for size validation (if already read)
+
+        Returns:
+            tuple: (is_valid: bool, error_message: str)
+        """
+        # Allowed video MIME types
+        ALLOWED_MIME_TYPES = {
+            'video/mp4',
+            'video/mpeg',
+            'video/quicktime',  # .mov
+            'video/x-msvideo',  # .avi
+            'video/x-matroska',  # .mkv
+            'video/webm',
+            'video/x-flv',
+            'application/octet-stream'  # Some clients send this for video files
+        }
+
+        # Allowed file extensions
+        ALLOWED_EXTENSIONS = {'.mp4', '.mpeg', '.mpg', '.mov', '.avi', '.mkv', '.webm', '.flv', '.m4v'}
+
+        # Maximum individual file size: 2GB
+        MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
+
+        # 1. Check filename exists
+        if not file.filename:
+            return False, "File has no filename"
+
+        # 2. Check file extension
+        filename_lower = file.filename.lower()
+        file_ext = None
+        for ext in ALLOWED_EXTENSIONS:
+            if filename_lower.endswith(ext):
+                file_ext = ext
+                break
+
+        if not file_ext:
+            return False, f"Invalid file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
+
+        # 3. Check MIME type (if provided)
+        if file.content_type and file.content_type not in ALLOWED_MIME_TYPES:
+            # Some clients send generic MIME types, so we're lenient if extension is valid
+            logger.warning(
+                f"File {file.filename} has unexpected MIME type {file.content_type}, "
+                f"but extension {file_ext} is valid. Proceeding."
+            )
+
+        # 4. Check file size (if contents provided)
+        if file_contents is not None:
+            file_size = len(file_contents)
+            if file_size == 0:
+                return False, "File is empty (0 bytes)"
+            if file_size > MAX_FILE_SIZE:
+                return False, f"File too large ({file_size / 1024 / 1024:.1f} MB). Maximum: {MAX_FILE_SIZE / 1024 / 1024:.0f} MB"
+
+        # 5. Check for path traversal attempts in filename
+        if '..' in file.filename or '/' in file.filename or '\\' in file.filename:
+            return False, "Filename contains invalid characters (path separators)"
+
+        return True, ""
+
     async def _handle_single_upload(self, file: UploadFile, namespace: str) -> dict:
         """Handle single file upload (existing logic, backward compatible)."""
         import uuid
+
+        # Validation before reading
+        is_valid, error_msg = self._validate_file(file)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
+
         job_id = str(uuid.uuid4())
         contents = await file.read()
         file_size = len(contents)
+
+        # Validation after reading
+        is_valid, error_msg = self._validate_file(file, contents)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
 
         self.job_store.create_job(job_id, {
             "job_id": job_id,
@@ -433,11 +510,19 @@ class Server:
         successfully_spawned = []
 
         try:
-            # Step 1: Collect metadata only (no file reading yet)
+            # Step 1: Collect metadata and validate (no reading)
             file_metadata = []
             child_job_ids = []
+            validation_errors = []
 
-            for file in files:
+            for idx, file in enumerate(files):
+                #  Validate file (filename, extension, MIME type)
+                is_valid, error_msg = self._validate_file(file)
+                if not is_valid:
+                    validation_errors.append(f"File #{idx + 1} ({file.filename}): {error_msg}")
+                    logger.warning(f"[Batch {batch_job_id}] Validation failed for {file.filename}: {error_msg}")
+                    continue  # Skip invalid files
+
                 job_id = str(uuid.uuid4())
                 file_metadata.append({
                     "job_id": job_id,
@@ -446,6 +531,16 @@ class Server:
                     "content_type": file.content_type
                 })
                 child_job_ids.append(job_id)
+
+            # Check if any files passed validation
+            if len(file_metadata) == 0:
+                error_details = "; ".join(validation_errors[:5])  # Limit to first 5 errors
+                if len(validation_errors) > 5:
+                    error_details += f" (and {len(validation_errors) - 5} more)"
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"All {len(files)} files failed validation: {error_details}"
+                )
 
             logger.info(
                 f"[Batch {batch_job_id}] Starting batch upload with {len(files)} videos"
