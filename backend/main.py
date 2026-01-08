@@ -71,15 +71,15 @@ class Server:
         R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
         if not R2_ACCOUNT_ID:
             raise ValueError("R2_ACCOUNT_ID not found in environment variables")
-        
+
         R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
         if not R2_ACCESS_KEY_ID:
             raise ValueError("R2_ACCESS_KEY_ID not found in environment variables")
-        
+
         R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
         if not R2_SECRET_ACCESS_KEY:
             raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
-        
+
         ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
         if ENVIRONMENT not in ["dev", "prod", "staging"]:
             raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod, staging")
@@ -115,7 +115,7 @@ class Server:
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = "", parent_batch_id: str = None):
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}' | batch={parent_batch_id or 'None'}")
-        
+
         hashed_identifier = None
         upserted_chunk_ids = []
 
@@ -141,14 +141,14 @@ class Server:
                 filename=filename,
                 hashed_identifier=hashed_identifier
             )
-            
+
             # Calculate summary statistics
             total_frames = sum(chunk['metadata']['frame_count'] for chunk in processed_chunks)
             total_memory = sum(chunk['memory_mb'] for chunk in processed_chunks)
             avg_complexity = sum(chunk['metadata']['complexity_score'] for chunk in processed_chunks) / len(processed_chunks) if processed_chunks else 0
 
             logger.info(f"[Job {job_id}] Complete: {len(processed_chunks)} chunks, {total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}")
-            
+
             # Embed frames and store in Pinecone
             logger.info(f"[Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
 
@@ -156,11 +156,11 @@ class Server:
             chunk_details = []
             for chunk in processed_chunks:
                 embedding = self.video_embedder._generate_clip_embedding(chunk["frames"], num_frames=8)
-               
+
                 logger.info(f"[Job {job_id}] Generated CLIP embedding for chunk {chunk['chunk_id']}")
                 logger.info(f"[Job {job_id}] Upserting embedding for chunk {chunk['chunk_id']} to Pinecone...")
-              
-    
+
+
                 # 1. Handle timestamp_range (List of Numbers -> Two Numbers)
                 if 'timestamp_range' in chunk['metadata']:
                     start_time, end_time = chunk['metadata'].pop('timestamp_range')
@@ -172,21 +172,21 @@ class Server:
                     file_info = chunk['metadata'].pop('file_info')
                     for key, value in file_info.items():
                         chunk['metadata'][f'file_{key}'] = value
-                        
+
                 # 3. Final Check: Remove Nulls (Optional but good practice)
                 # Pinecone rejects keys with null values.
                 keys_to_delete = [k for k, v in chunk['metadata'].items() if v is None]
                 for k in keys_to_delete:
                     del chunk['metadata'][k]
-              
-               
+
+
                 success = self.pinecone_connector.upsert_chunk(
                     chunk_id=chunk['chunk_id'],
                     chunk_embedding=embedding.numpy(),
                     namespace=namespace,
                     metadata=chunk['metadata']
-                )            
-                
+                )
+
                 if success:
                     upserted_chunk_ids.append(chunk['chunk_id'])
                 else:
@@ -209,7 +209,7 @@ class Server:
                 "avg_complexity": avg_complexity,
                 "chunk_details": chunk_details,
             }
-            
+
             logger.info(f"[Job {job_id}] Finished processing {filename}")
 
             # Store result for polling endpoint in shared storage
@@ -231,21 +231,21 @@ class Server:
 
             # --- ROLLBACK LOGIC ---
             logger.warning(f"[Job {job_id}] Initiating rollback due to failure...")
-            
+
             # 1. Delete video from R2
             if hashed_identifier:
                 logger.info(f"[Job {job_id}] Rolling back: Deleting video from R2 ({hashed_identifier})")
                 success = self.r2_connector.delete_video(hashed_identifier)
                 if not success:
                     logger.error(f"[Job {job_id}] Rollback failed for R2 video deletion: {hashed_identifier}")
-            
+
             # 2. Delete chunks from Pinecone
             if upserted_chunk_ids:
                 logger.info(f"[Job {job_id}] Rolling back: Deleting {len(upserted_chunk_ids)} chunks from Pinecone")
                 success = self.pinecone_connector.delete_chunks(upserted_chunk_ids, namespace=namespace)
                 if not success:
                     logger.error(f"[Job {job_id}] Rollback failed for Pinecone chunks deletion: {len(upserted_chunk_ids)} chunks")
-            
+
             logger.info(f"[Job {job_id}] Rollback complete.")
             # ----------------------
 
@@ -430,25 +430,23 @@ class Server:
         # Generate batch job ID
         batch_job_id = f"batch-{uuid.uuid4()}"
 
-        # Step 1: Collect all file data and generate child job IDs
-        file_data = []
+        # Step 1: Collect metadata only (no file reading yet)
+        file_metadata = []
         child_job_ids = []
-        total_size = 0
 
         for file in files:
             job_id = str(uuid.uuid4())
-            contents = await file.read()
-            file_size = len(contents)
-            total_size += file_size
-
-            file_data.append({
+            file_metadata.append({
                 "job_id": job_id,
-                "contents": contents,
+                "file": file,  # Keep reference to UploadFile, don't read yet
                 "filename": file.filename,
-                "size_bytes": file_size,
                 "content_type": file.content_type
             })
             child_job_ids.append(job_id)
+
+        logger.info(
+            f"[Batch {batch_job_id}] Starting batch upload with {len(files)} videos"
+        )
 
         # Step 2: Create batch job entry FIRST (before spawning any children)
         self.job_store.create_batch_job(
@@ -461,34 +459,43 @@ class Server:
             f"[Batch {batch_job_id}] Created parent job entry with {len(files)} children"
         )
 
-        # Step 3: Create individual child job entries and spawn processing
+        # Step 3: Process files one at a time
+        # Only ONE file in memory at a time
         child_jobs = []
-        for data in file_data:
+        total_size = 0
+
+        for metadata in file_metadata:
+            # Read file NOW - processed and discarded immediately
+            contents = await metadata["file"].read()
+            file_size = len(contents)
+            total_size += file_size
+
             # Create individual job entry
-            self.job_store.create_job(data["job_id"], {
-                "job_id": data["job_id"],
+            self.job_store.create_job(metadata["job_id"], {
+                "job_id": metadata["job_id"],
                 "job_type": "video",
                 "parent_batch_id": batch_job_id,
-                "filename": data["filename"],
+                "filename": metadata["filename"],
                 "status": "processing",
-                "size_bytes": data["size_bytes"],
-                "content_type": data["content_type"],
+                "size_bytes": file_size,
+                "content_type": metadata["content_type"],
                 "namespace": namespace
             })
 
-            # Spawn background processing (Modal handles parallel execution)
+            # Spawn background processing
             self.process_video.spawn(
-                data["contents"],
-                data["filename"],
-                data["job_id"],
+                contents,  # File contents sent to Modal and discarded from memory
+                metadata["filename"],
+                metadata["job_id"],
                 namespace,
                 batch_job_id  # Pass parent ID for callback
             )
 
+            # Track for response
             child_jobs.append({
-                "job_id": data["job_id"],
-                "filename": data["filename"],
-                "size_bytes": data["size_bytes"]
+                "job_id": metadata["job_id"],
+                "filename": metadata["filename"],
+                "size_bytes": file_size
             })
 
         logger.info(
@@ -506,7 +513,7 @@ class Server:
             "message": f"Batch upload started with {len(files)} videos"
         }
 
-    
+
     @modal.fastapi_endpoint(method="GET")
     async def search(self, query: str, namespace: str = ""):
         """
