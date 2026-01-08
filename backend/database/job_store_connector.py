@@ -194,6 +194,23 @@ class JobStoreConnector:
                     "error": child_result.get("error", "Unknown error")
                 })
 
+            else:
+                # Unexpected status value - treat as failure to prevent orphaned processing count
+                logger.error(
+                    f"Unexpected child status '{child_status}' for job {child_job_id} "
+                    f"in batch {batch_job_id}. Expected 'completed' or 'failed'. "
+                    f"Treating as failure."
+                )
+                batch_job["failed_count"] += 1
+                batch_job["processing_count"] -= 1
+
+                # Track as failed job with detailed error
+                batch_job["failed_jobs"].append({
+                    "job_id": child_job_id,
+                    "filename": child_result.get("filename", "unknown"),
+                    "error": f"Invalid status: {child_status}"
+                })
+
             # Update batch status
             total = batch_job["total_videos"]
             completed = batch_job["completed_count"]
