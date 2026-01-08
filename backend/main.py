@@ -422,6 +422,11 @@ class Server:
         """Handle batch file upload."""
         import uuid
 
+        # Validate input: ensure files list is not empty
+        if not files or len(files) == 0:
+            logger.error("Batch upload attempted with empty files list")
+            raise ValueError("Cannot create batch with zero files. At least one file is required.")
+
         # Generate batch job ID
         batch_job_id = f"batch-{uuid.uuid4()}"
 
