@@ -280,15 +280,22 @@ class JobStoreConnector:
         if not batch_job or batch_job.get("job_type") != "batch":
             return None
 
+        # Calculate progress percentage, handling empty batch case
+        total = batch_job["total_videos"]
+        if total > 0:
+            progress_percent = (
+                (batch_job["completed_count"] + batch_job["failed_count"])
+                / total * 100
+            )
+        else:
+            progress_percent = 0.0
+
         return {
             "batch_job_id": batch_job_id,
             "status": batch_job["status"],
-            "total_videos": batch_job["total_videos"],
+            "total_videos": total,
             "completed": batch_job["completed_count"],
             "failed": batch_job["failed_count"],
             "processing": batch_job["processing_count"],
-            "progress_percent": (
-                (batch_job["completed_count"] + batch_job["failed_count"])
-                / batch_job["total_videos"] * 100
-            )
+            "progress_percent": progress_percent
         }
