@@ -642,3 +642,20 @@ class TestConcurrentBatchUpdates:
         assert batch["failed_count"] == 2
         assert batch["processing_count"] == 0  # All jobs accounted for
         assert batch["status"] == "partial"
+
+    def test_empty_batch_progress_no_division_error(self, mock_modal_dict):
+        """Verify empty batch (0 videos) doesn't cause division by zero error."""
+        connector = JobStoreConnector("test-jobs")
+
+        # Create an empty batch (edge case that shouldn't normally happen)
+        connector.create_batch_job("batch-empty", [], "web-demo")
+
+        # This should not raise a ZeroDivisionError
+        progress = connector.get_batch_progress("batch-empty")
+
+        assert progress is not None
+        assert progress["total_videos"] == 0
+        assert progress["completed"] == 0
+        assert progress["failed"] == 0
+        assert progress["processing"] == 0
+        assert progress["progress_percent"] == 0.0  # Should return 0.0, not crash
