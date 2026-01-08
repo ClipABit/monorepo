@@ -1,6 +1,7 @@
 import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
+from copy import deepcopy
 import modal
 
 logging.basicConfig(level=logging.INFO)
@@ -44,7 +45,8 @@ class JobStoreConnector:
             if job_id in self.job_store:
                 job_data = self.job_store[job_id]
                 logger.info(f"Retrieved job {job_id} with status: {job_data.get('status', 'unknown')}")
-                return job_data
+                # Return a deep copy to prevent accidental mutations
+                return deepcopy(job_data)
             else:
                 logger.info(f"Job {job_id} not found in store")
                 return None
