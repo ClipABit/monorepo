@@ -127,15 +127,15 @@ def upload_dialog():
     if uploaded_files:
         st.write(f"**Selected Files:** {len(uploaded_files)}")
 
+        # Collect file metadata without loading all bytes into memory
         total_size = 0
         file_info = []
         for file in uploaded_files:
-            file_bytes = file.read()
-            file_size = len(file_bytes)
+            file_size = file.size
             total_size += file_size
             file_info.append({
                 "name": file.name,
-                "bytes": file_bytes,
+                "file_obj": file,  # Store reference, not bytes
                 "type": file.type,
                 "size": file_size
             })
@@ -152,7 +152,8 @@ def upload_dialog():
             if st.button("Upload", type="primary", use_container_width=True):
                 with st.spinner(f"Uploading {len(file_info)} video(s)..."):
                     try:
-                        files_data = [(info["bytes"], info["name"], info["type"]) for info in file_info]
+                        # Read bytes only when uploading (lazy loading)
+                        files_data = [(info["file_obj"].read(), info["name"], info["type"]) for info in file_info]
                         resp = upload_files_to_backend(files_data)
 
                         if resp.status_code == 200:
