@@ -51,7 +51,12 @@ def upload_files_to_backend(files_data: list[tuple[bytes, str, str]]):
         for file_bytes, filename, content_type in files_data
     ]
     data = {"namespace": NAMESPACE}
-    resp = requests.post(UPLOAD_API_URL, files=files, data=data, timeout=600)
+
+    # Dynamic timeout: 300s base + 30s per file, minimum 600s
+    # Handles large batches: 50 files = 1800s (30min), 200 files = 6300s (105min)
+    timeout = max(600, 300 + (len(files) * 30))
+
+    resp = requests.post(UPLOAD_API_URL, files=files, data=data, timeout=timeout)
     return resp
 
 
