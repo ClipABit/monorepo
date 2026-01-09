@@ -22,6 +22,7 @@ image = (
                 "models",
                 "database",
                 "search",
+                "services",
             )
         )
 
@@ -41,7 +42,7 @@ app = modal.App(
 )
 
 
-@app.cls(cpu=4.0, timeout=600, min_containers=1)
+@app.cls(cpu=4.0, memory=4096, timeout=600, min_containers=1)
 class Server:
 
     @modal.enter()
@@ -63,7 +64,7 @@ class Server:
         from database.job_store_connector import JobStoreConnector
         from search.searcher import Searcher
         from database.r2_connector import R2Connector
-
+        from services.upload import UploadHandler
 
         logger.info(f"Container starting up! Environment = {env}")
         self.start_time = datetime.now(timezone.utc)
@@ -76,15 +77,15 @@ class Server:
         R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
         if not R2_ACCOUNT_ID:
             raise ValueError("R2_ACCOUNT_ID not found in environment variables")
-        
+
         R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
         if not R2_ACCESS_KEY_ID:
             raise ValueError("R2_ACCESS_KEY_ID not found in environment variables")
-        
+
         R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
         if not R2_SECRET_ACCESS_KEY:
             raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
-        
+
         ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
         if ENVIRONMENT not in ["dev", "prod", "staging"]:
             raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod, staging")
@@ -113,14 +114,19 @@ class Server:
             r2_connector=self.r2_connector
         )
 
+        self.upload_handler = UploadHandler(
+            job_store=self.job_store,
+            process_video_method=self.process_video
+        )
+
         logger.info("Container modules initialized and ready!")
 
         print(f"[Container] Started at {self.start_time.isoformat()}")
 
     @modal.method()
-    async def process_video_background(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = ""):
-        logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}'")
-        
+    async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = "", parent_batch_id: str = None):
+        logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}' | batch={parent_batch_id or 'None'}")
+
         hashed_identifier = None
         upserted_chunk_ids = []
 
@@ -146,14 +152,14 @@ class Server:
                 filename=filename,
                 hashed_identifier=hashed_identifier
             )
-            
+
             # Calculate summary statistics
             total_frames = sum(chunk['metadata']['frame_count'] for chunk in processed_chunks)
             total_memory = sum(chunk['memory_mb'] for chunk in processed_chunks)
             avg_complexity = sum(chunk['metadata']['complexity_score'] for chunk in processed_chunks) / len(processed_chunks) if processed_chunks else 0
 
             logger.info(f"[Job {job_id}] Complete: {len(processed_chunks)} chunks, {total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}")
-            
+
             # Embed frames and store in Pinecone
             logger.info(f"[Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
 
@@ -161,11 +167,11 @@ class Server:
             chunk_details = []
             for chunk in processed_chunks:
                 embedding = self.video_embedder._generate_clip_embedding(chunk["frames"], num_frames=8)
-               
+
                 logger.info(f"[Job {job_id}] Generated CLIP embedding for chunk {chunk['chunk_id']}")
                 logger.info(f"[Job {job_id}] Upserting embedding for chunk {chunk['chunk_id']} to Pinecone...")
-              
-    
+
+
                 # 1. Handle timestamp_range (List of Numbers -> Two Numbers)
                 if 'timestamp_range' in chunk['metadata']:
                     start_time, end_time = chunk['metadata'].pop('timestamp_range')
@@ -177,21 +183,21 @@ class Server:
                     file_info = chunk['metadata'].pop('file_info')
                     for key, value in file_info.items():
                         chunk['metadata'][f'file_{key}'] = value
-                        
+
                 # 3. Final Check: Remove Nulls (Optional but good practice)
                 # Pinecone rejects keys with null values.
                 keys_to_delete = [k for k, v in chunk['metadata'].items() if v is None]
                 for k in keys_to_delete:
                     del chunk['metadata'][k]
-              
-               
+
+
                 success = self.pinecone_connector.upsert_chunk(
                     chunk_id=chunk['chunk_id'],
                     chunk_embedding=embedding.numpy(),
                     namespace=namespace,
                     metadata=chunk['metadata']
-                )            
-                
+                )
+
                 if success:
                     upserted_chunk_ids.append(chunk['chunk_id'])
                 else:
@@ -214,11 +220,27 @@ class Server:
                 "avg_complexity": avg_complexity,
                 "chunk_details": chunk_details,
             }
-            
+
             logger.info(f"[Job {job_id}] Finished processing {filename}")
 
             # Store result for polling endpoint in shared storage
             self.job_store.set_job_completed(job_id, result)
+
+            # Update parent batch if exists
+            if parent_batch_id:
+                update_success = self.job_store.update_batch_on_child_completion(
+                    parent_batch_id,
+                    job_id,
+                    result
+                )
+                if update_success:
+                    logger.info(f"[Job {job_id}] Updated parent batch {parent_batch_id}")
+                else:
+                    logger.error(
+                        f"[Job {job_id}] CRITICAL: Failed to update parent batch {parent_batch_id} "
+                        f"after max retries. Batch state may be inconsistent."
+                    )
+
             return result
 
         except Exception as e:
@@ -226,21 +248,21 @@ class Server:
 
             # --- ROLLBACK LOGIC ---
             logger.warning(f"[Job {job_id}] Initiating rollback due to failure...")
-            
+
             # 1. Delete video from R2
             if hashed_identifier:
                 logger.info(f"[Job {job_id}] Rolling back: Deleting video from R2 ({hashed_identifier})")
                 success = self.r2_connector.delete_video(hashed_identifier)
                 if not success:
                     logger.error(f"[Job {job_id}] Rollback failed for R2 video deletion: {hashed_identifier}")
-            
+
             # 2. Delete chunks from Pinecone
             if upserted_chunk_ids:
                 logger.info(f"[Job {job_id}] Rolling back: Deleting {len(upserted_chunk_ids)} chunks from Pinecone")
                 success = self.pinecone_connector.delete_chunks(upserted_chunk_ids, namespace=namespace)
                 if not success:
                     logger.error(f"[Job {job_id}] Rollback failed for Pinecone chunks deletion: {len(upserted_chunk_ids)} chunks")
-            
+
             logger.info(f"[Job {job_id}] Rollback complete.")
             # ----------------------
 
@@ -249,6 +271,28 @@ class Server:
 
             # Store error result for polling endpoint in shared storage
             self.job_store.set_job_failed(job_id, str(e))
+
+            # Update parent batch if exists
+            if parent_batch_id:
+                error_result = {
+                    "job_id": job_id,
+                    "status": "failed",
+                    "filename": filename,
+                    "error": str(e)
+                }
+                update_success = self.job_store.update_batch_on_child_completion(
+                    parent_batch_id,
+                    job_id,
+                    error_result
+                )
+                if update_success:
+                    logger.info(f"[Job {job_id}] Updated parent batch {parent_batch_id} with failure status")
+                else:
+                    logger.error(
+                        f"[Job {job_id}] CRITICAL: Failed to update parent batch {parent_batch_id} "
+                        f"after max retries. Batch state may be inconsistent."
+                    )
+
             return {"job_id": job_id, "status": "failed", "error": str(e)}
 
 
@@ -349,19 +393,17 @@ class Server:
             return {"job_id": job_id, "status": "failed", "error": error_msg}
 
     @modal.fastapi_endpoint(method="GET")
-    async def status(self, job_id: str):
+    async def status(self, job_id: str, include_children: bool = False):
         """
-        Check the status of a video processing job.
+        Check the status of a video processing job or batch job.
 
         Args:
-            job_id (str): The unique identifier for the video processing job.
+            job_id (str): The unique identifier for the video processing job or batch job.
+            include_children (bool): If True and job is a batch, include full child job details.
 
         Returns:
-            dict: Contains:
-                - job_id (str): The job identifier
-                - status (str): 'processing', 'completed', or 'failed'
-                - message (str, optional): If still processing or not found
-                - result (dict, optional): Full job result if completed
+            dict: For video jobs: job_id, status, and result data
+                  For batch jobs: batch_job_id, status, progress, metrics, etc.
 
         This endpoint allows clients (e.g., frontend) to poll for job progress and retrieve results when ready.
         """
@@ -374,47 +416,81 @@ class Server:
                 "message": "Job is still processing or not found"
             }
 
-        return job_data
+        job_type = job_data.get("job_type", "video")
+
+        # Individual video job - return as-is
+        if job_type == "video":
+            return job_data
+
+        # Batch job - return batch-specific format
+        elif job_type == "batch":
+            # Calculate progress percentage, handling empty batch case
+            total_videos = job_data["total_videos"]
+            if total_videos > 0:
+                progress_percent = (
+                    (job_data["completed_count"] + job_data["failed_count"])
+                    / total_videos * 100
+                )
+            else:
+                progress_percent = 0.0
+
+            response = {
+                "batch_job_id": job_data["batch_job_id"],
+                "status": job_data["status"],
+                "total_videos": total_videos,
+                "completed_count": job_data["completed_count"],
+                "failed_count": job_data["failed_count"],
+                "processing_count": job_data["processing_count"],
+                "progress_percent": progress_percent,
+                "namespace": job_data["namespace"],
+                "created_at": job_data["created_at"],
+                "updated_at": job_data["updated_at"]
+            }
+
+            # Include aggregated metrics if available
+            if job_data["completed_count"] > 0:
+                response["metrics"] = {
+                    "total_chunks": job_data["total_chunks"],
+                    "total_frames": job_data["total_frames"],
+                    "total_memory_mb": job_data["total_memory_mb"],
+                    "avg_complexity": job_data["avg_complexity"]
+                }
+
+            # Include failed job summaries if any
+            if job_data["failed_count"] > 0:
+                response["failed_jobs"] = job_data["failed_jobs"]
+
+            # Include child details if requested
+            if include_children:
+                response["child_jobs"] = self.job_store.get_batch_child_jobs(job_id)
+            else:
+                # Just include job IDs for reference
+                response["child_job_ids"] = job_data["child_jobs"]
+
+            return response
+
+        else:
+            return {
+                "job_id": job_id,
+                "error": f"Unknown job type: {job_type}"
+            }
 
     @modal.fastapi_endpoint(method="POST")
-    async def upload(self, file: UploadFile = None, namespace: str = Form("")):
+    async def upload(self, files: list[UploadFile] = None, namespace: str = Form("")):
         """
         Handle video file upload and start background processing.
+        Supports both single and batch uploads.
 
         Args:
-            file (UploadFile): The uploaded video file.
+            files (list[UploadFile]): List of uploaded video file(s). Client sends files with repeated 'files' field names, which FastAPI collects into a list.
             namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
 
         Returns:
-            dict: Contains job_id, filename, content_type, size_bytes, status, and message.
+            dict: For single upload: job_id, filename, etc.
+                  For batch upload: batch_job_id, total_videos, child_jobs, etc.
         """
-        # TODO: Add error handling for file types and sizes
-        import uuid
-        job_id = str(uuid.uuid4())
-        contents = await file.read()
-        file_size = len(contents)
-        self.job_store.create_job(job_id, {
-            "job_id": job_id,
-            "filename": file.filename,
-            "status": "processing",
-            "size_bytes": file_size,
-            "content_type": file.content_type,
-            "namespace": namespace
-        })
+        return await self.upload_handler.handle_upload(files, namespace)
 
-        # Spawn background processing (non-blocking - returns immediately)
-        self.process_video_background.spawn(contents, file.filename, job_id, namespace)
-
-        return {
-            "job_id": job_id,
-            "filename": file.filename,
-            "content_type": file.content_type,
-            "size_bytes": file_size,
-            "status": "processing",
-            "message": "Video uploaded successfully, processing in background"
-        }
-
-    
     @modal.fastapi_endpoint(method="GET")
     async def search(self, query: str, namespace: str = ""):
         """
