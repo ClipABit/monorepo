@@ -44,12 +44,35 @@ def fetch_all_videos():
         return []
 
 
-def upload_file_to_backend(file_bytes: bytes, filename: str, content_type: str | None = None):
-    """Upload file to backend via multipart form-data."""
-    files = {"file": (filename, io.BytesIO(file_bytes), content_type or "application/octet-stream")}
+def upload_files_to_backend(files_data: list[tuple[bytes, str, str]]):
+    """Upload single or multiple files to backend via multipart form-data."""
+    files = [
+        ("files", (filename, io.BytesIO(file_bytes), content_type or "application/octet-stream"))
+        for file_bytes, filename, content_type in files_data
+    ]
     data = {"namespace": NAMESPACE}
-    resp = requests.post(UPLOAD_API_URL, files=files, data=data, timeout=300)
+    resp = requests.post(UPLOAD_API_URL, files=files, data=data, timeout=600)
     return resp
+
+
+def poll_job_status(job_id: str, max_wait: int = 300):
+    """Poll job status until completion or timeout."""
+    start_time = time.time()
+    while time.time() - start_time < max_wait:
+        try:
+            resp = requests.get(STATUS_API_URL, params={"job_id": job_id}, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                status = data.get("status")
+                if status in ["completed", "partial", "failed"]:
+                    return data
+                return data
+            else:
+                return {"error": f"Status check failed with status {resp.status_code}"}
+        except requests.RequestException as e:
+            return {"error": str(e)}
+        time.sleep(2)
+    return {"error": "Timeout waiting for completion"}
 
 
 def delete_video(hashed_identifier: str, filename: str): 
@@ -85,49 +108,122 @@ def delete_video(hashed_identifier: str, filename: str):
     except requests.RequestException as e:
         st.toast(f"❌ Network error: {str(e)}", icon="❌")
 
-# Upload dialog
+# Upload dialog (handles single and multiple files)
 @st.fragment
-@st.dialog("Upload Video")
+@st.dialog("Upload Videos")
 def upload_dialog():
-    st.write("Upload a video to add it to the searchable database.")
-    
-    uploaded = st.file_uploader("Choose a video file", type=["mp4", "mov", "avi", "mkv", "webm"])
-    
-    if uploaded is not None:
-        uploaded_bytes = uploaded.read()
-        
-        # Show video preview
-        try:
-            st.video(io.BytesIO(uploaded_bytes))
-        except Exception:
-            st.info("Preview not available for this format.")
-        
-        # File metadata
-        st.write(f"**Filename:** {uploaded.name}")
-        st.write(f"**Size:** {len(uploaded_bytes):,} bytes ({len(uploaded_bytes) / 1024 / 1024:.2f} MB)")
-        
+    st.write("Upload one or more videos to add them to the searchable database.")
+
+    uploaded_files = st.file_uploader(
+        "Choose video file(s)",
+        type=["mp4", "mov", "avi", "mkv", "webm"],
+        accept_multiple_files=True
+    )
+
+    if uploaded_files:
+        st.write(f"**Selected Files:** {len(uploaded_files)}")
+
+        total_size = 0
+        file_info = []
+        for file in uploaded_files:
+            file_bytes = file.read()
+            file_size = len(file_bytes)
+            total_size += file_size
+            file_info.append({
+                "name": file.name,
+                "bytes": file_bytes,
+                "type": file.type,
+                "size": file_size
+            })
+
+        st.write(f"**Total Size:** {total_size:,} bytes ({total_size / 1024 / 1024:.2f} MB)")
+
+        with st.expander("File Details"):
+            for info in file_info:
+                st.write(f"- {info['name']} ({info['size'] / 1024 / 1024:.2f} MB)")
+
         col1, col2 = st.columns([1, 1])
-        
+
         with col1:
-            if st.button("Upload", type="primary", width="stretch"):
-                with st.spinner("Uploading..."):
+            if st.button("Upload", type="primary", use_container_width=True):
+                with st.spinner(f"Uploading {len(file_info)} video(s)..."):
                     try:
-                        resp = upload_file_to_backend(uploaded_bytes, uploaded.name, uploaded.type)
-                        
+                        files_data = [(info["bytes"], info["name"], info["type"]) for info in file_info]
+                        resp = upload_files_to_backend(files_data)
+
                         if resp.status_code == 200:
                             data = resp.json()
-                            if data.get("status") == "processing":
+
+                            # Check if single video or batch
+                            if "job_id" in data:
+                                # Single video
                                 job_id = data.get("job_id")
-                                st.toast(f"Video uploaded! Job ID: {job_id}")
-                                time.sleep(1)
+                                st.success(f"Video uploaded! Job ID: {job_id}")
+                                time.sleep(2)
                                 st.rerun()
-                            else:
-                                st.error("Upload failed")
+                            elif "batch_job_id" in data:
+                                # Batch upload
+                                batch_job_id = data.get("batch_job_id")
+                                st.success(f"Batch uploaded! Job ID: {batch_job_id}")
+                                st.write(f"Processing {data.get('total_videos', 0)} videos...")
+
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+
+                                while True:
+                                    status_data = poll_job_status(batch_job_id, max_wait=5)
+
+                                    if "error" in status_data:
+                                        st.error(f"Error checking status: {status_data['error']}")
+                                        break
+
+                                    status = status_data.get("status")
+                                    progress = status_data.get("progress_percent", 0)
+                                    completed = status_data.get("completed_count", 0)
+                                    failed = status_data.get("failed_count", 0)
+                                    processing = status_data.get("processing_count", 0)
+
+                                    progress_bar.progress(progress / 100.0)
+                                    status_text.text(
+                                        f"Status: {status} | "
+                                        f"Completed: {completed} | "
+                                        f"Failed: {failed} | "
+                                        f"Processing: {processing}"
+                                    )
+
+                                    if status in ["completed", "partial", "failed"]:
+                                        if status == "completed":
+                                            st.success(f"All {completed} videos processed successfully!")
+                                            metrics = status_data.get("metrics", {})
+                                            st.write(f"Total chunks: {metrics.get('total_chunks', 0)}")
+                                            st.write(f"Total frames: {metrics.get('total_frames', 0)}")
+                                        elif status == "partial":
+                                            st.warning(
+                                                f"Batch completed with {completed} successes and {failed} failures"
+                                            )
+                                            failed_jobs = status_data.get("failed_jobs", [])
+                                            if failed_jobs:
+                                                with st.expander("Failed Videos"):
+                                                    for job in failed_jobs:
+                                                        st.write(f"- {job.get('filename')}: {job.get('error')}")
+                                        else:
+                                            st.error(f"All {failed} videos failed to process")
+                                            failed_jobs = status_data.get("failed_jobs", [])
+                                            if failed_jobs:
+                                                with st.expander("Failed Videos"):
+                                                    for job in failed_jobs:
+                                                        st.write(f"- {job.get('filename')}: {job.get('error')}")
+
+                                        time.sleep(2)
+                                        st.rerun()
+                                        break
+
+                                    time.sleep(2)
                         else:
                             st.error(f"Upload failed with status {resp.status_code}. Message: {resp.text}")
                     except requests.RequestException as e:
                         st.error(f"Upload failed: {e}")
-        
+
         with col2:
             if st.button("Cancel", use_container_width=True):
                 st.rerun()
@@ -158,8 +254,7 @@ up_col1, up_col2, up_col3 = st.columns([1, 1, 6])
 # upload button in internal envs else info text
 if IS_INTERNAL_ENV:
     with up_col1:
-        # upload disabled in prod env
-        if st.button("Upload", disabled=(False), width="stretch"):
+        if st.button("Upload", disabled=(False), use_container_width=True):
             upload_dialog()
 else:
     st.text("The repository below mimics the footage you would have in your video editor's media pool. "
