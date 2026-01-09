@@ -93,8 +93,7 @@ def delete_video(hashed_identifier: str, filename: str):
             timeout=30
         )
         if resp.status_code == 200:
-            result = resp.json()
-            print(result)
+            _ = resp.json() # TODO: should do smth with result
             st.toast(f"✅ Video '{filename}' deleted successfully!", icon="✅")
             st.session_state.search_results = None  # Clear search results to refresh the display
             fetch_all_videos.clear()  # Clear the video cache immediately to force refresh

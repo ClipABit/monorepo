@@ -42,7 +42,7 @@ app = modal.App(
 )
 
 
-@app.cls(cpu=4.0, memory=4096, timeout=600)
+@app.cls(cpu=4.0, memory=4096, timeout=600, min_containers=1)
 class Server:
 
     @modal.enter()
@@ -286,7 +286,50 @@ class Server:
 
     @modal.method()
     async def delete_video_background(self, job_id: str, hashed_identifier: str, namespace: str = ""):
-        """Background method to delete a video and all associated chunks from R2 and Pinecone."""
+        """
+        Background job that deletes a video and all associated chunks from R2 and Pinecone.
+
+        This method is intended to run asynchronously as part of a job lifecycle. It:
+
+        1. Attempts to delete all chunks in Pinecone associated with ``hashed_identifier`` and
+           the given ``namespace`` using ``pinecone_connector.delete_by_identifier``.
+        2. If Pinecone deletion is successful, attempts to delete the corresponding video
+           object from R2 via ``r2_connector.delete_video``.
+        3. On full success (both deletions succeed), builds a result payload and records
+           the job as completed in ``self.job_store`` by calling
+           ``self.job_store.set_job_completed(job_id, result)``.
+        4. On any failure (including partial failures where Pinecone succeeds but R2 fails,
+           or Pinecone deletion itself fails), logs the error, records the job as failed in
+           ``self.job_store`` via ``self.job_store.set_job_failed(job_id, error_message)``,
+           and returns a failure payload.
+
+        The return value is the same object stored in ``job_store`` and has the following
+        general shape:
+
+        - On success::
+
+            {
+                "job_id": "<job id>",
+                "status": "completed",
+                "hashed_identifier": "<hashed id>",
+                "namespace": "<namespace>",
+                "r2": {"deleted": true},
+                "pinecone": {"deleted": true}
+            }
+
+        - On failure (including partial deletion failures)::
+
+            {
+                "job_id": "<job id>",
+                "status": "failed",
+                "error": "<human-readable error message>"
+            }
+
+        In particular, if Pinecone deletion succeeds but R2 deletion fails, the method logs
+        a critical inconsistency, raises an exception internally, and ultimately marks the
+        job as failed in ``job_store`` with an appropriate error message, indicating that
+        chunks may have been removed while the video object remains in R2.
+        """
         logger.info(f"[Job {job_id}] Deletion started: {hashed_identifier} | namespace='{namespace}'")
 
         try:
@@ -535,7 +578,7 @@ class Server:
             raise HTTPException(status_code=403, detail="Video deletion is not allowed in the current environment.")
 
 
-       # Create job
+        # Create job
         import uuid
         job_id = str(uuid.uuid4())
         self.job_store.create_job(job_id, {
