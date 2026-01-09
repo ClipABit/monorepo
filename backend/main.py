@@ -572,6 +572,12 @@ class Server:
                 try:
                     contents = await metadata["file"].read()
                     file_size = len(contents)
+
+                    # Validate file size
+                    is_valid, error_msg = self._validate_file(metadata["file"], contents)
+                    if not is_valid:
+                        raise ValueError(f"File validation failed: {error_msg}")
+
                     total_size += file_size
 
                     self.job_store.create_job(metadata["job_id"], {
