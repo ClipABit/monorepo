@@ -1,0 +1,27 @@
+name: Auto-Retarget PRs
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened]
+
+jobs:
+  retarget:
+    # Skip if the PR is already coming from staging (that's our valid release path)
+    if: github.head_ref != 'staging'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Change PR base to staging
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              base: 'staging'
+            });

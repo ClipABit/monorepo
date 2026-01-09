@@ -8,13 +8,15 @@ from config import Config
 if 'search_results' not in st.session_state:
     st.session_state.search_results = None
 
-# API endpoints from config
+# Configs
 SEARCH_API_URL = Config.SEARCH_API_URL
 UPLOAD_API_URL = Config.UPLOAD_API_URL
 STATUS_API_URL = Config.STATUS_API_URL
 LIST_VIDEOS_API_URL = Config.LIST_VIDEOS_API_URL
+DELETE_VIDEO_API_URL = Config.DELETE_VIDEO_API_URL
 NAMESPACE = Config.NAMESPACE
 ENVIRONMENT = Config.ENVIRONMENT
+IS_INTERNAL_ENV = Config.IS_INTERNAL_ENV
 
 
 def search_videos(query: str):
@@ -28,7 +30,6 @@ def search_videos(query: str):
     except requests.RequestException as e:
         return {"error": str(e)}
 
-
 @st.cache_data(ttl=60, show_spinner="Fetching all videos in repository...")
 def fetch_all_videos():
     """Fetch all videos from the backend."""
@@ -38,7 +39,8 @@ def fetch_all_videos():
             data = resp.json()
             return data.get("videos", [])
         return []
-    except requests.RequestException:
+    except requests.RequestException as e:
+        st.error(f"Failed to fetch videos from backend: {str(e)}")
         return []
 
 
@@ -49,6 +51,39 @@ def upload_file_to_backend(file_bytes: bytes, filename: str, content_type: str |
     resp = requests.post(UPLOAD_API_URL, files=files, data=data, timeout=300)
     return resp
 
+
+def delete_video(hashed_identifier: str, filename: str): 
+    """Delete video via API call."""
+
+    if not IS_INTERNAL_ENV:
+        st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
+        return
+
+    try:
+        resp = requests.delete(
+            DELETE_VIDEO_API_URL,
+            params={
+                    "hashed_identifier": hashed_identifier, 
+                    "filename": filename, 
+                    "namespace": NAMESPACE
+                    },
+            timeout=30
+        )
+        if resp.status_code == 200:
+            result = resp.json()
+            print(result)
+            st.toast(f"✅ Video '{filename}' deleted successfully!", icon="✅")
+            st.session_state.search_results = None  # Clear search results to refresh the display
+            fetch_all_videos.clear()  # Clear the video cache immediately to force refresh
+            st.rerun()  # Force refresh UI
+        elif resp.status_code == 404:
+            st.toast(f"⚠️ Video '{filename}' not found", icon="⚠️")
+        elif resp.status_code == 403:
+            st.toast(f"🚫 Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
+        else:
+            st.toast(f"❌ Delete failed with status {resp.status_code}", icon="❌")
+    except requests.RequestException as e:
+        st.toast(f"❌ Network error: {str(e)}", icon="❌")
 
 # Upload dialog
 @st.fragment
@@ -97,6 +132,21 @@ def upload_dialog():
             if st.button("Cancel", use_container_width=True):
                 st.rerun()
 
+# Delete confirmation dialog
+@st.dialog("Delete Video")
+def delete_confirmation_dialog(hashed_identifier: str, filename: str):
+    """Show delete confirmation dialog."""
+    st.write(f"Are you sure you want to delete **{filename}**?")
+    st.warning("⚠️ This action cannot be undone!")
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("Cancel", use_container_width=True):
+            st.rerun()
+    with col2:
+        if st.button("Delete", type="primary", use_container_width=True):
+            delete_video(hashed_identifier, filename)
+
 
 # Main UI
 st.title("ClipABit")
@@ -104,12 +154,9 @@ st.subheader("Semantic Video Search - Demo")
 
 # Upload button row
 up_col1, up_col2, up_col3 = st.columns([1, 1, 6])
-# with up_col1:
-#     if st.button("Upload", disabled=True, width="stretch"):
-#         upload_dialog()
 
-upload_enabled = (ENVIRONMENT != "prod")
-if upload_enabled:
+# upload button in internal envs else info text
+if IS_INTERNAL_ENV:
     with up_col1:
         # upload disabled in prod env
         if st.button("Upload", disabled=(False), width="stretch"):
@@ -118,9 +165,6 @@ else:
     st.text("The repository below mimics the footage you would have in your video editor's media pool. "
             "Try searching for specific actions, settings, objects in the videos using natural language! "
             "We'd appreciate any feedback you may have.")
-# with up_col2:
-#     if st.button("Feedback", width="stretch"):
-#         st.switch_page("pages/feedback.py")
         
 # insert vertical spaces
 st.write("")
@@ -180,14 +224,22 @@ if st.session_state.search_results:
                 presigned_url = metadata.get("presigned_url")
                 start_time = metadata.get("start_time_s", 0)
                 filename = metadata.get("file_filename", "Unknown Video")
+                hashed_identifier = metadata.get("hashed_identifier", "")
                 score = result.get("score", 0)
                 
-                if presigned_url:
-                    with cols[idx % 3]:
-                        with st.expander("Info"):
-                            st.write(f"**File:** {filename}")
-                            st.write(f"**Score:** {score:.2f}")
-                        st.video(presigned_url, start_time=int(start_time))
+                # Video info and delete button row
+                info_col, delete_col = st.columns([3, 1])
+
+                with cols[idx%3]:
+                    with st.expander("Info"):
+                        st.write(f"**File:** {filename}")
+                        st.write(f"**Score:** {score:.2f}")
+                    st.video(presigned_url, start_time=int(start_time))
+
+                with delete_col:
+                    if IS_INTERNAL_ENV and hashed_identifier:
+                        if st.button("🗑️", key=f"delete_search_{idx}", help=f"Delete {filename}"):
+                            delete_confirmation_dialog(hashed_identifier, filename)
         else:
             st.info("No matching videos found.")
 
@@ -203,8 +255,17 @@ else:
         cols = st.columns(3)
         for idx, video in enumerate(videos):
             with cols[idx % 3]:
-                with st.expander("Info"):
-                    st.write(f"**File:** {video['file_name']}")
+                # Video info and delete button row
+                info_col, delete_col = st.columns([3, 1])
+
+                with info_col:
+                    with st.expander("Info"):
+                        st.write(f"**File:** {video['file_name']}")
+
+                with delete_col:
+                    if IS_INTERNAL_ENV and video.get('hashed_identifier'):
+                        if st.button("🗑️", key=f"delete_repo_{idx}", help=f"Delete {video['file_name']}"):
+                            delete_confirmation_dialog(video['hashed_identifier'], video['file_name'])
                 st.video(video['presigned_url'])
     else:
         st.info("No videos found in the repository.")
