@@ -231,23 +231,28 @@ class JobStoreConnector:
             # Attempt atomic update with version check
             try:
                 # Verify version hasn't changed (optimistic locking)
-                current_batch = self.get_job(batch_job_id)
-                if current_batch and current_batch.get("_version", 0) == expected_version:
-                    # Version matches, safe to update
-                    self.job_store[batch_job_id] = batch_job
-                    logger.info(
-                        f"Updated batch {batch_job_id} for child {child_job_id} "
-                        f"(attempt {attempt + 1}, version {expected_version} -> {expected_version + 1})"
-                    )
-                    return True
+                # Access Modal Dict directly to minimize race window
+                if batch_job_id in self.job_store:
+                    current_version = self.job_store[batch_job_id].get("_version", 0)
+                    if current_version == expected_version:
+                        # Version matches, safe to update
+                        self.job_store[batch_job_id] = batch_job
+                        logger.info(
+                            f"Updated batch {batch_job_id} for child {child_job_id} "
+                            f"(attempt {attempt + 1}, version {expected_version} -> {expected_version + 1})"
+                        )
+                        return True
+                    else:
+                        # Version mismatch, retry
+                        logger.warning(
+                            f"Version mismatch for batch {batch_job_id} "
+                            f"(expected {expected_version}, got {current_version}). "
+                            f"Retrying... (attempt {attempt + 1}/{max_retries})"
+                        )
+                        continue
                 else:
-                    # Version mismatch, retry
-                    logger.warning(
-                        f"Version mismatch for batch {batch_job_id} "
-                        f"(expected {expected_version}, got {current_batch.get('_version', 0)}). "
-                        f"Retrying... (attempt {attempt + 1}/{max_retries})"
-                    )
-                    continue
+                    logger.error(f"Batch job {batch_job_id} disappeared during update")
+                    return False
             except Exception as e:
                 logger.error(f"Error updating batch {batch_job_id}: {e}")
                 return False
