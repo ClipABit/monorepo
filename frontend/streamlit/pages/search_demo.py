@@ -71,7 +71,6 @@ def poll_job_status(job_id: str, max_wait: int = 300):
                 status = data.get("status")
                 if status in ["completed", "partial", "failed"]:
                     return data
-                return data
             else:
                 return {"error": f"Status check failed with status {resp.status_code}"}
         except requests.RequestException as e:
@@ -80,7 +79,7 @@ def poll_job_status(job_id: str, max_wait: int = 300):
     return {"error": "Timeout waiting for completion"}
 
 
-def delete_video(hashed_identifier: str, filename: str): 
+def delete_video(hashed_identifier: str, filename: str):
     """Delete video via API call."""
 
     if not IS_INTERNAL_ENV:
@@ -91,8 +90,8 @@ def delete_video(hashed_identifier: str, filename: str):
         resp = requests.delete(
             DELETE_VIDEO_API_URL,
             params={
-                    "hashed_identifier": hashed_identifier, 
-                    "filename": filename, 
+                    "hashed_identifier": hashed_identifier,
+                    "filename": filename,
                     "namespace": NAMESPACE
                     },
             timeout=30
@@ -265,7 +264,7 @@ else:
     st.text("The repository below mimics the footage you would have in your video editor's media pool. "
             "Try searching for specific actions, settings, objects in the videos using natural language! "
             "We'd appreciate any feedback you may have.")
-        
+
 # insert vertical spaces
 st.write("")
 st.write("")
@@ -310,9 +309,9 @@ st.markdown("""
 # Display results or repository
 if st.session_state.search_results:
     st.subheader(f"Search Results for: '{search_query}'")
-    
+
     results_data = st.session_state.search_results
-    
+
     if "error" in results_data:
         st.error(f"Error: {results_data['error']}")
     elif "results" in results_data:
@@ -326,7 +325,7 @@ if st.session_state.search_results:
                 filename = metadata.get("file_filename", "Unknown Video")
                 hashed_identifier = metadata.get("hashed_identifier", "")
                 score = result.get("score", 0)
-                
+
                 # Video info and delete button row
                 info_col, delete_col = st.columns([3, 1])
 
@@ -345,11 +344,11 @@ if st.session_state.search_results:
 
 else:
     st.subheader("Video Repository")
-    
+
     # Fetch and display videos
     videos = fetch_all_videos()
 
-    
+
     if videos:
         # Create a grid of videos
         cols = st.columns(3)
