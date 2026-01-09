@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 class UploadHandler:
     """Handles video upload validation and orchestration."""
 
-    # Allowed video MIME types
     ALLOWED_MIME_TYPES = {
         'video/mp4',
         'video/mpeg',
@@ -21,28 +20,34 @@ class UploadHandler:
         'application/octet-stream'  # Some clients send this for video files
     }
 
-    # Allowed file extensions
     ALLOWED_EXTENSIONS = {'.mp4', '.mpeg', '.mpg', '.mov', '.avi', '.mkv', '.webm', '.flv', '.m4v'}
-
-    # Maximum individual file size: 2GB
     MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
-
-    # Maximum batch size
     MAX_BATCH_SIZE = 200
 
     def __init__(self, job_store, process_video_method):
         """
-        Initialize upload service.
+        Initialize upload handler.
 
         Args:
-            job_store: JobStoreConnector instance for tracking jobs
-            process_video_method: Modal method for spawning video processing
+            job_store: JobStoreConnector instance for job tracking and status updates
+            process_video_method: Modal method reference for spawning async video processing
         """
         self.job_store = job_store
         self.process_video = process_video_method
 
     def validate_file(self, file: UploadFile, file_contents: bytes = None) -> Tuple[bool, str]:
-        """Validate uploaded file for security and compatibility."""
+        """
+        Validate uploaded file for security and compatibility.
+
+        Checks filename, extension, MIME type, size, and path traversal attempts.
+
+        Args:
+            file: The uploaded file object
+            file_contents: Optional file bytes for size validation
+
+        Returns:
+            Tuple of (is_valid: bool, error_message: str)
+        """
         if not file.filename:
             return False, "File has no filename"
 
@@ -70,7 +75,21 @@ class UploadHandler:
         return True, ""
 
     async def handle_single_upload(self, file: UploadFile, namespace: str) -> dict:
-        """Handle single file upload."""
+        """
+        Handle single file upload.
+
+        Validates file, creates job entry, spawns background processing, and returns immediately.
+
+        Args:
+            file: The uploaded video file
+            namespace: Storage namespace for isolation
+
+        Returns:
+            dict: Job details with job_id, filename, size, and status
+
+        Raises:
+            HTTPException: 400 if validation fails, 500 if processing errors
+        """
         is_valid, error_msg = self.validate_file(file)
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_msg)
@@ -105,7 +124,23 @@ class UploadHandler:
         }
 
     async def handle_batch_upload(self, files: list[UploadFile], namespace: str) -> dict:
-        """Handle batch file upload."""
+        """
+        Handle batch file upload with streaming and partial failure support.
+
+        Validates all files, creates parent batch job, then processes files one at a time.
+        Memory efficient - only one file in memory at a time.
+
+        Args:
+            files: List of uploaded video files
+            namespace: Storage namespace for isolation
+
+        Returns:
+            dict: Batch details with batch_job_id, counts, and processing status
+
+        Raises:
+            ValueError: If files list is empty
+            HTTPException: 400 if all files fail validation, 500 if all fail processing
+        """
         if not files:
             raise ValueError("Cannot create batch with zero files")
 
@@ -206,14 +241,19 @@ class UploadHandler:
 
     async def handle_upload(self, files: list[UploadFile], namespace: str) -> dict:
         """
-        Handle video file upload (single or batch).
+        Handle video file upload - auto-detects single or batch mode.
+
+        Routes to single or batch handler based on file count.
 
         Args:
             files: List of uploaded video files
             namespace: Namespace for storage isolation
 
         Returns:
-            dict: Upload response with job details
+            dict: Single upload returns job_id, batch returns batch_job_id with counts
+
+        Raises:
+            HTTPException: 400 if no files provided or batch exceeds limit
         """
         # Validation
         if not files:
