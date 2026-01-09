@@ -130,182 +130,103 @@ class UploadHandler:
 
     async def handle_batch_upload(self, files: list[UploadFile], namespace: str) -> dict:
         """Handle batch file upload."""
-        # Validate input: ensure files list is not empty
-        if not files or len(files) == 0:
-            logger.error("Batch upload attempted with empty files list")
-            raise ValueError("Cannot create batch with zero files. At least one file is required.")
+        if not files:
+            raise ValueError("Cannot create batch with zero files")
 
-        # Generate batch job ID
         batch_job_id = f"batch-{uuid.uuid4()}"
         batch_created = False
-        successfully_spawned = []
 
         try:
-            # Step 1: Collect metadata and validate (no reading)
-            file_metadata = []
-            child_job_ids = []
-            validation_errors = []
-
-            for idx, file in enumerate(files):
-                #  Validate file (filename, extension, MIME type)
+            # Validate files and build metadata (no reading yet)
+            validated = []
+            for file in files:
                 is_valid, error_msg = self.validate_file(file)
-                if not is_valid:
-                    validation_errors.append(f"File #{idx + 1} ({file.filename}): {error_msg}")
-                    logger.warning(f"[Batch {batch_job_id}] Validation failed for {file.filename}: {error_msg}")
-                    continue  # Skip invalid files
+                if is_valid:
+                    validated.append({"job_id": str(uuid.uuid4()), "file": file})
+                else:
+                    logger.warning(f"[Batch {batch_job_id}] Skipped {file.filename}: {error_msg}")
 
-                job_id = str(uuid.uuid4())
-                file_metadata.append({
-                    "job_id": job_id,
-                    "file": file,
-                    "filename": file.filename,
-                    "content_type": file.content_type
-                })
-                child_job_ids.append(job_id)
+            if not validated:
+                raise HTTPException(status_code=400, detail="All files failed validation")
 
-            # Check if any files passed validation
-            if len(file_metadata) == 0:
-                error_details = "; ".join(validation_errors[:5])  # Limit to first 5 errors
-                if len(validation_errors) > 5:
-                    error_details += f" (and {len(validation_errors) - 5} more)"
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"All {len(files)} files failed validation: {error_details}"
-                )
-
-            logger.info(
-                f"[Batch {batch_job_id}] Starting batch upload with {len(files)} videos"
+            # Create batch job FIRST (before spawning children)
+            self.job_store.create_batch_job(
+                batch_job_id=batch_job_id,
+                child_job_ids=[v["job_id"] for v in validated],
+                namespace=namespace
             )
+            batch_created = True
+            logger.info(f"[Batch {batch_job_id}] Created batch with {len(validated)} videos")
 
-            # Step 2: Create batch job entry FIRST
-            try:
-                self.job_store.create_batch_job(
-                    batch_job_id=batch_job_id,
-                    child_job_ids=child_job_ids,
-                    namespace=namespace
-                )
-                batch_created = True
-                logger.info(
-                    f"[Batch {batch_job_id}] Created parent job entry with {len(files)} children"
-                )
-            except Exception as e:
-                logger.error(f"[Batch {batch_job_id}] Failed to create batch job: {e}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to initialize batch job: {str(e)}"
-                )
+            # Process files one at a time (read, validate size, spawn, discard)
+            spawned, total_size = [], 0
 
-            # Step 3: Process files one at a time
-            child_jobs = []
-            total_size = 0
-
-            for idx, metadata in enumerate(file_metadata):
+            for meta in validated:
                 try:
-                    contents = await metadata["file"].read()
-                    file_size = len(contents)
-
-                    # Validate file size
-                    is_valid, error_msg = self.validate_file(metadata["file"], contents)
+                    contents = await meta["file"].read()
+                    is_valid, error_msg = self.validate_file(meta["file"], contents)
                     if not is_valid:
-                        raise ValueError(f"File validation failed: {error_msg}")
+                        raise ValueError(error_msg)
 
-                    total_size += file_size
+                    total_size += len(contents)
 
-                    self.job_store.create_job(metadata["job_id"], {
-                        "job_id": metadata["job_id"],
+                    # Create job and spawn processing
+                    self.job_store.create_job(meta["job_id"], {
+                        "job_id": meta["job_id"],
                         "job_type": "video",
                         "parent_batch_id": batch_job_id,
-                        "filename": metadata["filename"],
+                        "filename": meta["file"].filename,
                         "status": "processing",
-                        "size_bytes": file_size,
-                        "content_type": metadata["content_type"],
+                        "size_bytes": len(contents),
+                        "content_type": meta["file"].content_type,
                         "namespace": namespace
                     })
 
                     self.process_video.spawn(
-                        contents,
-                        metadata["filename"],
-                        metadata["job_id"],
-                        namespace,
-                        batch_job_id
+                        contents, meta["file"].filename, meta["job_id"], namespace, batch_job_id
                     )
-
-                    successfully_spawned.append(metadata["job_id"])
-
-                    child_jobs.append({
-                        "job_id": metadata["job_id"],
-                        "filename": metadata["filename"],
-                        "size_bytes": file_size
-                    })
+                    spawned.append(meta["job_id"])
 
                 except Exception as e:
-                    logger.error(
-                        f"[Batch {batch_job_id}] Failed to process file {metadata['filename']} "
-                        f"(#{idx + 1}/{len(file_metadata)}): {e}"
-                    )
-
-                    # Mark job as failed and update parent batch
+                    logger.error(f"[Batch {batch_job_id}] Failed {meta['file'].filename}: {e}")
+                    # Mark failed and update parent
                     try:
-                        self.job_store.set_job_failed(
-                            metadata["job_id"],
-                            f"Upload failed: {str(e)}"
-                        )
+                        self.job_store.set_job_failed(meta["job_id"], f"Upload failed: {e}")
                         self.job_store.update_batch_on_child_completion(
-                            batch_job_id,
-                            metadata["job_id"],
-                            {
-                                "job_id": metadata["job_id"],
-                                "status": "failed",
-                                "filename": metadata["filename"],
-                                "error": f"Upload failed: {str(e)}"
-                            }
+                            batch_job_id, meta["job_id"],
+                            {"job_id": meta["job_id"], "status": "failed",
+                             "filename": meta["file"].filename, "error": str(e)}
                         )
-                    except Exception as update_error:
-                        logger.error(
-                            f"[Batch {batch_job_id}] Failed to update job status: {update_error}"
-                        )
+                    except Exception as ue:
+                        logger.error(f"[Batch {batch_job_id}] Update failed: {ue}")
 
-            # Check if any jobs succeeded
-            if len(successfully_spawned) == 0:
-                logger.error(f"[Batch {batch_job_id}] All {len(files)} jobs failed")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"All {len(files)} videos failed to process. Check server logs."
-                )
+            if not spawned:
+                raise HTTPException(status_code=500, detail="All videos failed to process")
 
             logger.info(
-                f"[Batch {batch_job_id}] Spawned {len(successfully_spawned)}/{len(files)} videos, "
-                f"total size: {total_size / 1024 / 1024:.2f} MB"
+                f"[Batch {batch_job_id}] Spawned {len(spawned)}/{len(validated)} videos, "
+                f"{total_size / 1024 / 1024:.2f} MB"
             )
 
             return {
                 "batch_job_id": batch_job_id,
                 "status": "processing",
                 "total_videos": len(files),
-                "successfully_spawned": len(successfully_spawned),
-                "failed_at_upload": len(files) - len(successfully_spawned),
-                "child_jobs": child_jobs,
+                "successfully_spawned": len(spawned),
+                "failed_at_upload": len(files) - len(spawned),
                 "message": "Batch upload complete, videos processing in background"
             }
 
         except HTTPException:
-            # Re-raise HTTP exceptions as-is
             raise
         except Exception as e:
             logger.error(f"[Batch {batch_job_id}] Batch upload failed: {e}")
-
-            # Clean up: delete batch job if it was created
             if batch_created:
                 try:
                     self.job_store.delete_job(batch_job_id)
-                    logger.info(f"[Batch {batch_job_id}] Cleaned up batch job entry")
-                except Exception as cleanup_error:
-                    logger.error(f"[Batch {batch_job_id}] Failed to cleanup batch job: {cleanup_error}")
-
-            raise HTTPException(
-                status_code=500,
-                detail=f"Batch upload failed: {str(e)}"
-            )
+                except Exception as ce:
+                    logger.error(f"[Batch {batch_job_id}] Cleanup failed: {ce}")
+            raise HTTPException(status_code=500, detail=f"Batch upload failed: {e}")
 
     async def handle_upload(self, files: list[UploadFile], namespace: str) -> dict:
         """
