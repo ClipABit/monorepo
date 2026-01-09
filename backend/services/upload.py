@@ -222,9 +222,11 @@ class UploadHandler:
             return {
                 "batch_job_id": batch_job_id,
                 "status": "processing",
-                "total_videos": len(files),
+                "total_submitted": len(files),
+                "failed_validation": len(files) - len(validated),
+                "total_videos": len(validated),
                 "successfully_spawned": len(spawned),
-                "failed_at_upload": len(files) - len(spawned),
+                "failed_at_upload": len(validated) - len(spawned),
                 "message": "Batch upload complete, videos processing in background"
             }
 
