@@ -470,7 +470,7 @@ class Server:
         Supports both single and batch uploads.
 
         Args:
-            files (list[UploadFile]): The uploaded video file(s). FastAPI wraps single file in list.
+            files (list[UploadFile]): List of uploaded video file(s). Client sends files with repeated 'files' field names, which FastAPI collects into a list.
             namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
 
         Returns:
