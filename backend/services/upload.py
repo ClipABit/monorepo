@@ -42,50 +42,30 @@ class UploadHandler:
         self.process_video = process_video_method
 
     def validate_file(self, file: UploadFile, file_contents: bytes = None) -> Tuple[bool, str]:
-        """
-        Validate uploaded file for security and compatibility.
-
-        Args:
-            file: The UploadFile object to validate
-            file_contents: Optional file contents for size validation (if already read)
-
-        Returns:
-            tuple: (is_valid: bool, error_message: str)
-        """
-        # 1. Check filename exists
+        """Validate uploaded file for security and compatibility."""
         if not file.filename:
             return False, "File has no filename"
 
-        # 2. Check file extension
-        filename_lower = file.filename.lower()
-        file_ext = None
-        for ext in self.ALLOWED_EXTENSIONS:
-            if filename_lower.endswith(ext):
-                file_ext = ext
-                break
+        # Check path traversal
+        if any(c in file.filename for c in ['..', '/', '\\']):
+            return False, "Filename contains invalid characters"
 
-        if not file_ext:
+        # Check file extension
+        filename_lower = file.filename.lower()
+        if not any(filename_lower.endswith(ext) for ext in self.ALLOWED_EXTENSIONS):
             return False, f"Invalid file type. Allowed: {', '.join(self.ALLOWED_EXTENSIONS)}"
 
-        # 3. Check MIME type (if provided)
+        # Warn about unexpected MIME type (lenient)
         if file.content_type and file.content_type not in self.ALLOWED_MIME_TYPES:
-            # Some clients send generic MIME types, so we're lenient if extension is valid
-            logger.warning(
-                f"File {file.filename} has unexpected MIME type {file.content_type}, "
-                f"but extension {file_ext} is valid. Proceeding."
-            )
+            logger.warning(f"{file.filename}: unexpected MIME {file.content_type}")
 
-        # 4. Check file size (if contents provided)
+        # Check file size (if contents provided)
         if file_contents is not None:
-            file_size = len(file_contents)
-            if file_size == 0:
-                return False, "File is empty (0 bytes)"
-            if file_size > self.MAX_FILE_SIZE:
-                return False, f"File too large ({file_size / 1024 / 1024:.1f} MB). Maximum: {self.MAX_FILE_SIZE / 1024 / 1024:.0f} MB"
-
-        # 5. Check for path traversal attempts in filename
-        if '..' in file.filename or '/' in file.filename or '\\' in file.filename:
-            return False, "Filename contains invalid characters (path separators)"
+            size = len(file_contents)
+            if size == 0:
+                return False, "File is empty"
+            if size > self.MAX_FILE_SIZE:
+                return False, f"File too large ({size / 1024 / 1024:.1f} MB, max {self.MAX_FILE_SIZE / 1024 / 1024:.0f} MB)"
 
         return True, ""
 
