@@ -203,11 +203,16 @@ class UploadHandler:
                     # Mark failed and update parent
                     try:
                         self.job_store.set_job_failed(meta["job_id"], f"Upload failed: {e}")
-                        self.job_store.update_batch_on_child_completion(
+                        update_success = self.job_store.update_batch_on_child_completion(
                             batch_job_id, meta["job_id"],
                             {"job_id": meta["job_id"], "status": "failed",
                              "filename": meta["file"].filename, "error": str(e)}
                         )
+                        if not update_success:
+                            logger.error(
+                                f"[Batch {batch_job_id}] CRITICAL: Failed to update batch for job {meta['job_id']} "
+                                f"after max retries. Batch state may be inconsistent."
+                            )
                     except Exception as ue:
                         logger.error(f"[Batch {batch_job_id}] Update failed: {ue}")
 
