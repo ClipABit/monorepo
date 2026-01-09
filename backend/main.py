@@ -228,12 +228,18 @@ class Server:
 
             # Update parent batch if exists
             if parent_batch_id:
-                self.job_store.update_batch_on_child_completion(
+                update_success = self.job_store.update_batch_on_child_completion(
                     parent_batch_id,
                     job_id,
                     result
                 )
-                logger.info(f"[Job {job_id}] Updated parent batch {parent_batch_id}")
+                if update_success:
+                    logger.info(f"[Job {job_id}] Updated parent batch {parent_batch_id}")
+                else:
+                    logger.error(
+                        f"[Job {job_id}] CRITICAL: Failed to update parent batch {parent_batch_id} "
+                        f"after max retries. Batch state may be inconsistent."
+                    )
 
             return result
 
@@ -274,12 +280,18 @@ class Server:
                     "filename": filename,
                     "error": str(e)
                 }
-                self.job_store.update_batch_on_child_completion(
+                update_success = self.job_store.update_batch_on_child_completion(
                     parent_batch_id,
                     job_id,
                     error_result
                 )
-                logger.info(f"[Job {job_id}] Updated parent batch {parent_batch_id} with failure status")
+                if update_success:
+                    logger.info(f"[Job {job_id}] Updated parent batch {parent_batch_id} with failure status")
+                else:
+                    logger.error(
+                        f"[Job {job_id}] CRITICAL: Failed to update parent batch {parent_batch_id} "
+                        f"after max retries. Batch state may be inconsistent."
+                    )
 
             return {"job_id": job_id, "status": "failed", "error": str(e)}
 
