@@ -71,16 +71,13 @@ class UploadHandler:
 
     async def handle_single_upload(self, file: UploadFile, namespace: str) -> dict:
         """Handle single file upload."""
-        # Validation before reading
         is_valid, error_msg = self.validate_file(file)
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_msg)
 
         job_id = str(uuid.uuid4())
         contents = await file.read()
-        file_size = len(contents)
 
-        # Validation after reading
         is_valid, error_msg = self.validate_file(file, contents)
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_msg)
@@ -91,19 +88,18 @@ class UploadHandler:
             "parent_batch_id": None,
             "filename": file.filename,
             "status": "processing",
-            "size_bytes": file_size,
+            "size_bytes": len(contents),
             "content_type": file.content_type,
             "namespace": namespace
         })
 
-        # Spawn background processing (non-blocking - returns immediately)
         self.process_video.spawn(contents, file.filename, job_id, namespace, None)
 
         return {
             "job_id": job_id,
             "filename": file.filename,
             "content_type": file.content_type,
-            "size_bytes": file_size,
+            "size_bytes": len(contents),
             "status": "processing",
             "message": "Video uploaded successfully, processing in background"
         }
