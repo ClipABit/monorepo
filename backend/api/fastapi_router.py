@@ -6,12 +6,13 @@ from fastapi import APIRouter, Form, HTTPException, UploadFile
 logger = logging.getLogger(__name__)
 
 class FastAPIRouter:
-    def __init__(self, server_instance, is_internal_env):
+    def __init__(self, server_instance, background_tasks, is_internal_env):
         """
         Initializes the API routes, giving them access to the server instance
         for calling background tasks and accessing shared state.
         """
         self.server_instance = server_instance
+        self.background_tasks = background_tasks
         self.is_internal_env = is_internal_env
         self.router = APIRouter()
         self._register_routes()
@@ -81,7 +82,7 @@ class FastAPIRouter:
             "namespace": namespace
         })
 
-        self.server_instance.process_video_background.spawn(contents, file.filename, job_id, namespace)
+        self.background_tasks.process_video_background.spawn(contents, file.filename, job_id, namespace)
 
         return {
             "job_id": job_id,
@@ -183,12 +184,11 @@ class FastAPIRouter:
         self.server_instance.job_store.create_job(job_id, {
             "job_id": job_id,
             "hashed_identifier": hashed_identifier,
-            "namespace": namespace,
             "status": "processing",
-            "operation": "delete"
+            "namespace": namespace
         })
 
-        self.server_instance.delete_video_background.spawn(job_id, hashed_identifier, namespace)
+        self.background_tasks.delete_video_background.spawn(job_id, hashed_identifier, namespace)
 
         return {
             "job_id": job_id,
