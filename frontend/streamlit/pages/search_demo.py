@@ -61,9 +61,8 @@ def delete_video(hashed_identifier: str, filename: str):
 
     try:
         resp = requests.delete(
-            DELETE_VIDEO_API_URL,
+            DELETE_VIDEO_API_URL.format(hashed_identifier=hashed_identifier),
             params={
-                    "hashed_identifier": hashed_identifier, 
                     "filename": filename, 
                     "namespace": NAMESPACE
                     },

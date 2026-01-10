@@ -24,19 +24,19 @@ class Config:
     
     print(f"Running in {ENVIRONMENT} environment")
 
-    # Modal app name (matches backend app name)
-    APP_NAME = f"clipabit-{ENVIRONMENT}"
+    url_suffix = "-dev" if ENVIRONMENT == "dev" else ""
     
-    # Determine url portion based on environment
-    url_portion = "" if ENVIRONMENT in ["prod", "staging"] else f"-{ENVIRONMENT}"
+    # This is the single entrypoint for the FastAPI app served by Modal's asgi_app
+    API_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-server-asgi-app{url_suffix}.modal.run"
 
-    # API Endpoints - dynamically constructed based on environment
-    # Pattern: https://clipabit01--{env}-server-{endpoint}-{env}.modal.run
-    SEARCH_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-search{url_portion}.modal.run"
-    UPLOAD_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-upload{url_portion}.modal.run"
-    STATUS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-status{url_portion}.modal.run"
-    LIST_VIDEOS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-list-videos{url_portion}.modal.run"
-    DELETE_VIDEO_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-delete-video{url_portion}.modal.run"
+    SEARCH_API_URL = f"{API_BASE_URL}/search"
+    UPLOAD_API_URL = f"{API_BASE_URL}/upload"
+    STATUS_API_URL = f"{API_BASE_URL}/status"
+    LIST_VIDEOS_API_URL = f"{API_BASE_URL}/videos"
+    DELETE_VIDEO_API_URL = f"{API_BASE_URL}/videos/{{hashed_identifier}}"
+
+    # Application name
+    APP_NAME = f"ClipABit Streamlit {ENVIRONMENT.capitalize()}"
 
     # Namespace for Pinecone and R2 (web-demo for public demo)
     NAMESPACE = "web-demo"
