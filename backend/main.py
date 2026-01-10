@@ -22,6 +22,7 @@ image = (
                 "database",
                 "search",
                 "api",
+                "services",
             )
         )
 
@@ -41,7 +42,8 @@ app = modal.App(
 )
 
 
-@app.cls(cpu=4.0, timeout=600, min_containers=1)
+
+@app.cls(cpu=4.0, memory=4096, timeout=600, min_containers=1)
 class Server:
 
     @modal.enter()
@@ -65,6 +67,7 @@ class Server:
         from database.r2_connector import R2Connector
         from api.fastapi_router import FastAPIRouter
         from fastapi import FastAPI
+        from services.upload import UploadHandler
 
         logger.info(f"Container starting up! Environment = {env}")
         self.start_time = datetime.now(timezone.utc)
@@ -77,15 +80,15 @@ class Server:
         R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
         if not R2_ACCOUNT_ID:
             raise ValueError("R2_ACCOUNT_ID not found in environment variables")
-        
+
         R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
         if not R2_ACCESS_KEY_ID:
             raise ValueError("R2_ACCESS_KEY_ID not found in environment variables")
-        
+
         R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
         if not R2_SECRET_ACCESS_KEY:
             raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
-        
+
         ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
         if ENVIRONMENT not in ["dev", "prod", "staging"]:
             raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod, staging")
@@ -114,11 +117,15 @@ class Server:
             r2_connector=self.r2_connector
         )
 
+        self.upload_handler = UploadHandler(
+            job_store=self.job_store,
+            process_video_method=self.process_video
+        )
+
         # Create the FastAPI app
         self.fastapi_app = FastAPI()
         self.api = FastAPIRouter(self, IS_INTERNAL_ENV)
         self.fastapi_app.include_router(self.api.router)
-
         logger.info("Container modules initialized and ready!")
 
         print(f"[Container] Started at {self.start_time.isoformat()}")
@@ -131,9 +138,9 @@ class Server:
         return self.fastapi_app
 
     @modal.method()
-    async def process_video_background(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = ""):
-        logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}'")
-        
+    async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = "", parent_batch_id: str = None):
+        logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}' | batch={parent_batch_id or 'None'}")
+
         hashed_identifier = None
         upserted_chunk_ids = []
 
@@ -159,14 +166,14 @@ class Server:
                 filename=filename,
                 hashed_identifier=hashed_identifier
             )
-            
+
             # Calculate summary statistics
             total_frames = sum(chunk['metadata']['frame_count'] for chunk in processed_chunks)
             total_memory = sum(chunk['memory_mb'] for chunk in processed_chunks)
             avg_complexity = sum(chunk['metadata']['complexity_score'] for chunk in processed_chunks) / len(processed_chunks) if processed_chunks else 0
 
             logger.info(f"[Job {job_id}] Complete: {len(processed_chunks)} chunks, {total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}")
-            
+
             # Embed frames and store in Pinecone
             logger.info(f"[Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
 
@@ -174,11 +181,11 @@ class Server:
             chunk_details = []
             for chunk in processed_chunks:
                 embedding = self.video_embedder._generate_clip_embedding(chunk["frames"], num_frames=8)
-               
+
                 logger.info(f"[Job {job_id}] Generated CLIP embedding for chunk {chunk['chunk_id']}")
                 logger.info(f"[Job {job_id}] Upserting embedding for chunk {chunk['chunk_id']} to Pinecone...")
-              
-    
+
+
                 # 1. Handle timestamp_range (List of Numbers -> Two Numbers)
                 if 'timestamp_range' in chunk['metadata']:
                     start_time, end_time = chunk['metadata'].pop('timestamp_range')
@@ -190,21 +197,21 @@ class Server:
                     file_info = chunk['metadata'].pop('file_info')
                     for key, value in file_info.items():
                         chunk['metadata'][f'file_{key}'] = value
-                        
+
                 # 3. Final Check: Remove Nulls (Optional but good practice)
                 # Pinecone rejects keys with null values.
                 keys_to_delete = [k for k, v in chunk['metadata'].items() if v is None]
                 for k in keys_to_delete:
                     del chunk['metadata'][k]
-              
-               
+
+
                 success = self.pinecone_connector.upsert_chunk(
                     chunk_id=chunk['chunk_id'],
                     chunk_embedding=embedding.numpy(),
                     namespace=namespace,
                     metadata=chunk['metadata']
-                )            
-                
+                )
+
                 if success:
                     upserted_chunk_ids.append(chunk['chunk_id'])
                 else:
@@ -227,11 +234,27 @@ class Server:
                 "avg_complexity": avg_complexity,
                 "chunk_details": chunk_details,
             }
-            
+
             logger.info(f"[Job {job_id}] Finished processing {filename}")
 
             # Store result for polling endpoint in shared storage
             self.job_store.set_job_completed(job_id, result)
+
+            # Update parent batch if exists
+            if parent_batch_id:
+                update_success = self.job_store.update_batch_on_child_completion(
+                    parent_batch_id,
+                    job_id,
+                    result
+                )
+                if update_success:
+                    logger.info(f"[Job {job_id}] Updated parent batch {parent_batch_id}")
+                else:
+                    logger.error(
+                        f"[Job {job_id}] CRITICAL: Failed to update parent batch {parent_batch_id} "
+                        f"after max retries. Batch state may be inconsistent."
+                    )
+
             return result
 
         except Exception as e:
@@ -239,21 +262,21 @@ class Server:
 
             # --- ROLLBACK LOGIC ---
             logger.warning(f"[Job {job_id}] Initiating rollback due to failure...")
-            
+
             # 1. Delete video from R2
             if hashed_identifier:
                 logger.info(f"[Job {job_id}] Rolling back: Deleting video from R2 ({hashed_identifier})")
                 success = self.r2_connector.delete_video(hashed_identifier)
                 if not success:
                     logger.error(f"[Job {job_id}] Rollback failed for R2 video deletion: {hashed_identifier}")
-            
+
             # 2. Delete chunks from Pinecone
             if upserted_chunk_ids:
                 logger.info(f"[Job {job_id}] Rolling back: Deleting {len(upserted_chunk_ids)} chunks from Pinecone")
                 success = self.pinecone_connector.delete_chunks(upserted_chunk_ids, namespace=namespace)
                 if not success:
                     logger.error(f"[Job {job_id}] Rollback failed for Pinecone chunks deletion: {len(upserted_chunk_ids)} chunks")
-            
+
             logger.info(f"[Job {job_id}] Rollback complete.")
             # ----------------------
 
@@ -262,12 +285,77 @@ class Server:
 
             # Store error result for polling endpoint in shared storage
             self.job_store.set_job_failed(job_id, str(e))
+
+            # Update parent batch if exists
+            if parent_batch_id:
+                error_result = {
+                    "job_id": job_id,
+                    "status": "failed",
+                    "filename": filename,
+                    "error": str(e)
+                }
+                update_success = self.job_store.update_batch_on_child_completion(
+                    parent_batch_id,
+                    job_id,
+                    error_result
+                )
+                if update_success:
+                    logger.info(f"[Job {job_id}] Updated parent batch {parent_batch_id} with failure status")
+                else:
+                    logger.error(
+                        f"[Job {job_id}] CRITICAL: Failed to update parent batch {parent_batch_id} "
+                        f"after max retries. Batch state may be inconsistent."
+                    )
+
             return {"job_id": job_id, "status": "failed", "error": str(e)}
 
 
     @modal.method()
     async def delete_video_background(self, job_id: str, hashed_identifier: str, namespace: str = ""):
-        """Background method to delete a video and all associated chunks from R2 and Pinecone."""
+        """
+        Background job that deletes a video and all associated chunks from R2 and Pinecone.
+
+        This method is intended to run asynchronously as part of a job lifecycle. It:
+
+        1. Attempts to delete all chunks in Pinecone associated with ``hashed_identifier`` and
+           the given ``namespace`` using ``pinecone_connector.delete_by_identifier``.
+        2. If Pinecone deletion is successful, attempts to delete the corresponding video
+           object from R2 via ``r2_connector.delete_video``.
+        3. On full success (both deletions succeed), builds a result payload and records
+           the job as completed in ``self.job_store`` by calling
+           ``self.job_store.set_job_completed(job_id, result)``.
+        4. On any failure (including partial failures where Pinecone succeeds but R2 fails,
+           or Pinecone deletion itself fails), logs the error, records the job as failed in
+           ``self.job_store`` via ``self.job_store.set_job_failed(job_id, error_message)``,
+           and returns a failure payload.
+
+        The return value is the same object stored in ``job_store`` and has the following
+        general shape:
+
+        - On success::
+
+            {
+                "job_id": "<job id>",
+                "status": "completed",
+                "hashed_identifier": "<hashed id>",
+                "namespace": "<namespace>",
+                "r2": {"deleted": true},
+                "pinecone": {"deleted": true}
+            }
+
+        - On failure (including partial deletion failures)::
+
+            {
+                "job_id": "<job id>",
+                "status": "failed",
+                "error": "<human-readable error message>"
+            }
+
+        In particular, if Pinecone deletion succeeds but R2 deletion fails, the method logs
+        a critical inconsistency, raises an exception internally, and ultimately marks the
+        job as failed in ``job_store`` with an appropriate error message, indicating that
+        chunks may have been removed while the video object remains in R2.
+        """
         logger.info(f"[Job {job_id}] Deletion started: {hashed_identifier} | namespace='{namespace}'")
 
         try:
@@ -317,4 +405,3 @@ class Server:
             # Store error result
             self.job_store.set_job_failed(job_id, error_msg)
             return {"job_id": job_id, "status": "failed", "error": error_msg}
-
