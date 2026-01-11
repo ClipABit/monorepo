@@ -1,6 +1,5 @@
 import os
 import logging
-from fastapi import UploadFile, HTTPException, Form
 import modal
 
 # Configure logging
@@ -22,6 +21,7 @@ image = (
                 "models",
                 "database",
                 "search",
+                "api",
                 "services",
             )
         )
@@ -40,6 +40,7 @@ app = modal.App(
     image=image,
     secrets=[modal.Secret.from_name(env)]
 )
+
 
 
 @app.cls(cpu=4.0, memory=4096, timeout=600, min_containers=1)
@@ -64,6 +65,8 @@ class Server:
         from database.job_store_connector import JobStoreConnector
         from search.searcher import Searcher
         from database.r2_connector import R2Connector
+        from api.fastapi_router import FastAPIRouter
+        from fastapi import FastAPI
         from services.upload import UploadHandler
 
         logger.info(f"Container starting up! Environment = {env}")
@@ -119,9 +122,20 @@ class Server:
             process_video_method=self.process_video
         )
 
+        # Create the FastAPI app
+        self.fastapi_app = FastAPI()
+        self.api = FastAPIRouter(self, IS_INTERNAL_ENV)
+        self.fastapi_app.include_router(self.api.router)
         logger.info("Container modules initialized and ready!")
 
         print(f"[Container] Started at {self.start_time.isoformat()}")
+
+    @modal.asgi_app()
+    def asgi_app(self):
+        """
+        Exposes the FastAPI app as a web endpoint.
+        """
+        return self.fastapi_app
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = "", parent_batch_id: str = None):
@@ -391,223 +405,3 @@ class Server:
             # Store error result
             self.job_store.set_job_failed(job_id, error_msg)
             return {"job_id": job_id, "status": "failed", "error": error_msg}
-
-    @modal.fastapi_endpoint(method="GET")
-    async def status(self, job_id: str, include_children: bool = False):
-        """
-        Check the status of a video processing job or batch job.
-
-        Args:
-            job_id (str): The unique identifier for the video processing job or batch job.
-            include_children (bool): If True and job is a batch, include full child job details.
-
-        Returns:
-            dict: For video jobs: job_id, status, and result data
-                  For batch jobs: batch_job_id, status, progress, metrics, etc.
-
-        This endpoint allows clients (e.g., frontend) to poll for job progress and retrieve results when ready.
-        """
-        job_data = self.job_store.get_job(job_id)
-
-        if job_data is None:
-            return {
-                "job_id": job_id,
-                "status": "processing",
-                "message": "Job is still processing or not found"
-            }
-
-        job_type = job_data.get("job_type", "video")
-
-        # Individual video job - return as-is
-        if job_type == "video":
-            return job_data
-
-        # Batch job - return batch-specific format
-        elif job_type == "batch":
-            # Calculate progress percentage, handling empty batch case
-            total_videos = job_data["total_videos"]
-            if total_videos > 0:
-                progress_percent = (
-                    (job_data["completed_count"] + job_data["failed_count"])
-                    / total_videos * 100
-                )
-            else:
-                progress_percent = 0.0
-
-            response = {
-                "batch_job_id": job_data["batch_job_id"],
-                "status": job_data["status"],
-                "total_videos": total_videos,
-                "completed_count": job_data["completed_count"],
-                "failed_count": job_data["failed_count"],
-                "processing_count": job_data["processing_count"],
-                "progress_percent": progress_percent,
-                "namespace": job_data["namespace"],
-                "created_at": job_data["created_at"],
-                "updated_at": job_data["updated_at"]
-            }
-
-            # Include aggregated metrics if available
-            if job_data["completed_count"] > 0:
-                response["metrics"] = {
-                    "total_chunks": job_data["total_chunks"],
-                    "total_frames": job_data["total_frames"],
-                    "total_memory_mb": job_data["total_memory_mb"],
-                    "avg_complexity": job_data["avg_complexity"]
-                }
-
-            # Include failed job summaries if any
-            if job_data["failed_count"] > 0:
-                response["failed_jobs"] = job_data["failed_jobs"]
-
-            # Include child details if requested
-            if include_children:
-                response["child_jobs"] = self.job_store.get_batch_child_jobs(job_id)
-            else:
-                # Just include job IDs for reference
-                response["child_job_ids"] = job_data["child_jobs"]
-
-            return response
-
-        else:
-            return {
-                "job_id": job_id,
-                "error": f"Unknown job type: {job_type}"
-            }
-
-    @modal.fastapi_endpoint(method="POST")
-    async def upload(self, files: list[UploadFile] = None, namespace: str = Form("")):
-        """
-        Handle video file upload and start background processing.
-        Supports both single and batch uploads.
-
-        Args:
-            files (list[UploadFile]): List of uploaded video file(s). Client sends files with repeated 'files' field names, which FastAPI collects into a list.
-            namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
-
-        Returns:
-            dict: For single upload: job_id, filename, etc.
-                  For batch upload: batch_job_id, total_videos, child_jobs, etc.
-        """
-        return await self.upload_handler.handle_upload(files, namespace)
-
-    @modal.fastapi_endpoint(method="GET")
-    async def search(self, query: str, namespace: str = ""):
-        """
-        Search endpoint - accepts a text query and returns semantic search results.
-
-        Args:
-        - query (str): The search query string (required)
-        - namespace (str, optional): Namespace for Pinecone search (default: "")
-        - top_k (int, optional): Number of top results to return (default: 10)
-
-        Returns: dict with 'query', 'results', and 'timing'.
-        """
-
-        try:
-            import time
-            t_start = time.perf_counter()
-
-            # Parse request
-            if not query:
-                raise HTTPException(status_code=400, detail="Missing 'query' parameter")
-
-            top_k = 10
-            logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
-
-            # Execute semantic search
-            results = self.searcher.search(
-                query=query,
-                top_k=top_k,
-                namespace=namespace
-            )
-
-            t_done = time.perf_counter()
-
-            # Log chunk-level results only
-            logger.info(f"[Search] Found {len(results)} chunk-level results in {t_done - t_start:.3f}s")
-
-            return {
-                "query": query,
-                "results": results,
-                "timing": {
-                    "total_s": round(t_done - t_start, 3)
-                }
-            }
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"[Search] Error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    
-    @modal.fastapi_endpoint(method="GET")
-    async def list_videos(self, namespace: str = "__default__"):
-        """
-        List all videos for a specific namespace (namespace).
-        Returns a list of video data objects containing filename, identifier, and presigned URL.
-        """
-        logger.info(f"[List Videos] Fetching videos for namespace: {namespace}")
-
-        try:
-            video_data = self.r2_connector.fetch_all_video_data(namespace)
-            return {
-                "status": "success",
-                "namespace": namespace,
-                "videos": video_data
-            }
-        except Exception as e:
-            logger.error(f"[List Videos] Error fetching videos: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-        
-    @modal.fastapi_endpoint(method="DELETE")
-    async def delete_video(self, hashed_identifier: str, filename: str, namespace: str = ""):
-        """
-        Delete a video and its associated chunks from storage and database.
-
-        Args:
-            hashed_identifier (str): The unique identifier of the video in R2 storage.
-            filename (str): The original filename of the video.
-            namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
-
-        Returns:
-            dict: Contains status and message about deletion result.
-        
-        Raises:
-            HTTPException: If deletion fails at any step.
-                - 500 Internal Server Error with details.
-                - 400 Bad Request if parameters are missing.
-                - 404 Not Found if video does not exist.
-                - 403 Forbidden if deletion is not allowed.
-
-        """
-
-        logger.info(f"[Delete Video] Request to delete video: {filename} ({hashed_identifier}) | namespace='{namespace}'")
-        if not hashed_identifier or not filename:
-            raise HTTPException(status_code=400, detail="Missing parameters: 'hashed_identifier' and 'filename' are required.")
-        
-        if not IS_INTERNAL_ENV:
-            raise HTTPException(status_code=403, detail="Video deletion is not allowed in the current environment.")
-
-
-        # Create job
-        import uuid
-        job_id = str(uuid.uuid4())
-        self.job_store.create_job(job_id, {
-            "job_id": job_id,
-            "hashed_identifier": hashed_identifier,
-            "namespace": namespace,
-            "status": "processing",
-            "operation": "delete"
-        })
-
-        # Spawn background deletion (non-blocking - returns immediately)
-        self.delete_video_background.spawn(job_id, hashed_identifier, namespace)
-
-        return {
-            "job_id": job_id,
-            "hashed_identifier": hashed_identifier,
-            "namespace": namespace,
-            "status": "processing",
-            "message": "Video deletion started, processing in background"
-        }
