@@ -90,8 +90,7 @@ def delete_video(hashed_identifier: str, filename: str):
         resp = requests.delete(
             DELETE_VIDEO_API_URL.format(hashed_identifier=hashed_identifier),
             params={
-                    "filename": filename, 
-                    "hashed_identifier": hashed_identifier,
+                    "filename": filename,
                     "namespace": NAMESPACE
                     },
             timeout=30
