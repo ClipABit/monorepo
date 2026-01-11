@@ -16,7 +16,9 @@ dependencies = [
     "transformers",
     "scenedetect",
     "boto3",
-    "torchvision"
+    "torchvision",
+    "deepface>=0.0.96",
+    "tf-keras>=2.20.1",
 ]
 
 [project.scripts]
