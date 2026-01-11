@@ -27,7 +27,7 @@ class FastAPIRouter:
 
     async def health(self):
         """
-        \Health check endpoint.
+        Health check endpoint.
         Returns a simple status message indicating the service is running.
         """
         return {"status": "ok"}
