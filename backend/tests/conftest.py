@@ -238,6 +238,31 @@ def sample_embedding() -> np.ndarray:
     """Sample embedding vector for testing (512-dimensional, typical CLIP embedding size)."""
     return np.random.rand(512).astype(np.float32)
 
+@pytest.fixture
+def sample_image_10x3_faces() -> np.ndarray:
+    """Sample image array of assets/test_img_10x3_faces.jpg."""
+    from PIL import Image
+    import numpy as np
+    img_path = Path(__file__).parent / "assets" / "test_img_10x3_faces.jpg"
+
+    with Image.open(img_path) as img:
+        img = img.convert("RGB")
+        img_array = np.array(img)
+
+    return img_array
+
+@pytest.fixture
+def sample_image_no_face() -> np.ndarray:
+    """Sample image array of assets/test_img_no_face.jpg."""
+    from PIL import Image
+    import numpy as np
+    img_path = Path(__file__).parent / "assets" / "test_img_no_face.jpg"
+
+    with Image.open(img_path) as img:
+        img = img.convert("RGB")
+        img_array = np.array(img)
+
+    return img_array
 
 # ==============================================================================
 # COMPONENT FIXTURES
