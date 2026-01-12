@@ -7,4 +7,5 @@ __all__ = [
     "Face",
     "FaceRepository",
     "FaceDetector",
+    "FrameFacePipeline",
 ]

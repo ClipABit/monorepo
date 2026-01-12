@@ -1,5 +1,4 @@
 import numpy as np
-from .face import Face
 import logging
 from database import PineconeConnector, R2Connector
 import uuid
@@ -23,6 +22,7 @@ class FaceRepository:
             r2_connector: R2Connector,
             threshold = 0.35,
             image_serializer: Optional[Callable[[np.ndarray], bytes]] = None,
+            r2_face_image_namespace: str = "face_images"
         ):
         self.threshold = threshold
         
@@ -33,6 +33,7 @@ class FaceRepository:
 
         # image_serializer: callable that converts ndarray -> bytes
         self.image_serializer = image_serializer or self._ndarray_to_png_bytes
+        self.r2_face_image_namespace = r2_face_image_namespace
         
         logging.debug(f"FaceRepository: Initialized FaceRepository with pinecone_index={pinecone_connector.index} and threshold={threshold}")
 
@@ -45,12 +46,11 @@ class FaceRepository:
 
     # similarity search in pinecone to find closest face embedding (similarity has to be above threshold)
     # if found, return face identity, else return None
-    def get_face_identity(self, namespace: str, face: Face) -> DetectedFaceData | None:
-        embedding = face.embedding
+    def get_face_identity(self, namespace: str, face_embedding: np.ndarray) -> DetectedFaceData | None:
 
         # find closest face from pinecone vector db
         best_match = self.pinecone_connector.query_chunks(
-            query_embedding=embedding,
+            query_embedding=face_embedding,
             namespace=namespace,
             top_k=1
         )
@@ -74,9 +74,9 @@ class FaceRepository:
         return str(uuid.uuid4())
 
     # store the face image in r2 storage, return the storage identifier / url
-    def upload_face_image(self, face: Face, face_id: str = None) -> str | None:
+    def upload_face_image(self, face_image: np.ndarray, face_id: str = None) -> str | None:
         # Use the injected serializer (or default) to convert ndarray -> bytes
-        face_img_bytes = self.image_serializer(face.face_image)
+        face_img_bytes = self.image_serializer(face_image)
         if not face_id:
             face_id = self.generate_face_id()
             logger.warning("FaceRepository: No face_id provided for upload_face_image, gnerating new face_id {face_id}")
@@ -84,7 +84,7 @@ class FaceRepository:
         upload_success, identifier = self.r2_connector.upload_image(
             image_data=face_img_bytes,
             filename=face_file_name,
-            namespace="face_images"
+            namespace=self.r2_face_image_namespace
         )
         if not upload_success:
             logger.error(f"FaceRepository: Failed to upload face image to R2 with face_id {face_id}. Error message: {identifier}")
@@ -93,11 +93,11 @@ class FaceRepository:
         return identifier
 
     # upsert the face embedding with metadata into pinecone vector database
-    def upsert_identified_face_embedding(self, namespace: str, face_id: str, img_access_id: str, video_chunk_id: str, face: Face):
+    def upsert_identified_face_embedding(self, namespace: str, face_id: str, img_access_id: str, video_chunk_id: str, face_embedding: np.ndarray) -> bool:
         try:
             success = self.pinecone_connector.upsert_chunk(
                 chunk_id=str(uuid.uuid4()),
-                chunk_embedding=face.embedding,
+                chunk_embedding=face_embedding,
                 namespace=namespace,
                 metadata={"face_id": face_id, "img_access_id": img_access_id, "chunk_id": video_chunk_id}
             )

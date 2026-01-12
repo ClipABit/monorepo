@@ -94,7 +94,7 @@ def test_upsert_identified_face_embedding_calls_pinecone(mock_pinecone_connector
     repo = face_repository.FaceRepository(pinecone_connector=connector, r2_connector=MagicMock())
     f = _make_face()
 
-    ok = repo.upsert_identified_face_embedding(namespace='ns', face_id='face-1', img_access_id='img-1', video_chunk_id='chunk-x', face=f)
+    ok = repo.upsert_identified_face_embedding(namespace='ns', face_id='face-1', img_access_id='img-1', video_chunk_id='chunk-x', face_embedding=f.embedding)
     assert ok is True
 
     # Verify upsert_chunk was called and metadata contains our keys

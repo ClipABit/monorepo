@@ -1,0 +1,63 @@
+from .face_detector import FaceDetector
+from .face_repository import FaceRepository
+import numpy as np
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class FrameFacePipeline:
+    """Pipeline to process frames for face recognition.
+
+    This class handles the detection of faces in video frames and computes their embeddings.
+    It utilizes a face detector and an embedding model to extract features from detected faces.
+
+    Attributes:
+        detector (FaceDetector): The face detector used to find faces in frames.
+    """
+
+    def __init__(self, namespace: str, face_detector: FaceDetector, face_repository: FaceRepository):
+        self.namespace = namespace
+        self.face_detector = face_detector
+        self.face_repository = face_repository
+
+    def process_frame(self, frame: np.ndarray, chunk_id: str) -> dict[str, str]:
+        """Process a video frame to detect faces and compute embeddings.
+
+        Args:
+            frame (np.ndarray): The input video frame.
+
+        Returns:
+            a dictionary mapping face_id to img_access_id for each detected face.
+        """
+        face_access_id_map = {}
+        faces = self.face_detector.detect_and_embed(frame)
+        for face in faces:
+            # The FaceRepository expects an embedding (np.ndarray) for lookup
+            detected_face_data = self.face_repository.get_face_identity(self.namespace, face.embedding)
+
+            if detected_face_data is None:
+                face_id = self.face_repository.generate_face_id()
+                logger.info("FrameFacePipeline: New face detected, generated face_id=%s", face_id)
+                face_img_identifier = self.face_repository.upload_face_image(
+                    face_image=face.img,
+                    face_id=face_id,
+                )
+                if face_img_identifier is None:
+                    logger.error("FrameFacePipeline: Failed to upload face image for face_id=%s", face_id)
+                    raise Exception("Failed to upload face image")
+            else:
+                face_id = detected_face_data.face_id
+                face_img_identifier = detected_face_data.img_access_id
+
+            # Use the FaceRepository upsert API (video_chunk_id, face_embedding)
+            self.face_repository.upsert_identified_face_embedding(
+                namespace=self.namespace,
+                face_id=face_id,
+                img_access_id=face_img_identifier,
+                video_chunk_id=chunk_id,
+                face_embedding=face.embedding,
+            )
+            face_access_id_map[face_id] = face_img_identifier
+
+        return face_access_id_map
