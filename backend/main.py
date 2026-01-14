@@ -641,59 +641,60 @@ class Server:
         except Exception as e:
             logger.error(f"[List Videos] Error fetching videos: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+
+    # NOTE: Deletion endpoint is currently disabled for modal limitations     
+    # @modal.fastapi_endpoint(method="DELETE")
+    # async def delete_video(self, hashed_identifier: str, filename: str, namespace: str = ""):
+    #     """
+    #     Delete a video and its associated chunks from storage and database.
+
+    #     Args:
+    #         hashed_identifier (str): The unique identifier of the video in R2 storage.
+    #         filename (str): The original filename of the video.
+    #         namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
+
+    #     Returns:
+    #         dict: Contains status and message about deletion result.
         
-    @modal.fastapi_endpoint(method="DELETE")
-    async def delete_video(self, hashed_identifier: str, filename: str, namespace: str = ""):
-        """
-        Delete a video and its associated chunks from storage and database.
+    #     Raises:
+    #         HTTPException: If deletion fails at any step.
+    #             - 500 Internal Server Error with details.
+    #             - 400 Bad Request if parameters are missing.
+    #             - 404 Not Found if video does not exist.
+    #             - 403 Forbidden if deletion is not allowed.
 
-        Args:
-            hashed_identifier (str): The unique identifier of the video in R2 storage.
-            filename (str): The original filename of the video.
-            namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
-
-        Returns:
-            dict: Contains status and message about deletion result.
-        
-        Raises:
-            HTTPException: If deletion fails at any step.
-                - 500 Internal Server Error with details.
-                - 400 Bad Request if parameters are missing.
-                - 404 Not Found if video does not exist.
-                - 403 Forbidden if deletion is not allowed.
-
-        """
-        self._ensure_ready()
-        logger.info(f"[Delete Video] Request to delete video: {filename} ({hashed_identifier}) | namespace='{namespace}'")
-        try:
-            if not hashed_identifier or not filename:
-                raise HTTPException(status_code=400, detail="Missing parameters: 'hashed_identifier' and 'filename' are required.")
+    #     """
+    #     self._ensure_ready()
+    #     logger.info(f"[Delete Video] Request to delete video: {filename} ({hashed_identifier}) | namespace='{namespace}'")
+    #     try:
+    #         if not hashed_identifier or not filename:
+    #             raise HTTPException(status_code=400, detail="Missing parameters: 'hashed_identifier' and 'filename' are required.")
             
-            if not IS_INTERNAL_ENV:
-                raise HTTPException(status_code=403, detail="Video deletion is not allowed in the current environment.")
+    #         if not IS_INTERNAL_ENV:
+    #             raise HTTPException(status_code=403, detail="Video deletion is not allowed in the current environment.")
 
 
-            # Create job
-            import uuid
-            job_id = str(uuid.uuid4())
-            self.job_store.create_job(job_id, {
-                "job_id": job_id,
-                "hashed_identifier": hashed_identifier,
-                "namespace": namespace,
-                "status": "processing",
-                "operation": "delete"
-            })
+    #         # Create job
+    #         import uuid
+    #         job_id = str(uuid.uuid4())
+    #         self.job_store.create_job(job_id, {
+    #             "job_id": job_id,
+    #             "hashed_identifier": hashed_identifier,
+    #             "namespace": namespace,
+    #             "status": "processing",
+    #             "operation": "delete"
+    #         })
 
-            # Spawn background deletion (non-blocking - returns immediately)
-            self.delete_video_background.spawn(job_id, hashed_identifier, namespace)
+    #         # Spawn background deletion (non-blocking - returns immediately)
+    #         self.delete_video_background.spawn(job_id, hashed_identifier, namespace)
 
-            return {
-                "job_id": job_id,
-                "hashed_identifier": hashed_identifier,
-                "namespace": namespace,
-                "status": "processing",
-                "message": "Video deletion started, processing in background"
-            }
-        except Exception as e:
-            logger.error(f"[Delete Video] Error processing deletion request: {e}")
-            raise HTTPException(status_code=500, detail={str(e)})
+    #         return {
+    #             "job_id": job_id,
+    #             "hashed_identifier": hashed_identifier,
+    #             "namespace": namespace,
+    #             "status": "processing",
+    #             "message": "Video deletion started, processing in background"
+    #         }
+    #     except Exception as e:
+    #         logger.error(f"[Delete Video] Error processing deletion request: {e}")
+    #         raise HTTPException(status_code=500, detail={str(e)})

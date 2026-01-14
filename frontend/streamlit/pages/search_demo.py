@@ -13,7 +13,7 @@ SEARCH_API_URL = Config.SEARCH_API_URL
 UPLOAD_API_URL = Config.UPLOAD_API_URL
 STATUS_API_URL = Config.STATUS_API_URL
 LIST_VIDEOS_API_URL = Config.LIST_VIDEOS_API_URL
-DELETE_VIDEO_API_URL = Config.DELETE_VIDEO_API_URL
+# DELETE_VIDEO_API_URL = Config.DELETE_VIDEO_API_URL
 NAMESPACE = Config.NAMESPACE
 ENVIRONMENT = Config.ENVIRONMENT
 IS_INTERNAL_ENV = Config.IS_INTERNAL_ENV
@@ -81,6 +81,8 @@ def poll_job_status(job_id: str, max_wait: int = 300):
 
 def delete_video(hashed_identifier: str, filename: str):
     """Delete video via API call."""
+
+    return  # Deletion endpoint is currently disabled for modal limitations
 
     if not IS_INTERNAL_ENV:
         st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
@@ -319,26 +321,32 @@ if st.session_state.search_results:
         if results:
             cols = st.columns(3)
             for idx, result in enumerate(results):
-                metadata = result.get("metadata", {})
-                presigned_url = metadata.get("presigned_url")
-                start_time = metadata.get("start_time_s", 0)
-                filename = metadata.get("file_filename", "Unknown Video")
-                hashed_identifier = metadata.get("hashed_identifier", "")
-                score = result.get("score", 0)
-
-                # Video info and delete button row
-                info_col, delete_col = st.columns([3, 1])
-
                 with cols[idx%3]:
-                    with st.expander("Info"):
-                        st.write(f"**File:** {filename}")
-                        st.write(f"**Score:** {score:.2f}")
+                    metadata = result.get("metadata", {})
+                    presigned_url = metadata.get("presigned_url")
+                    start_time = metadata.get("start_time_s", 0)
+                    filename = metadata.get("file_filename", "Unknown Video")
+                    hashed_identifier = metadata.get("hashed_identifier", "")
+                    score = result.get("score", 0)
+
+                    # Video info and delete button row
+                    if IS_INTERNAL_ENV:
+                        # info_col, delete_col = st.columns([3, 1]) NOTE: reenable with delete
+
+                        # with info_col[idx%3]:
+                        with st.expander("Info"):
+                            st.write(f"**File:** {filename}")
+                            st.write(f"**Score:** {score:.2f}")
+                        # with delete_col:
+                        #     if hashed_identifier:
+                        #         if st.button("🗑️", key=f"delete_search_{idx}", help=f"Delete {filename}"):
+                        #             delete_confirmation_dialog(hashed_identifier, filename)
+                    else:
+                        with st.expander("Info"):
+                            st.write(f"**File:** {filename}")
+                            st.write(f"**Score:** {score:.2f}")
                     st.video(presigned_url, start_time=int(start_time))
 
-                with delete_col:
-                    if IS_INTERNAL_ENV and hashed_identifier:
-                        if st.button("🗑️", key=f"delete_search_{idx}", help=f"Delete {filename}"):
-                            delete_confirmation_dialog(hashed_identifier, filename)
         else:
             st.info("No matching videos found.")
 
@@ -353,18 +361,21 @@ else:
         # Create a grid of videos
         cols = st.columns(3)
         for idx, video in enumerate(videos):
-            with cols[idx % 3]:
+            with cols[idx%3]:
                 # Video info and delete button row
-                info_col, delete_col = st.columns([3, 1])
-
-                with info_col:
+                if IS_INTERNAL_ENV:
+                    # info_col, delete_col = st.columns([3, 1])
+                    # with info_col[idx%3]:
+                    with st.expander("Info"):
+                        st.write(f"**File:** {video['file_name']}")
+                    # with delete_col:
+                    #     if video.get('hashed_identifier'):
+                    #         if st.button("🗑️", key=f"delete_repo_{idx}", help=f"Delete {video['file_name']}"):
+                    #             delete_confirmation_dialog(video['hashed_identifier'], video['file_name'])
+                else:
                     with st.expander("Info"):
                         st.write(f"**File:** {video['file_name']}")
 
-                with delete_col:
-                    if IS_INTERNAL_ENV and video.get('hashed_identifier'):
-                        if st.button("🗑️", key=f"delete_repo_{idx}", help=f"Delete {video['file_name']}"):
-                            delete_confirmation_dialog(video['hashed_identifier'], video['file_name'])
                 st.video(video['presigned_url'])
     else:
         st.info("No videos found in the repository.")
