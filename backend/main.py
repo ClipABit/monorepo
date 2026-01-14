@@ -52,76 +52,91 @@ class Server:
             Here is where you would instantiate classes and load models that are
             reused across multiple requests to avoid reloading them each time.
         """
+        # Initialize a ready flag to indicate successful startup
+        self.ready = False
+        try:
+            # Import local module inside class
+            import os
+            from datetime import datetime, timezone
 
-        # Import local module inside class
-        import os
-        from datetime import datetime, timezone
+            # Import classes here
+            from preprocessing.preprocessor import Preprocessor
+            from embeddings.embedder import VideoEmbedder
+            from database.pinecone_connector import PineconeConnector
+            from database.job_store_connector import JobStoreConnector
+            from search.searcher import Searcher
+            from database.r2_connector import R2Connector
+            from services.upload import UploadHandler
 
-        # Import classes here
-        from preprocessing.preprocessor import Preprocessor
-        from embeddings.embedder import VideoEmbedder
-        from database.pinecone_connector import PineconeConnector
-        from database.job_store_connector import JobStoreConnector
-        from search.searcher import Searcher
-        from database.r2_connector import R2Connector
-        from services.upload import UploadHandler
+            logger.info(f"Container starting up! Environment = {env}")
+            self.start_time = datetime.now(timezone.utc)
 
-        logger.info(f"Container starting up! Environment = {env}")
-        self.start_time = datetime.now(timezone.utc)
+            # Get environment variables (TODO: abstract to config module)
+            PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+            if not PINECONE_API_KEY:
+                raise ValueError("PINECONE_API_KEY not found in environment variables")
 
-        # Get environment variables (TODO: abstract to config module)
-        PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-        if not PINECONE_API_KEY:
-            raise ValueError("PINECONE_API_KEY not found in environment variables")
+            R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
+            if not R2_ACCOUNT_ID:
+                raise ValueError("R2_ACCOUNT_ID not found in environment variables")
 
-        R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
-        if not R2_ACCOUNT_ID:
-            raise ValueError("R2_ACCOUNT_ID not found in environment variables")
+            R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+            if not R2_ACCESS_KEY_ID:
+                raise ValueError("R2_ACCESS_KEY_ID not found in environment variables")
 
-        R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
-        if not R2_ACCESS_KEY_ID:
-            raise ValueError("R2_ACCESS_KEY_ID not found in environment variables")
+            R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+            if not R2_SECRET_ACCESS_KEY:
+                raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
 
-        R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
-        if not R2_SECRET_ACCESS_KEY:
-            raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
+            ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
+            if ENVIRONMENT not in ["dev", "prod", "staging"]:
+                raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod, staging")
+            logger.info(f"Running in environment: {ENVIRONMENT}")
 
-        ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
-        if ENVIRONMENT not in ["dev", "prod", "staging"]:
-            raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod, staging")
-        logger.info(f"Running in environment: {ENVIRONMENT}")
+            # Select Pinecone index based on environment
+            pinecone_index = f"{ENVIRONMENT}-chunks"
+            logger.info(f"Using Pinecone index: {pinecone_index}")
 
-        # Select Pinecone index based on environment
-        pinecone_index = f"{ENVIRONMENT}-chunks"
-        logger.info(f"Using Pinecone index: {pinecone_index}")
+            # Instantiate classes
+            self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
+            self.video_embedder = VideoEmbedder()
+            self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=pinecone_index)
+            self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
 
-        # Instantiate classes
-        self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
-        self.video_embedder = VideoEmbedder()
-        self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=pinecone_index)
-        self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
+            self.r2_connector = R2Connector(
+                account_id=R2_ACCOUNT_ID,
+                access_key_id=R2_ACCESS_KEY_ID,
+                secret_access_key=R2_SECRET_ACCESS_KEY,
+                environment=ENVIRONMENT
+            )
 
-        self.r2_connector = R2Connector(
-            account_id=R2_ACCOUNT_ID,
-            access_key_id=R2_ACCESS_KEY_ID,
-            secret_access_key=R2_SECRET_ACCESS_KEY,
-            environment=ENVIRONMENT
-        )
+            self.searcher = Searcher(
+                api_key=PINECONE_API_KEY,
+                index_name=pinecone_index,
+                r2_connector=self.r2_connector
+            )
 
-        self.searcher = Searcher(
-            api_key=PINECONE_API_KEY,
-            index_name=pinecone_index,
-            r2_connector=self.r2_connector
-        )
+            self.upload_handler = UploadHandler(
+                job_store=self.job_store,
+                process_video_method=self.process_video
+            )
 
-        self.upload_handler = UploadHandler(
-            job_store=self.job_store,
-            process_video_method=self.process_video
-        )
+            logger.info("Container modules initialized and ready!")
 
-        logger.info("Container modules initialized and ready!")
+            print(f"[Container] Started at {self.start_time.isoformat()}")
+            self.ready = True
+        except Exception as e:
+            logger.critical(str(e))
+            self.ready = False
+    
+    def _ensure_ready(self):
+        logger.info("Checking server readiness...")
+        if not getattr(self, "ready", False):
+            raise HTTPException(
+                status_code=500,
+                detail="Server Error"
+            )
 
-        print(f"[Container] Started at {self.start_time.isoformat()}")
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = "", parent_batch_id: str = None):
@@ -406,74 +421,101 @@ class Server:
                   For batch jobs: batch_job_id, status, progress, metrics, etc.
 
         This endpoint allows clients (e.g., frontend) to poll for job progress and retrieve results when ready.
+        
+        Raises:
+            HTTPException:
+                - 400 if job_id is missing or invalid
+                - 500 if server initialization failed
         """
-        job_data = self.job_store.get_job(job_id)
-
-        if job_data is None:
-            return {
-                "job_id": job_id,
-                "status": "processing",
-                "message": "Job is still processing or not found"
-            }
-
-        job_type = job_data.get("job_type", "video")
-
-        # Individual video job - return as-is
-        if job_type == "video":
-            return job_data
-
-        # Batch job - return batch-specific format
-        elif job_type == "batch":
-            # Calculate progress percentage, handling empty batch case
-            total_videos = job_data["total_videos"]
-            if total_videos > 0:
-                progress_percent = (
-                    (job_data["completed_count"] + job_data["failed_count"])
-                    / total_videos * 100
+        self._ensure_ready()
+        try:
+            if not job_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing required parameter: 'job_id'"
                 )
-            else:
-                progress_percent = 0.0
 
-            response = {
-                "batch_job_id": job_data["batch_job_id"],
-                "status": job_data["status"],
-                "total_videos": total_videos,
-                "completed_count": job_data["completed_count"],
-                "failed_count": job_data["failed_count"],
-                "processing_count": job_data["processing_count"],
-                "progress_percent": progress_percent,
-                "namespace": job_data["namespace"],
-                "created_at": job_data["created_at"],
-                "updated_at": job_data["updated_at"]
-            }
+            if not isinstance(job_id, str):
+                raise HTTPException(
+                    status_code=400,
+                    detail="job_id must be a string"
+                )
 
-            # Include aggregated metrics if available
-            if job_data["completed_count"] > 0:
-                response["metrics"] = {
-                    "total_chunks": job_data["total_chunks"],
-                    "total_frames": job_data["total_frames"],
-                    "total_memory_mb": job_data["total_memory_mb"],
-                    "avg_complexity": job_data["avg_complexity"]
+            job_data = self.job_store.get_job(job_id)
+
+            if job_data is None:
+                return {
+                    "job_id": job_id,
+                    "status": "processing",
+                    "message": "Job is still processing or not found"
                 }
 
-            # Include failed job summaries if any
-            if job_data["failed_count"] > 0:
-                response["failed_jobs"] = job_data["failed_jobs"]
+            job_type = job_data.get("job_type", "video")
 
-            # Include child details if requested
-            if include_children:
-                response["child_jobs"] = self.job_store.get_batch_child_jobs(job_id)
+            # Individual video job - return as-is
+            if job_type == "video":
+                return job_data
+
+            # Batch job - return batch-specific format
+            elif job_type == "batch":
+                # Calculate progress percentage, handling empty batch case
+                total_videos = job_data["total_videos"]
+                if total_videos > 0:
+                    progress_percent = (
+                        (job_data["completed_count"] + job_data["failed_count"])
+                        / total_videos * 100
+                    )
+                else:
+                    progress_percent = 0.0
+
+                response = {
+                    "batch_job_id": job_data["batch_job_id"],
+                    "status": job_data["status"],
+                    "total_videos": total_videos,
+                    "completed_count": job_data["completed_count"],
+                    "failed_count": job_data["failed_count"],
+                    "processing_count": job_data["processing_count"],
+                    "progress_percent": progress_percent,
+                    "namespace": job_data["namespace"],
+                    "created_at": job_data["created_at"],
+                    "updated_at": job_data["updated_at"]
+                }
+
+                # Include aggregated metrics if available
+                if job_data["completed_count"] > 0:
+                    response["metrics"] = {
+                        "total_chunks": job_data["total_chunks"],
+                        "total_frames": job_data["total_frames"],
+                        "total_memory_mb": job_data["total_memory_mb"],
+                        "avg_complexity": job_data["avg_complexity"]
+                    }
+
+                # Include failed job summaries if any
+                if job_data["failed_count"] > 0:
+                    response["failed_jobs"] = job_data["failed_jobs"]
+
+                # Include child details if requested
+                if include_children:
+                    response["child_jobs"] = self.job_store.get_batch_child_jobs(job_id)
+                else:
+                    # Just include job IDs for reference
+                    response["child_job_ids"] = job_data["child_jobs"]
+
+                return response
+
             else:
-                # Just include job IDs for reference
-                response["child_job_ids"] = job_data["child_jobs"]
-
-            return response
-
-        else:
-            return {
-                "job_id": job_id,
-                "error": f"Unknown job type: {job_type}"
-            }
+                return {
+                    "job_id": job_id,
+                    "error": f"Unknown job type: {job_type}"
+                }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[Status] Error checking job {job_id}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=str(e)
+            )
 
     @modal.fastapi_endpoint(method="POST")
     async def upload(self, files: list[UploadFile] = None, namespace: str = Form("")):
@@ -488,8 +530,33 @@ class Server:
         Returns:
             dict: For single upload: job_id, filename, etc.
                   For batch upload: batch_job_id, total_videos, child_jobs, etc.
+        
+        Raises:
+            HTTPException:
+                - 400 if required parameters are missing or invalid
+                - 500 if server initialization failed or processing fails
         """
-        return await self.upload_handler.handle_upload(files, namespace)
+        self._ensure_ready()
+
+        if files is None:
+            raise HTTPException(status_code=400, detail="Missing 'files' parameter")
+        if not isinstance(files, list):
+            raise HTTPException(status_code=400, detail="'files' parameter must be a list of uploaded files")
+        if len(files) == 0:
+            raise HTTPException(status_code=400, detail="'files' list is empty")
+        if namespace is not None and not isinstance(namespace, str):
+            raise HTTPException(status_code=400, detail="'namespace' parameter must be a string")
+
+        try:
+            return await self.upload_handler.handle_upload(files, namespace)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[Upload] Error during file upload: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=str(e)
+            )
 
     @modal.fastapi_endpoint(method="GET")
     async def search(self, query: str, namespace: str = ""):
@@ -502,8 +569,13 @@ class Server:
         - top_k (int, optional): Number of top results to return (default: 10)
 
         Returns: dict with 'query', 'results', and 'timing'.
+        
+        Raises:
+            HTTPException:
+                - 400 if query is missing or invalid
+                - 500 if server initialization failed or search fails
         """
-
+        self._ensure_ready()
         try:
             import time
             t_start = time.perf_counter()
@@ -511,6 +583,8 @@ class Server:
             # Parse request
             if not query:
                 raise HTTPException(status_code=400, detail="Missing 'query' parameter")
+            if not isinstance(namespace, str):
+                raise HTTPException(status_code=400, detail="Namespace must be a string")
 
             top_k = 10
             logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
@@ -546,10 +620,18 @@ class Server:
         """
         List all videos for a specific namespace (namespace).
         Returns a list of video data objects containing filename, identifier, and presigned URL.
+        
+        Raises:
+            HTTPException:
+                - 400 if namespace is invalid
+                - 500 if server initialization failed or fetching fails
         """
+        self._ensure_ready()
         logger.info(f"[List Videos] Fetching videos for namespace: {namespace}")
 
         try:
+            if not namespace or not isinstance(namespace, str):
+                raise HTTPException(status_code=400, detail="Invalid namespace parameter. Must be a non-empty string.")
             video_data = self.r2_connector.fetch_all_video_data(namespace)
             return {
                 "status": "success",
@@ -581,33 +663,37 @@ class Server:
                 - 403 Forbidden if deletion is not allowed.
 
         """
-
+        self._ensure_ready()
         logger.info(f"[Delete Video] Request to delete video: {filename} ({hashed_identifier}) | namespace='{namespace}'")
-        if not hashed_identifier or not filename:
-            raise HTTPException(status_code=400, detail="Missing parameters: 'hashed_identifier' and 'filename' are required.")
-        
-        if not IS_INTERNAL_ENV:
-            raise HTTPException(status_code=403, detail="Video deletion is not allowed in the current environment.")
+        try:
+            if not hashed_identifier or not filename:
+                raise HTTPException(status_code=400, detail="Missing parameters: 'hashed_identifier' and 'filename' are required.")
+            
+            if not IS_INTERNAL_ENV:
+                raise HTTPException(status_code=403, detail="Video deletion is not allowed in the current environment.")
 
 
-        # Create job
-        import uuid
-        job_id = str(uuid.uuid4())
-        self.job_store.create_job(job_id, {
-            "job_id": job_id,
-            "hashed_identifier": hashed_identifier,
-            "namespace": namespace,
-            "status": "processing",
-            "operation": "delete"
-        })
+            # Create job
+            import uuid
+            job_id = str(uuid.uuid4())
+            self.job_store.create_job(job_id, {
+                "job_id": job_id,
+                "hashed_identifier": hashed_identifier,
+                "namespace": namespace,
+                "status": "processing",
+                "operation": "delete"
+            })
 
-        # Spawn background deletion (non-blocking - returns immediately)
-        self.delete_video_background.spawn(job_id, hashed_identifier, namespace)
+            # Spawn background deletion (non-blocking - returns immediately)
+            self.delete_video_background.spawn(job_id, hashed_identifier, namespace)
 
-        return {
-            "job_id": job_id,
-            "hashed_identifier": hashed_identifier,
-            "namespace": namespace,
-            "status": "processing",
-            "message": "Video deletion started, processing in background"
-        }
+            return {
+                "job_id": job_id,
+                "hashed_identifier": hashed_identifier,
+                "namespace": namespace,
+                "status": "processing",
+                "message": "Video deletion started, processing in background"
+            }
+        except Exception as e:
+            logger.error(f"[Delete Video] Error processing deletion request: {e}")
+            raise HTTPException(status_code=500, detail={str(e)})
