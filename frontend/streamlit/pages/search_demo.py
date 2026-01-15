@@ -84,9 +84,9 @@ def delete_video(hashed_identifier: str, filename: str):
 
     # return  # Deletion endpoint is currently disabled for modal limitations
 
-    if not IS_INTERNAL_ENV:
-        st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
-        return
+    # if not IS_INTERNAL_ENV:
+    #     st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
+    #     return
 
     try:
         resp = requests.delete(
