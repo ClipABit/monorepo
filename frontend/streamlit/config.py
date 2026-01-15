@@ -36,7 +36,7 @@ class Config:
     UPLOAD_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-upload{url_portion}.modal.run"
     STATUS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-status{url_portion}.modal.run"
     LIST_VIDEOS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-list-videos{url_portion}.modal.run"
-    # DELETE_VIDEO_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-delete-video{url_portion}.modal.run"
+    DELETE_VIDEO_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-delete-video{url_portion}.modal.run"
 
     # Namespace for Pinecone and R2 (web-demo for public demo)
     NAMESPACE = "web-demo"
@@ -61,7 +61,7 @@ class Config:
             "upload_api_url": cls.UPLOAD_API_URL,
             "status_api_url": cls.STATUS_API_URL,
             "list_videos_api_url": cls.LIST_VIDEOS_API_URL,
-            # "delete_video_api_url": cls.DELETE_VIDEO_API_URL,
+            "delete_video_api_url": cls.DELETE_VIDEO_API_URL,
         }
 
     @classmethod
