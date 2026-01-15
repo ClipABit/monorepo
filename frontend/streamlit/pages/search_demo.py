@@ -258,7 +258,7 @@ st.subheader("Semantic Video Search - Demo")
 up_col1, up_col2, up_col3 = st.columns([1, 1, 6])
 
 # upload button in internal envs else info text
-if IS_INTERNAL_ENV:
+if 1 == 1:
     with up_col1:
         if st.button("Upload", disabled=(False), use_container_width=True):
             upload_dialog()
