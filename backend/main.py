@@ -670,8 +670,8 @@ class Server:
             if not hashed_identifier or not filename:
                 raise HTTPException(status_code=400, detail="Missing parameters: 'hashed_identifier' and 'filename' are required.")
             
-            if not IS_INTERNAL_ENV:
-                raise HTTPException(status_code=403, detail="Video deletion is not allowed in the current environment.")
+            # if not IS_INTERNAL_ENV:
+            #     raise HTTPException(status_code=403, detail="Video deletion is not allowed in the current environment.")
 
 
             # Create job
