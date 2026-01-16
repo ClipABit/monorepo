@@ -82,11 +82,9 @@ def poll_job_status(job_id: str, max_wait: int = 300):
 def delete_video(hashed_identifier: str, filename: str):
     """Delete video via API call."""
 
-    # return  # Deletion endpoint is currently disabled for modal limitations
-
-    # if not IS_INTERNAL_ENV:
-    #     st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
-    #     return
+    if not IS_INTERNAL_ENV:
+        st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
+        return
 
     try:
         resp = requests.delete(
@@ -258,7 +256,7 @@ st.subheader("Semantic Video Search - Demo")
 up_col1, up_col2, up_col3 = st.columns([1, 1, 6])
 
 # upload button in internal envs else info text
-if 1 == 1:
+if IS_INTERNAL_ENV:
     with up_col1:
         if st.button("Upload", disabled=(False), use_container_width=True):
             upload_dialog()
@@ -330,7 +328,7 @@ if st.session_state.search_results:
                     score = result.get("score", 0)
 
                     # Video info and delete button row
-                    if 1 == 1:
+                    if IS_INTERNAL_ENV:
                         info_col, delete_col = st.columns([3, 1]) # NOTE: reenable with delete
 
                         with info_col:
@@ -363,7 +361,7 @@ else:
         for idx, video in enumerate(videos):
             with cols[idx%3]:
                 # Video info and delete button row
-                if 1 == 1:
+                if IS_INTERNAL_ENV:
                     info_col, delete_col = st.columns([3, 1])
                     with info_col:
                         with st.expander("Info"):
