@@ -4,9 +4,19 @@ import requests
 import streamlit as st
 from config import Config
 
+REPO_PAGE_SIZE = 20
+
 # Initialize session state
 if 'search_results' not in st.session_state:
     st.session_state.search_results = None
+if 'repo_videos' not in st.session_state:
+    st.session_state.repo_videos = []
+if 'repo_next_token' not in st.session_state:
+    st.session_state.repo_next_token = None
+if 'repo_initialized' not in st.session_state:
+    st.session_state.repo_initialized = False
+if 'repo_page_size' not in st.session_state:
+    st.session_state.repo_page_size = REPO_PAGE_SIZE
 
 # Configs
 SEARCH_API_URL = Config.SEARCH_API_URL
@@ -30,18 +40,54 @@ def search_videos(query: str):
     except requests.RequestException as e:
         return {"error": str(e)}
 
-@st.cache_data(ttl=60, show_spinner="Fetching all videos in repository...")
-def fetch_all_videos():
-    """Fetch all videos from the backend."""
+def fetch_videos_page(page_token: str | None = None, page_size: int = REPO_PAGE_SIZE):
+    """Fetch a single page of videos from the backend."""
+    params = {
+        "namespace": NAMESPACE,
+        "page_size": page_size,
+    }
+    if page_token:
+        params["page_token"] = page_token
+
     try:
-        resp = requests.get(LIST_VIDEOS_API_URL, params={"namespace": NAMESPACE}, timeout=30)
+        resp = requests.get(LIST_VIDEOS_API_URL, params=params, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
-            return data.get("videos", [])
-        return []
+            return {
+                "videos": data.get("videos", []),
+                "next_page_token": data.get("next_page_token"),
+            }
+        return {"error": f"Fetch failed with status {resp.status_code}"}
     except requests.RequestException as e:
-        st.error(f"Failed to fetch videos from backend: {str(e)}")
-        return []
+        return {"error": str(e)}
+
+
+def load_repository_page(page_token: str | None = None, append: bool = False) -> tuple[bool, str | None]:
+    """Load a page of videos into session state."""
+    page_size = st.session_state.repo_page_size
+    result = fetch_videos_page(page_token=page_token, page_size=page_size)
+
+    if "error" in result:
+        return False, result["error"]
+
+    videos = result.get("videos", [])
+    next_token = result.get("next_page_token")
+
+    if append:
+        st.session_state.repo_videos.extend(videos)
+    else:
+        st.session_state.repo_videos = videos
+
+    st.session_state.repo_next_token = next_token
+    st.session_state.repo_initialized = True
+    return True, None
+
+
+def reset_repository_state() -> None:
+    """Reset cached repository data so it reloads on next view."""
+    st.session_state.repo_videos = []
+    st.session_state.repo_next_token = None
+    st.session_state.repo_initialized = False
 
 
 def upload_files_to_backend(files_data: list[tuple[bytes, str, str]]):
@@ -90,17 +136,17 @@ def delete_video(hashed_identifier: str, filename: str):
         resp = requests.delete(
             DELETE_VIDEO_API_URL,
             params={
-                    "hashed_identifier": hashed_identifier,
-                    "filename": filename,
-                    "namespace": NAMESPACE
-                    },
+                "hashed_identifier": hashed_identifier,
+                "filename": filename,
+                "namespace": NAMESPACE
+            },
             timeout=30
         )
         if resp.status_code == 200:
             _ = resp.json() # TODO: should do smth with result
             st.toast(f"✅ Video '{filename}' deleted successfully!", icon="✅")
             st.session_state.search_results = None  # Clear search results to refresh the display
-            fetch_all_videos.clear()  # Clear the video cache immediately to force refresh
+            reset_repository_state()
             st.rerun()  # Force refresh UI
         elif resp.status_code == 404:
             st.toast(f"⚠️ Video '{filename}' not found", icon="⚠️")
@@ -163,6 +209,7 @@ def upload_dialog():
                                 # Single video
                                 job_id = data.get("job_id")
                                 st.success(f"Video uploaded! Job ID: {job_id}")
+                                reset_repository_state()
                                 time.sleep(2)
                                 st.rerun()
                             elif "batch_job_id" in data:
@@ -218,6 +265,7 @@ def upload_dialog():
                                                     for job in failed_jobs:
                                                         st.write(f"- {job.get('filename')}: {job.get('error')}")
 
+                                        reset_repository_state()
                                         time.sleep(2)
                                         st.rerun()
                                         break
@@ -351,9 +399,13 @@ if st.session_state.search_results:
 else:
     st.subheader("Video Repository")
 
-    # Fetch and display videos
-    videos = fetch_all_videos()
+    if not st.session_state.repo_initialized:
+        with st.spinner("Loading videos..."):
+            success, error = load_repository_page()
+        if not success and error:
+            st.error(f"Failed to load videos: {error}")
 
+    videos = st.session_state.repo_videos
 
     if videos:
         # Create a grid of videos
@@ -377,6 +429,18 @@ else:
                 st.video(video['presigned_url'])
     else:
         st.info("No videos found in the repository.")
+
+    if st.session_state.repo_next_token:
+        if st.button("Load more videos", use_container_width=True):
+            with st.spinner("Loading more videos..."):
+                success, error = load_repository_page(
+                    page_token=st.session_state.repo_next_token,
+                    append=True
+                )
+            if not success and error:
+                st.error(f"Failed to load additional videos: {error}")
+            else:
+                st.rerun()
 
 # Footer
 st.markdown("---")

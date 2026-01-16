@@ -2,7 +2,7 @@ import os
 import logging
 import boto3
 from botocore.exceptions import ClientError
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 import base64
 
 logger = logging.getLogger(__name__)
@@ -292,6 +292,75 @@ class R2Connector:
             logger.error(f"Error deleting video from R2: {e}")
             return False
 
+    def fetch_video_page(
+        self,
+        namespace: str = "__default__",
+        page_size: int = 20,
+        continuation_token: Optional[str] = None,
+        expiration: int = 3600,
+    ) -> Tuple[List[dict], Optional[str]]:
+        """Fetch a single page of video metadata from R2.
+
+        Returns a tuple of (videos, next_continuation_token).
+        """
+        try:
+            if page_size <= 0:
+                raise ValueError("page_size must be a positive integer")
+
+            prefix = f"{namespace}/"
+            params = {
+                "Bucket": self.bucket_name,
+                "Prefix": prefix,
+                "MaxKeys": page_size,
+            }
+            if continuation_token:
+                params["ContinuationToken"] = continuation_token
+
+            response = self.s3_client.list_objects_v2(**params)
+
+            contents = response.get("Contents", [])
+            videos: List[dict] = []
+
+            for obj in contents:
+                object_key = obj.get("Key")
+                if not object_key or object_key == prefix:
+                    continue
+
+                try:
+                    filename = object_key.split('/', 1)[1]
+                    identifier = self._encode_path(self.bucket_name, namespace, filename)
+                    url = self.s3_client.generate_presigned_url(
+                        'get_object',
+                        Params={'Bucket': self.bucket_name, 'Key': object_key},
+                        ExpiresIn=expiration,
+                    )
+                    if url:
+                        videos.append({
+                            "file_name": filename,
+                            "hashed_identifier": identifier,
+                            "presigned_url": url,
+                        })
+                except ClientError as e:
+                    logger.error(f"Error processing video {object_key}: {e}")
+
+            next_token = response.get("NextContinuationToken") if response.get("IsTruncated") else None
+            logger.info(
+                "Fetched %s video objects for namespace %s (truncated=%s)",
+                len(videos),
+                namespace,
+                response.get("IsTruncated", False),
+            )
+            return videos, next_token
+
+        except Exception as e:
+            logger.error(
+                "Error fetching video page for namespace %s (token=%s): %s",
+                namespace,
+                continuation_token,
+                e,
+            )
+            return [], None
+
     def fetch_all_video_data(self, namespace: str = "__default__", expiration: int = 3600) -> list[dict]:
         """
         Fetch all video data for a namespace, including filenames, identifiers, and presigned URLs.
@@ -304,51 +373,24 @@ class R2Connector:
         Returns:
             list[dict]: List of dictionaries containing file_name, hashed_identifier, and presigned_url
         """
-        video_data_list = []
-        try:
-            # Ensure namespace ends with /
-            prefix = f"{namespace}/"
-            
-            paginator = self.s3_client.get_paginator('list_objects_v2')
-            
-            for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
-                if 'Contents' not in page:
-                    continue
-                
-                for obj in page['Contents']:
-                    object_key = obj['Key']
-                    
-                    # Skip if it's just the folder placeholder itself
-                    if object_key == prefix:
-                        continue
-                        
-                    try:
-                        # Extract filename from object key
-                        # object_key is namespace/filename
-                        filename = object_key.split('/', 1)[1]
-                        
-                        # Generate hashed identifier
-                        identifier = self._encode_path(self.bucket_name, namespace, filename)
-                        
-                        # Generate presigned URL directly from object key
-                        url = self.s3_client.generate_presigned_url(
-                            'get_object',
-                            Params={'Bucket': self.bucket_name, 'Key': object_key},
-                            ExpiresIn=expiration
-                        )
-                        
-                        if url:
-                            video_data_list.append({
-                                "file_name": filename,
-                                "hashed_identifier": identifier,
-                                "presigned_url": url
-                            })
-                    except ClientError as e:
-                        logger.error(f"Error processing video {object_key}: {e}")
-            
-            logger.info(f"Fetched data for {len(video_data_list)} videos for user {namespace}")
-            return video_data_list
-            
-        except Exception as e:
-            logger.error(f"Error listing objects for user {namespace}: {e}")
-            return []
+        video_data_list: List[dict] = []
+        next_token: Optional[str] = None
+
+        while True:
+            page, next_token = self.fetch_video_page(
+                namespace=namespace,
+                page_size=1000,
+                continuation_token=next_token,
+                expiration=expiration,
+            )
+            video_data_list.extend(page)
+
+            if not next_token:
+                break
+
+        logger.info(
+            "Fetched complete dataset (%s videos) for namespace %s",
+            len(video_data_list),
+            namespace,
+        )
+        return video_data_list

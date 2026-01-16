@@ -3,6 +3,8 @@ import logging
 from fastapi import UploadFile, HTTPException, Form
 import modal
 
+from cache.video_cache import VideoCache
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -23,6 +25,7 @@ image = (
                 "database",
                 "search",
                 "services",
+                "cache",
             )
         )
 
@@ -120,6 +123,8 @@ class Server:
                 job_store=self.job_store,
                 process_video_method=self.process_video
             )
+
+            self.video_cache = VideoCache(environment=ENVIRONMENT)
 
             logger.info("Container modules initialized and ready!")
 
@@ -255,6 +260,13 @@ class Server:
                         f"[Job {job_id}] CRITICAL: Failed to update parent batch {parent_batch_id} "
                         f"after max retries. Batch state may be inconsistent."
                     )
+
+            # Invalidate cached pages for namespace after successful processing
+            try:
+                if hasattr(self, "video_cache"):
+                    self.video_cache.clear_namespace(namespace or "__default__")
+            except Exception as cache_exc:
+                logger.error(f"[Job {job_id}] Failed to clear cache for namespace {namespace}: {cache_exc}")
 
             return result
 
@@ -394,6 +406,14 @@ class Server:
 
             # Store result for polling endpoint
             self.job_store.set_job_completed(job_id, result)
+
+            try:
+                if hasattr(self, "video_cache"):
+                    self.video_cache.clear_namespace(namespace or "__default__")
+            except Exception as cache_exc:
+                logger.error(
+                    f"[Job {job_id}] Failed to clear cache after deletion for namespace {namespace}: {cache_exc}"
+                )
             return result
 
         except Exception as e:
@@ -616,7 +636,12 @@ class Server:
 
     
     @modal.fastapi_endpoint(method="GET")
-    async def list_videos(self, namespace: str = "__default__"):
+    async def list_videos(
+        self,
+        namespace: str = "__default__",
+        page_token: str | None = None,
+        page_size: int = 20,
+    ):
         """
         List all videos for a specific namespace (namespace).
         Returns a list of video data objects containing filename, identifier, and presigned URL.
@@ -627,16 +652,51 @@ class Server:
                 - 500 if server initialization failed or fetching fails
         """
         self._ensure_ready()
-        logger.info(f"[List Videos] Fetching videos for namespace: {namespace}")
+        logger.info(
+            "[List Videos] Fetching videos for namespace %s (page_token=%s, page_size=%s)",
+            namespace,
+            page_token,
+            page_size,
+        )
 
         try:
             if not namespace or not isinstance(namespace, str):
                 raise HTTPException(status_code=400, detail="Invalid namespace parameter. Must be a non-empty string.")
-            video_data = self.r2_connector.fetch_all_video_data(namespace)
+            if page_size <= 0:
+                raise HTTPException(status_code=400, detail="page_size must be a positive integer")
+            if page_size > 100:
+                raise HTTPException(status_code=400, detail="page_size must be less than or equal to 100")
+
+            normalized_token = page_token or None
+
+            videos = []
+            next_token = None
+            cache_hit = False
+
+            video_cache = getattr(self, "video_cache", None)
+            if video_cache:
+                cached = video_cache.get_page(namespace, normalized_token, page_size)
+                if cached:
+                    videos = cached.get("videos", [])
+                    next_token = cached.get("next_token")
+                    cache_hit = True
+
+            if not cache_hit:
+                videos, next_token = self.r2_connector.fetch_video_page(
+                    namespace=namespace,
+                    page_size=page_size,
+                    continuation_token=normalized_token,
+                )
+                if video_cache:
+                    video_cache.set_page(namespace, normalized_token, page_size, videos, next_token)
+
             return {
                 "status": "success",
                 "namespace": namespace,
-                "videos": video_data
+                "page_size": page_size,
+                "page_token": normalized_token,
+                "next_page_token": next_token,
+                "videos": videos
             }
         except Exception as e:
             logger.error(f"[List Videos] Error fetching videos: {e}")
