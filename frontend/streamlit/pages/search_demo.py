@@ -4,9 +4,25 @@ import requests
 import streamlit as st
 from config import Config
 
+REPO_PAGE_SIZE = 18
+
 # Initialize session state
 if 'search_results' not in st.session_state:
     st.session_state.search_results = None
+if 'repo_videos' not in st.session_state:
+    st.session_state.repo_videos = []
+if 'repo_next_token' not in st.session_state:
+    st.session_state.repo_next_token = None
+if 'repo_initialized' not in st.session_state:
+    st.session_state.repo_initialized = False
+if 'repo_page_size' not in st.session_state:
+    st.session_state.repo_page_size = REPO_PAGE_SIZE
+if 'repo_pages' not in st.session_state:
+    st.session_state.repo_pages = []
+if 'repo_page_tokens' not in st.session_state:
+    st.session_state.repo_page_tokens = []
+if 'repo_current_page_idx' not in st.session_state:
+    st.session_state.repo_current_page_idx = 0
 
 # Configs
 SEARCH_API_URL = Config.SEARCH_API_URL
@@ -30,18 +46,62 @@ def search_videos(query: str):
     except requests.RequestException as e:
         return {"error": str(e)}
 
-@st.cache_data(ttl=60, show_spinner="Fetching all videos in repository...")
-def fetch_all_videos():
-    """Fetch all videos from the backend."""
+def fetch_videos_page(page_token: str | None = None, page_size: int = REPO_PAGE_SIZE):
+    """Fetch a single page of videos from the backend."""
+    params = {
+        "namespace": NAMESPACE,
+        "page_size": page_size,
+    }
+    if page_token:
+        params["page_token"] = page_token
+
     try:
-        resp = requests.get(LIST_VIDEOS_API_URL, params={"namespace": NAMESPACE}, timeout=30)
+        resp = requests.get(LIST_VIDEOS_API_URL, params=params, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
-            return data.get("videos", [])
-        return []
+            return {
+                "videos": data.get("videos", []),
+                "next_page_token": data.get("next_page_token"),
+            }
+        return {"error": f"Fetch failed with status {resp.status_code}"}
     except requests.RequestException as e:
-        st.error(f"Failed to fetch videos from backend: {str(e)}")
-        return []
+        return {"error": str(e)}
+
+
+def load_repository_page(page_token: str | None = None, append: bool = False) -> tuple[bool, str | None]:
+    """Load a page of videos into session state."""
+    page_size = st.session_state.repo_page_size
+    result = fetch_videos_page(page_token=page_token, page_size=page_size)
+
+    if "error" in result:
+        return False, result["error"]
+
+    videos = result.get("videos", [])
+    next_token = result.get("next_page_token")
+
+    if append:
+        st.session_state.repo_pages.append(videos)
+        st.session_state.repo_page_tokens.append(page_token or "")
+        st.session_state.repo_current_page_idx = len(st.session_state.repo_pages) - 1
+    else:
+        st.session_state.repo_pages = [videos]
+        st.session_state.repo_page_tokens = [page_token or ""]
+        st.session_state.repo_current_page_idx = 0
+
+    st.session_state.repo_videos = st.session_state.repo_pages[st.session_state.repo_current_page_idx]
+    st.session_state.repo_next_token = next_token
+    st.session_state.repo_initialized = True
+    return True, None
+
+
+def reset_repository_state() -> None:
+    """Reset cached repository data so it reloads on next view."""
+    st.session_state.repo_videos = []
+    st.session_state.repo_next_token = None
+    st.session_state.repo_initialized = False
+    st.session_state.repo_pages = []
+    st.session_state.repo_page_tokens = []
+    st.session_state.repo_current_page_idx = 0
 
 
 def upload_files_to_backend(files_data: list[tuple[bytes, str, str]]):
@@ -82,27 +142,25 @@ def poll_job_status(job_id: str, max_wait: int = 300):
 def delete_video(hashed_identifier: str, filename: str):
     """Delete video via API call."""
 
-    return  # Deletion endpoint is currently disabled for modal limitations
-
-    # if not IS_INTERNAL_ENV:
-    #     st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
-    #     return
+    if not IS_INTERNAL_ENV:
+        st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
+        return
 
     # try:
     #     resp = requests.delete(
     #         DELETE_VIDEO_API_URL,
     #         params={
-    #                 "hashed_identifier": hashed_identifier,
-    #                 "filename": filename,
-    #                 "namespace": NAMESPACE
-    #                 },
+    #             "hashed_identifier": hashed_identifier,
+    #             "filename": filename,
+    #             "namespace": NAMESPACE
+    #         },
     #         timeout=30
     #     )
     #     if resp.status_code == 200:
     #         _ = resp.json() # TODO: should do smth with result
     #         st.toast(f"✅ Video '{filename}' deleted successfully!", icon="✅")
     #         st.session_state.search_results = None  # Clear search results to refresh the display
-    #         fetch_all_videos.clear()  # Clear the video cache immediately to force refresh
+    #         reset_repository_state()
     #         st.rerun()  # Force refresh UI
     #     elif resp.status_code == 404:
     #         st.toast(f"⚠️ Video '{filename}' not found", icon="⚠️")
@@ -165,6 +223,7 @@ def upload_dialog():
                                 # Single video
                                 job_id = data.get("job_id")
                                 st.success(f"Video uploaded! Job ID: {job_id}")
+                                reset_repository_state()
                                 time.sleep(2)
                                 st.rerun()
                             elif "batch_job_id" in data:
@@ -220,6 +279,7 @@ def upload_dialog():
                                                     for job in failed_jobs:
                                                         st.write(f"- {job.get('filename')}: {job.get('error')}")
 
+                                        reset_repository_state()
                                         time.sleep(2)
                                         st.rerun()
                                         break
@@ -331,16 +391,16 @@ if st.session_state.search_results:
 
                     # Video info and delete button row
                     if IS_INTERNAL_ENV:
-                        # info_col, delete_col = st.columns([3, 1]) NOTE: reenable with delete
+                        info_col, delete_col = st.columns([3, 1]) # NOTE: reenable with delete
 
-                        # with info_col[idx%3]:
-                        with st.expander("Info"):
-                            st.write(f"**File:** {filename}")
-                            st.write(f"**Score:** {score:.2f}")
-                        # with delete_col:
-                        #     if hashed_identifier:
-                        #         if st.button("🗑️", key=f"delete_search_{idx}", help=f"Delete {filename}"):
-                        #             delete_confirmation_dialog(hashed_identifier, filename)
+                        with info_col:
+                            with st.expander("Info"):
+                                st.write(f"**File:** {filename}")
+                                st.write(f"Score: {score:.2f}")
+                        with delete_col:
+                            if hashed_identifier:
+                                if st.button("🗑️", key=f"delete_search_{idx}", help=f"Delete {filename}"):
+                                    delete_confirmation_dialog(hashed_identifier, filename)
                     else:
                         with st.expander("Info"):
                             st.write(f"**File:** {filename}")
@@ -353,9 +413,52 @@ if st.session_state.search_results:
 else:
     st.subheader("Video Repository")
 
-    # Fetch and display videos
-    videos = fetch_all_videos()
+    if not st.session_state.repo_initialized:
+        with st.spinner("Loading videos..."):
+            success, error = load_repository_page()
+        if not success and error:
+            st.error(f"Failed to load videos: {error}")
 
+    videos = st.session_state.repo_videos
+
+    current_page_idx = st.session_state.repo_current_page_idx
+    total_loaded_pages = len(st.session_state.repo_pages)
+    has_more_pages = st.session_state.repo_next_token is not None
+
+    prev_disabled = current_page_idx <= 0
+    next_disabled = (current_page_idx >= total_loaded_pages - 1) and not has_more_pages
+
+    nav_info_col, nav_prev_col, nav_next_col = st.columns([6, 0.3, 0.3])
+
+    with nav_info_col:
+        page_label = f"Page {current_page_idx + 1} of {max(total_loaded_pages, 1)}"
+        if has_more_pages:
+            page_label += " (more available)"
+        st.markdown(f"<div style='text-align:left;font-weight:600;'>{page_label}</div>", unsafe_allow_html=True)
+
+    with nav_prev_col:
+        if st.button("◄", disabled=prev_disabled, use_container_width=True, key="repo_prev_btn"):
+            if current_page_idx > 0:
+                st.session_state.repo_current_page_idx -= 1
+                st.session_state.repo_videos = st.session_state.repo_pages[st.session_state.repo_current_page_idx]
+                st.rerun()
+
+    with nav_next_col:
+        if st.button("►", disabled=next_disabled, use_container_width=True, key="repo_next_btn"):
+            if current_page_idx + 1 < total_loaded_pages:
+                st.session_state.repo_current_page_idx += 1
+                st.session_state.repo_videos = st.session_state.repo_pages[st.session_state.repo_current_page_idx]
+                st.rerun()
+            elif st.session_state.repo_next_token:
+                with st.spinner("Loading next page..."):
+                    success, error = load_repository_page(
+                        page_token=st.session_state.repo_next_token,
+                        append=True
+                    )
+                if not success and error:
+                    st.error(f"Failed to load additional videos: {error}")
+                else:
+                    st.rerun()
 
     if videos:
         # Create a grid of videos
@@ -364,14 +467,14 @@ else:
             with cols[idx%3]:
                 # Video info and delete button row
                 if IS_INTERNAL_ENV:
-                    # info_col, delete_col = st.columns([3, 1])
-                    # with info_col[idx%3]:
-                    with st.expander("Info"):
-                        st.write(f"**File:** {video['file_name']}")
-                    # with delete_col:
-                    #     if video.get('hashed_identifier'):
-                    #         if st.button("🗑️", key=f"delete_repo_{idx}", help=f"Delete {video['file_name']}"):
-                    #             delete_confirmation_dialog(video['hashed_identifier'], video['file_name'])
+                    info_col, delete_col = st.columns([3, 1])
+                    with info_col:
+                        with st.expander("Info"):
+                            st.write(f"**File:** {video['file_name']}")
+                    with delete_col:
+                        if video.get('hashed_identifier'):
+                            if st.button("🗑️", key=f"delete_repo_{idx}", help=f"Delete {video['file_name']}"):
+                                delete_confirmation_dialog(video['hashed_identifier'], video['file_name'])
                 else:
                     with st.expander("Info"):
                         st.write(f"**File:** {video['file_name']}")
@@ -379,6 +482,8 @@ else:
                 st.video(video['presigned_url'])
     else:
         st.info("No videos found in the repository.")
+
+    # Navigation controls already render above; no infinite scroll button needed.
 
 # Footer
 st.markdown("---")

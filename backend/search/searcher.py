@@ -101,12 +101,28 @@ class Searcher:
             metadata = match.get('metadata', {})
 
             # Generate presigned URL if identifier exists
-            presigned_url = None
-            if 'file_hashed_identifier' in metadata and self.r2_connector:
-                presigned_url = self.r2_connector.generate_presigned_url(
-                    identifier=metadata['file_hashed_identifier']
+            if 'file_hashed_identifier' not in metadata:
+                logger.warning(
+                    "Skipping result %s: missing file_hashed_identifier",
+                    match.get('id'),
                 )
-                metadata['presigned_url'] = presigned_url
+                continue
+
+            presigned_url = None
+            if self.r2_connector:
+                presigned_url = self.r2_connector.generate_presigned_url(
+                    identifier=metadata['file_hashed_identifier'],
+                    validate_exists=True,
+                )
+
+            if not presigned_url:
+                logger.warning(
+                    "Skipping result %s: unable to generate presigned URL",
+                    match.get('id'),
+                )
+                continue
+
+            metadata['presigned_url'] = presigned_url
 
             result = {
                 'id': match.get('id'),
