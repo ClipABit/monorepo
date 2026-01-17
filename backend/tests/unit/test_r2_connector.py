@@ -1,6 +1,8 @@
 import base64
 from botocore.exceptions import ClientError
 
+from database.r2_connector import DEFAULT_PRESIGNED_URL_TTL
+
 
 class TestR2ConnectorInitialization:
     """Test connector initialization."""
@@ -142,6 +144,9 @@ class TestFetchVideoPage:
             Prefix="ns/",
             MaxKeys=3,
         )
+        for call in mock_client.generate_presigned_url.call_args_list:
+            kwargs = call.kwargs
+            assert kwargs['ExpiresIn'] == DEFAULT_PRESIGNED_URL_TTL
 
     def test_fetch_page_handles_error(self, mock_r2_connector):
         connector, mock_client, _ = mock_r2_connector
@@ -179,6 +184,9 @@ class TestFetchVideoPage:
             MaxKeys=3,
             StartAfter='ns/vid2.mp4',
         )
+        for call in mock_client.generate_presigned_url.call_args_list:
+            kwargs = call.kwargs
+            assert kwargs['ExpiresIn'] == DEFAULT_PRESIGNED_URL_TTL
 
 
 class TestFetchAllVideoData:
