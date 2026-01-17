@@ -7,6 +7,10 @@ import base64
 
 logger = logging.getLogger(__name__)
 
+
+DEFAULT_PRESIGNED_URL_TTL = 60 * 60  # 1 hour
+
+
 class R2Connector:
     """
     R2 Connector Class for managing Cloudflare R2 storage interactions.
@@ -343,7 +347,7 @@ class R2Connector:
         namespace: str = "__default__",
         page_size: int = 20,
         continuation_token: Optional[str] = None,
-        expiration: int = 3600,
+        expiration: int = DEFAULT_PRESIGNED_URL_TTL,
     ) -> Tuple[List[dict], Optional[str]]:
         """Fetch a single page of video metadata from R2.
 
@@ -423,7 +427,54 @@ class R2Connector:
             )
             return [], None
 
-    def fetch_all_video_data(self, namespace: str = "__default__", expiration: int = 3600) -> list[dict]:
+    def count_videos(self, namespace: str = "__default__") -> int:
+        """Return total number of stored video objects for a namespace."""
+        try:
+            prefix = f"{namespace}/"
+            continuation_token: Optional[str] = None
+            total = 0
+
+            while True:
+                params = {
+                    "Bucket": self.bucket_name,
+                    "Prefix": prefix,
+                    "MaxKeys": 1000,
+                }
+                if continuation_token:
+                    params["ContinuationToken"] = continuation_token
+
+                response = self.s3_client.list_objects_v2(**params)
+
+                contents = response.get("Contents", [])
+                for obj in contents:
+                    key = obj.get("Key")
+                    if key and key != prefix:
+                        total += 1
+
+                if response.get("IsTruncated"):
+                    continuation_token = response.get("NextContinuationToken")
+                else:
+                    break
+
+            logger.info(
+                "Counted %s video objects for namespace %s",
+                total,
+                namespace,
+            )
+            return total
+        except Exception as exc:
+            logger.error(
+                "Error counting videos for namespace %s: %s",
+                namespace,
+                exc,
+            )
+            return 0
+
+    def fetch_all_video_data(
+        self,
+        namespace: str = "__default__",
+        expiration: int = DEFAULT_PRESIGNED_URL_TTL,
+    ) -> list[dict]:
         """
         Fetch all video data for a namespace, including filenames, identifiers, and presigned URLs.
         For WEB this will be the web client name, and for PLUGIN this will be user/project
