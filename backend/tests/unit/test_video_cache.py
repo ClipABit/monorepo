@@ -1,7 +1,4 @@
-import pytest
-
 from cache.video_cache import VideoCache, VIDEO_PAGE_TTL_SECONDS
-
 
 class TestVideoCachePagination:
     def test_get_page_respects_ttl(self, mock_modal_dict, mocker):
