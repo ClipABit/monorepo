@@ -116,33 +116,91 @@ class TestGeneratePresignedURL:
         assert url is None
 
 
-class TestFetchAllVideoData:
-    """Test listing videos."""
+class TestFetchVideoPage:
+    """Test paginated listings."""
 
-    def test_fetch_all_success(self, mock_r2_connector, mocker):
-        """Verify listing videos works."""
+    def test_fetch_page_success(self, mock_r2_connector):
         connector, mock_client, _ = mock_r2_connector
-        
-        # Mock paginator
-        mock_paginator = mocker.MagicMock()
-        mock_client.get_paginator.return_value = mock_paginator
-        
-        # Mock page content
-        mock_paginator.paginate.return_value = [{
+
+        mock_client.list_objects_v2.return_value = {
             'Contents': [
                 {'Key': 'ns/vid1.mp4'},
-                {'Key': 'ns/vid2.mp4'}
-            ]
-        }]
-        
+                {'Key': 'ns/vid2.mp4'},
+            ],
+            'IsTruncated': True,
+            'NextContinuationToken': 'token-2',
+        }
         mock_client.generate_presigned_url.return_value = "http://url"
+
+        videos, token = connector.fetch_video_page(namespace="ns", page_size=2)
+
+        assert token == "token-2"
+        assert len(videos) == 2
+        assert videos[0]['file_name'] == "vid1.mp4"
+        mock_client.list_objects_v2.assert_called_once_with(
+            Bucket="test",
+            Prefix="ns/",
+            MaxKeys=3,
+        )
+
+    def test_fetch_page_handles_error(self, mock_r2_connector):
+        connector, mock_client, _ = mock_r2_connector
+        mock_client.list_objects_v2.side_effect = Exception("boom")
+
+        videos, token = connector.fetch_video_page(namespace="ns")
+
+        assert videos == []
+        assert token is None
+
+    def test_fetch_page_cursor_fallback(self, mock_r2_connector):
+        connector, mock_client, _ = mock_r2_connector
+
+        mock_client.list_objects_v2.return_value = {
+            'Contents': [
+                {'Key': 'ns/vid1.mp4'},
+                {'Key': 'ns/vid2.mp4'},
+                {'Key': 'ns/vid3.mp4'},
+            ],
+            'IsTruncated': False,
+        }
+        mock_client.generate_presigned_url.return_value = "http://url"
+
+        videos, token = connector.fetch_video_page(namespace="ns", page_size=2)
+
+        assert len(videos) == 2
+        assert token is not None
+        assert token.startswith("cursor:")
+
+        mock_client.list_objects_v2.reset_mock()
+        connector.fetch_video_page(namespace="ns", page_size=2, continuation_token=token)
+        mock_client.list_objects_v2.assert_called_once_with(
+            Bucket="test",
+            Prefix="ns/",
+            MaxKeys=3,
+            StartAfter='ns/vid2.mp4',
+        )
+
+
+class TestFetchAllVideoData:
+    """Test full listings."""
+
+    def test_fetch_all_success(self, mock_r2_connector, mocker):
+        connector, _, _ = mock_r2_connector
+
+        mocker.patch.object(
+            connector,
+            "fetch_video_page",
+            side_effect=[
+                ([{"file_name": "vid1.mp4", "hashed_identifier": "id1", "presigned_url": "url1"}], "token"),
+                ([{"file_name": "vid2.mp4", "hashed_identifier": "id2", "presigned_url": "url2"}], None),
+            ],
+        )
 
         results = connector.fetch_all_video_data("ns")
 
         assert len(results) == 2
-        assert results[0]['file_name'] == "vid1.mp4"
-        assert results[1]['file_name'] == "vid2.mp4"
-        assert results[0]['presigned_url'] == "http://url"
+        assert results[0]['hashed_identifier'] == "id1"
+        assert results[1]['hashed_identifier'] == "id2"
 
 
 class TestDeleteVideo:
