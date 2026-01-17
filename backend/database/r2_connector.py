@@ -229,7 +229,12 @@ class R2Connector:
             logger.error(f"Error fetching video from R2: {e}")
             return None
     
-    def generate_presigned_url(self, identifier: str, expiration: int = 3600) -> Optional[str]:
+    def generate_presigned_url(
+        self,
+        identifier: str,
+        expiration: int = 3600,
+        validate_exists: bool = False,
+    ) -> Optional[str]:
         """
         Generate a presigned URL for temporary access to a video using its identifier.
         Validates that the bucket name in the identifier matches the connector's bucket.
@@ -237,6 +242,7 @@ class R2Connector:
         Args:
             identifier: The base64-encoded identifier of the video
             expiration: URL expiration time in seconds (default: 1 hour)
+            validate_exists: When True, perform a HEAD request to ensure the object exists before signing
         
         Returns:
             str: Presigned URL that can be used to access the video directly, or None if failed
@@ -248,6 +254,29 @@ class R2Connector:
                 logger.warning(f"Cannot generate presigned URL: invalid identifier {identifier}")
                 return None
             
+            # Optionally validate the object exists before signing
+            if validate_exists:
+                try:
+                    self.s3_client.head_object(
+                        Bucket=self.bucket_name,
+                        Key=object_key,
+                    )
+                except ClientError as e:
+                    error_code = e.response.get("Error", {}).get("Code") if getattr(e, "response", None) else None
+                    if error_code in {"404", "NoSuchKey", "NotFound"}:
+                        logger.warning(
+                            "Cannot generate presigned URL: object missing for identifier %s (key=%s)",
+                            identifier,
+                            object_key,
+                        )
+                        return None
+                    logger.error(
+                        "Error validating object existence for identifier %s: %s",
+                        identifier,
+                        e,
+                    )
+                    return None
+
             # Generate presigned URL
             presigned_url = self.s3_client.generate_presigned_url(
                 'get_object',
@@ -292,6 +321,23 @@ class R2Connector:
             logger.error(f"Error deleting video from R2: {e}")
             return False
 
+    CURSOR_PREFIX = "cursor:"
+
+    @staticmethod
+    def _encode_cursor_token(object_key: str) -> str:
+        return f"{R2Connector.CURSOR_PREFIX}{base64.urlsafe_b64encode(object_key.encode('utf-8')).decode('utf-8')}"
+
+    @staticmethod
+    def _decode_cursor_token(token: str) -> Optional[str]:
+        if not token.startswith(R2Connector.CURSOR_PREFIX):
+            return None
+        raw = token[len(R2Connector.CURSOR_PREFIX):]
+        try:
+            padding = '=' * (-len(raw) % 4)
+            return base64.urlsafe_b64decode(raw + padding).decode('utf-8')
+        except Exception:
+            return None
+
     def fetch_video_page(
         self,
         namespace: str = "__default__",
@@ -311,21 +357,34 @@ class R2Connector:
             params = {
                 "Bucket": self.bucket_name,
                 "Prefix": prefix,
-                "MaxKeys": page_size,
+                "MaxKeys": min(page_size + 1, 1000),
             }
+
             if continuation_token:
-                params["ContinuationToken"] = continuation_token
+                cursor_key = self._decode_cursor_token(continuation_token)
+                if cursor_key:
+                    params["StartAfter"] = cursor_key
+                else:
+                    params["ContinuationToken"] = continuation_token
 
             response = self.s3_client.list_objects_v2(**params)
 
             contents = response.get("Contents", [])
-            videos: List[dict] = []
+            filtered: List[dict] = []
 
             for obj in contents:
                 object_key = obj.get("Key")
                 if not object_key or object_key == prefix:
                     continue
+                filtered.append(obj)
 
+            has_more_flag = response.get("IsTruncated", False)
+            items = filtered[:page_size]
+            has_more = has_more_flag or len(filtered) > page_size
+
+            videos: List[dict] = []
+            for obj in items:
+                object_key = obj.get("Key")
                 try:
                     filename = object_key.split('/', 1)[1]
                     identifier = self._encode_path(self.bucket_name, namespace, filename)
@@ -343,12 +402,15 @@ class R2Connector:
                 except ClientError as e:
                     logger.error(f"Error processing video {object_key}: {e}")
 
-            next_token = response.get("NextContinuationToken") if response.get("IsTruncated") else None
+            next_token = response.get("NextContinuationToken") if has_more_flag else None
+            if not next_token and has_more and videos:
+                next_token = self._encode_cursor_token(items[-1].get("Key"))
+
             logger.info(
-                "Fetched %s video objects for namespace %s (truncated=%s)",
+                "Fetched %s video objects for namespace %s (has_more=%s)",
                 len(videos),
                 namespace,
-                response.get("IsTruncated", False),
+                bool(next_token),
             )
             return videos, next_token
 

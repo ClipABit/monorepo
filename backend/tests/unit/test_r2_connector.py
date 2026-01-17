@@ -140,7 +140,7 @@ class TestFetchVideoPage:
         mock_client.list_objects_v2.assert_called_once_with(
             Bucket="test",
             Prefix="ns/",
-            MaxKeys=2,
+            MaxKeys=3,
         )
 
     def test_fetch_page_handles_error(self, mock_r2_connector):
@@ -151,6 +151,34 @@ class TestFetchVideoPage:
 
         assert videos == []
         assert token is None
+
+    def test_fetch_page_cursor_fallback(self, mock_r2_connector):
+        connector, mock_client, _ = mock_r2_connector
+
+        mock_client.list_objects_v2.return_value = {
+            'Contents': [
+                {'Key': 'ns/vid1.mp4'},
+                {'Key': 'ns/vid2.mp4'},
+                {'Key': 'ns/vid3.mp4'},
+            ],
+            'IsTruncated': False,
+        }
+        mock_client.generate_presigned_url.return_value = "http://url"
+
+        videos, token = connector.fetch_video_page(namespace="ns", page_size=2)
+
+        assert len(videos) == 2
+        assert token is not None
+        assert token.startswith("cursor:")
+
+        mock_client.list_objects_v2.reset_mock()
+        connector.fetch_video_page(namespace="ns", page_size=2, continuation_token=token)
+        mock_client.list_objects_v2.assert_called_once_with(
+            Bucket="test",
+            Prefix="ns/",
+            MaxKeys=3,
+            StartAfter='ns/vid2.mp4',
+        )
 
 
 class TestFetchAllVideoData:
