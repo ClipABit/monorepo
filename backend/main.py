@@ -1,4 +1,5 @@
 import os
+import math
 import logging
 from fastapi import UploadFile, HTTPException, Form
 import modal
@@ -672,6 +673,7 @@ class Server:
             videos = []
             next_token = None
             cache_hit = False
+            total_videos: int | None = None
 
             video_cache = getattr(self, "video_cache", None)
             if video_cache:
@@ -680,6 +682,10 @@ class Server:
                     videos = cached.get("videos", [])
                     next_token = cached.get("next_token")
                     cache_hit = True
+
+                metadata = video_cache.get_namespace_metadata(namespace)
+                if metadata is not None:
+                    total_videos = metadata.get("total_videos")
 
             if not cache_hit:
                 videos, next_token = self.r2_connector.fetch_video_page(
@@ -690,13 +696,27 @@ class Server:
                 if video_cache:
                     video_cache.set_page(namespace, normalized_token, page_size, videos, next_token)
 
+            if total_videos is None:
+                total_videos = self.r2_connector.count_videos(namespace=namespace)
+                if video_cache:
+                    video_cache.set_namespace_metadata(
+                        namespace,
+                        {
+                            "total_videos": int(total_videos),
+                        },
+                    )
+
+            total_pages = math.ceil(total_videos / page_size) if page_size and total_videos else 0
+
             return {
                 "status": "success",
                 "namespace": namespace,
                 "page_size": page_size,
                 "page_token": normalized_token,
                 "next_page_token": next_token,
-                "videos": videos
+                "total_videos": total_videos,
+                "total_pages": total_pages,
+                "videos": videos,
             }
         except Exception as e:
             logger.error(f"[List Videos] Error fetching videos: {e}")
