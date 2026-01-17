@@ -30,13 +30,16 @@ class Config:
     # Determine url portion based on environment
     url_portion = "" if ENVIRONMENT in ["prod", "staging"] else f"-{ENVIRONMENT}"
 
-    # API Endpoints - dynamically constructed based on environment
-    # Pattern: https://clipabit01--{env}-server-{endpoint}-{env}.modal.run
-    SEARCH_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-search{url_portion}.modal.run"
-    UPLOAD_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-upload{url_portion}.modal.run"
-    STATUS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-status{url_portion}.modal.run"
-    LIST_VIDEOS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-list-videos{url_portion}.modal.run"
-    # DELETE_VIDEO_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-delete-video{url_portion}.modal.run"
+    # Base URL for single ASGI app exposed via Modal
+    # Pattern: https://clipabit01--{env}-server-asgi-app-{env}.modal.run (dev/staging)
+    BASE_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-asgi-app{url_portion}.modal.run"
+
+    # API Endpoints routed through the single FastAPI app
+    SEARCH_API_URL = f"{BASE_API_URL}/search"
+    UPLOAD_API_URL = f"{BASE_API_URL}/upload"
+    STATUS_API_URL = f"{BASE_API_URL}/status"
+    LIST_VIDEOS_API_URL = f"{BASE_API_URL}/videos"
+    # DELETE_VIDEO_API_URL = f"{BASE_API_URL}/videos"  # with path param on call
 
     # Namespace for Pinecone and R2 (web-demo for public demo)
     NAMESPACE = "web-demo"
