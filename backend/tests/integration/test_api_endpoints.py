@@ -52,6 +52,17 @@ class FakeR2Connector:
         self.last_namespace = namespace
         return self.videos
 
+    def list_videos_page(
+        self,
+        namespace: str,
+        page_size: int,
+        continuation_token: str | None,
+    ) -> Tuple[List[Dict[str, Any]], str | None, int, int]:
+        self.last_namespace = namespace
+        total_videos = len(self.videos)
+        total_pages = 1 if total_videos else 0
+        return self.videos[:page_size], None, total_videos, total_pages
+
 
 class ServerStub:
     """
@@ -126,6 +137,9 @@ def test_list_videos_returns_data(test_client_internal: Tuple[TestClient, Server
     assert data["namespace"] == "ns1"
     assert isinstance(data["videos"], list)
     assert data["videos"][0]["file_name"] == "sample.mp4"
+    assert data["total_videos"] == 1
+    assert data["total_pages"] == 1
+    assert data["next_page_token"] is None
     assert server.r2_connector.last_namespace == "ns1"
 
 
