@@ -273,11 +273,27 @@ def mock_modal_dict(mocker):
     fake_dict = {}
     mock_dict = mocker.MagicMock()
 
-    mock_dict.__getitem__ = lambda self, key: fake_dict[key]
-    mock_dict.__setitem__ = lambda self, key, val: fake_dict.__setitem__(key, val)
-    mock_dict.__delitem__ = lambda self, key: fake_dict.__delitem__(key)
-    mock_dict.__contains__ = lambda self, key: key in fake_dict
-    mock_dict.get = lambda self, key, default=None: fake_dict.get(key, default)
+    def getitem(_, key):
+        return fake_dict[key]
+
+    def setitem(_, key, value):
+        fake_dict[key] = value
+
+    def delitem(_, key):
+        del fake_dict[key]
+
+    def contains(_, key):
+        return key in fake_dict
+
+    def get(_, key, default=None):
+        return fake_dict.get(key, default)
+
+    mock_dict.__getitem__ = getitem
+    mock_dict.__setitem__ = setitem
+    mock_dict.__delitem__ = delitem
+    mock_dict.__contains__ = contains
+    mock_dict.get = get
+    mock_dict.keys.side_effect = fake_dict.keys
 
     mocker.patch('modal.Dict.from_name', return_value=mock_dict)
     return fake_dict

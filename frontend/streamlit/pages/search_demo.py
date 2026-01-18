@@ -4,9 +4,35 @@ import requests
 import streamlit as st
 from config import Config
 
+REPO_PAGE_SIZE = 18
+
 # Initialize session state
 if 'search_results' not in st.session_state:
     st.session_state.search_results = None
+if 'repo_videos' not in st.session_state:
+    st.session_state.repo_videos = []
+if 'repo_next_token' not in st.session_state:
+    st.session_state.repo_next_token = None
+if 'repo_initialized' not in st.session_state:
+    st.session_state.repo_initialized = False
+if 'repo_page_size' not in st.session_state:
+    st.session_state.repo_page_size = REPO_PAGE_SIZE
+if 'repo_pages' not in st.session_state:
+    st.session_state.repo_pages = []
+if 'repo_page_tokens' not in st.session_state:
+    st.session_state.repo_page_tokens = []
+if 'repo_current_page_idx' not in st.session_state:
+    st.session_state.repo_current_page_idx = 0
+if 'repo_total_videos' not in st.session_state:
+    st.session_state.repo_total_videos = 0
+if 'repo_total_pages' not in st.session_state:
+    st.session_state.repo_total_pages = 0
+if 'repo_loading' not in st.session_state:
+    st.session_state.repo_loading = False
+if 'repo_error' not in st.session_state:
+    st.session_state.repo_error = None
+if 'repo_action' not in st.session_state:
+    st.session_state.repo_action = None
 
 # Configs
 SEARCH_API_URL = Config.SEARCH_API_URL
@@ -17,6 +43,11 @@ LIST_VIDEOS_API_URL = Config.LIST_VIDEOS_API_URL
 NAMESPACE = Config.NAMESPACE
 ENVIRONMENT = Config.ENVIRONMENT
 IS_INTERNAL_ENV = Config.IS_INTERNAL_ENV
+
+
+def set_repo_action(action: str) -> None:
+    """Schedule a repository navigation action for the next render."""
+    st.session_state.repo_action = action
 
 
 def search_videos(query: str):
@@ -30,18 +61,73 @@ def search_videos(query: str):
     except requests.RequestException as e:
         return {"error": str(e)}
 
-@st.cache_data(ttl=60, show_spinner="Fetching all videos in repository...")
-def fetch_all_videos():
-    """Fetch all videos from the backend."""
+def fetch_videos_page(page_token: str | None = None, page_size: int = REPO_PAGE_SIZE):
+    """Fetch a single page of videos from the backend."""
+    params = {
+        "namespace": NAMESPACE,
+        "page_size": page_size,
+    }
+    if page_token:
+        params["page_token"] = page_token
+
     try:
-        resp = requests.get(LIST_VIDEOS_API_URL, params={"namespace": NAMESPACE}, timeout=30)
+        resp = requests.get(LIST_VIDEOS_API_URL, params=params, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
-            return data.get("videos", [])
-        return []
+            return {
+                "videos": data.get("videos", []),
+                "next_page_token": data.get("next_page_token"),
+                "total_videos": data.get("total_videos", 0),
+                "total_pages": data.get("total_pages", 0),
+            }
+        return {"error": f"Fetch failed with status {resp.status_code}"}
     except requests.RequestException as e:
-        st.error(f"Failed to fetch videos from backend: {str(e)}")
-        return []
+        return {"error": str(e)}
+
+
+def load_repository_page(page_token: str | None = None, append: bool = False) -> tuple[bool, str | None]:
+    """Load a page of videos into session state."""
+    page_size = st.session_state.repo_page_size
+    result = fetch_videos_page(page_token=page_token, page_size=page_size)
+
+    if "error" in result:
+        return False, result["error"]
+
+    videos = result.get("videos", [])
+    next_token = result.get("next_page_token")
+    total_videos = result.get("total_videos", 0) or 0
+    total_pages = result.get("total_pages", 0) or 0
+
+    if append:
+        st.session_state.repo_pages.append(videos)
+        st.session_state.repo_page_tokens.append(page_token or "")
+        st.session_state.repo_current_page_idx = len(st.session_state.repo_pages) - 1
+    else:
+        st.session_state.repo_pages = [videos]
+        st.session_state.repo_page_tokens = [page_token or ""]
+        st.session_state.repo_current_page_idx = 0
+
+    st.session_state.repo_videos = st.session_state.repo_pages[st.session_state.repo_current_page_idx]
+    st.session_state.repo_next_token = next_token
+    st.session_state.repo_total_videos = total_videos
+    st.session_state.repo_total_pages = total_pages
+    st.session_state.repo_initialized = True
+    return True, None
+
+
+def reset_repository_state() -> None:
+    """Reset cached repository data so it reloads on next view."""
+    st.session_state.repo_videos = []
+    st.session_state.repo_next_token = None
+    st.session_state.repo_initialized = False
+    st.session_state.repo_pages = []
+    st.session_state.repo_page_tokens = []
+    st.session_state.repo_current_page_idx = 0
+    st.session_state.repo_total_videos = 0
+    st.session_state.repo_total_pages = 0
+    st.session_state.repo_loading = False
+    st.session_state.repo_error = None
+    st.session_state.repo_action = None
 
 
 def upload_files_to_backend(files_data: list[tuple[bytes, str, str]]):
@@ -90,17 +176,17 @@ def delete_video(hashed_identifier: str, filename: str):
     #     resp = requests.delete(
     #         DELETE_VIDEO_API_URL,
     #         params={
-    #                 "hashed_identifier": hashed_identifier,
-    #                 "filename": filename,
-    #                 "namespace": NAMESPACE
-    #                 },
+    #             "hashed_identifier": hashed_identifier,
+    #             "filename": filename,
+    #             "namespace": NAMESPACE
+    #         },
     #         timeout=30
     #     )
     #     if resp.status_code == 200:
     #         _ = resp.json() # TODO: should do smth with result
     #         st.toast(f"✅ Video '{filename}' deleted successfully!", icon="✅")
     #         st.session_state.search_results = None  # Clear search results to refresh the display
-    #         fetch_all_videos.clear()  # Clear the video cache immediately to force refresh
+    #         reset_repository_state()
     #         st.rerun()  # Force refresh UI
     #     elif resp.status_code == 404:
     #         st.toast(f"⚠️ Video '{filename}' not found", icon="⚠️")
@@ -163,6 +249,7 @@ def upload_dialog():
                                 # Single video
                                 job_id = data.get("job_id")
                                 st.success(f"Video uploaded! Job ID: {job_id}")
+                                reset_repository_state()
                                 time.sleep(2)
                                 st.rerun()
                             elif "batch_job_id" in data:
@@ -218,6 +305,7 @@ def upload_dialog():
                                                     for job in failed_jobs:
                                                         st.write(f"- {job.get('filename')}: {job.get('error')}")
 
+                                        reset_repository_state()
                                         time.sleep(2)
                                         st.rerun()
                                         break
@@ -351,9 +439,98 @@ if st.session_state.search_results:
 else:
     st.subheader("Video Repository")
 
-    # Fetch and display videos
-    videos = fetch_all_videos()
+    if not st.session_state.repo_initialized:
+        with st.spinner("Loading videos..."):
+            success, error = load_repository_page()
+        if not success and error:
+            st.error(f"Failed to load videos: {error}")
 
+    videos = st.session_state.repo_videos
+
+    current_page_idx = st.session_state.repo_current_page_idx
+    total_loaded_pages = len(st.session_state.repo_pages)
+    repo_action = st.session_state.repo_action
+    st.session_state.repo_action = None
+
+    if repo_action == "prev" and not st.session_state.repo_loading:
+        if current_page_idx > 0:
+            st.session_state.repo_current_page_idx -= 1
+            st.session_state.repo_videos = st.session_state.repo_pages[st.session_state.repo_current_page_idx]
+            st.session_state.repo_error = None
+            st.rerun()
+
+    if repo_action == "next" and not st.session_state.repo_loading:
+        if current_page_idx + 1 < total_loaded_pages:
+            st.session_state.repo_current_page_idx += 1
+            st.session_state.repo_videos = st.session_state.repo_pages[st.session_state.repo_current_page_idx]
+            st.session_state.repo_error = None
+            st.rerun()
+        elif st.session_state.repo_next_token:
+            st.session_state.repo_loading = True
+            try:
+                with st.spinner("Loading next page..."):
+                    success, error = load_repository_page(
+                        page_token=st.session_state.repo_next_token,
+                        append=True
+                    )
+            finally:
+                st.session_state.repo_loading = False
+            if not success and error:
+                st.session_state.repo_error = error
+            else:
+                st.session_state.repo_error = None
+                st.rerun()
+
+    current_page_idx = st.session_state.repo_current_page_idx
+    total_loaded_pages = len(st.session_state.repo_pages)
+    total_pages = st.session_state.repo_total_pages or 0
+    total_videos = st.session_state.repo_total_videos or 0
+
+    prev_disabled = st.session_state.repo_loading or current_page_idx <= 0
+    if st.session_state.repo_loading:
+        next_disabled = True
+    elif total_pages > 0:
+        next_disabled = (current_page_idx + 1) >= total_pages
+    else:
+        next_disabled = True
+
+    nav_info_col, nav_prev_col, nav_next_col = st.columns([6, 0.3, 0.3])
+
+    with nav_info_col:
+        if total_pages > 0:
+            current_display_page = current_page_idx + 1
+        else:
+            current_display_page = 0
+        page_label = f"Page {current_display_page} of {total_pages}"
+        video_suffix = "video" if total_videos == 1 else "videos"
+        page_label += f" • {total_videos} {video_suffix}"
+        st.markdown(
+            f"<div style='text-align:left;font-weight:600;'>{page_label}</div>",
+            unsafe_allow_html=True
+        )
+
+    with nav_prev_col:
+        st.button(
+            "◄",
+            disabled=prev_disabled,
+            use_container_width=True,
+            key="repo_prev_btn",
+            on_click=set_repo_action,
+            args=("prev",),
+        )
+
+    with nav_next_col:
+        st.button(
+            "►",
+            disabled=next_disabled,
+            use_container_width=True,
+            key="repo_next_btn",
+            on_click=set_repo_action,
+            args=("next",),
+        )
+
+    if st.session_state.repo_error:
+        st.error(f"Failed to load additional videos: {st.session_state.repo_error}")
 
     if videos:
         # Create a grid of videos
@@ -377,6 +554,8 @@ else:
                 st.video(video['presigned_url'])
     else:
         st.info("No videos found in the repository.")
+
+    # Navigation controls already render above; no infinite scroll button needed.
 
 # Footer
 st.markdown("---")

@@ -1,6 +1,9 @@
 import os
+import math
 import logging
 import modal
+
+from cache.video_cache import VideoCache
 
 # Configure logging
 logging.basicConfig(
@@ -23,6 +26,7 @@ image = (
                 "database",
                 "search",
                 "services",
+                "cache",
             )
         )
 
@@ -124,6 +128,9 @@ class Server:
         self.fastapi_app = FastAPI()
         self.api = FastAPIRouter(self, IS_INTERNAL_ENV)
         self.fastapi_app.include_router(self.api.router)
+
+        self.video_cache = VideoCache(environment=ENVIRONMENT)
+
         logger.info("Container modules initialized and ready!")
 
         print(f"[Container] Started at {self.start_time.isoformat()}")
@@ -250,6 +257,13 @@ class Server:
                         f"[Job {job_id}] CRITICAL: Failed to update parent batch {parent_batch_id} "
                         f"after max retries. Batch state may be inconsistent."
                     )
+
+            # Invalidate cached pages for namespace after successful processing
+            try:
+                if hasattr(self, "video_cache"):
+                    self.video_cache.clear_namespace(namespace or "__default__")
+            except Exception as cache_exc:
+                logger.error(f"[Job {job_id}] Failed to clear cache for namespace {namespace}: {cache_exc}")
 
             return result
 
@@ -389,6 +403,14 @@ class Server:
 
             # Store result for polling endpoint
             self.job_store.set_job_completed(job_id, result)
+
+            try:
+                if hasattr(self, "video_cache"):
+                    self.video_cache.clear_namespace(namespace or "__default__")
+            except Exception as cache_exc:
+                logger.error(
+                    f"[Job {job_id}] Failed to clear cache after deletion for namespace {namespace}: {cache_exc}"
+                )
             return result
 
         except Exception as e:
