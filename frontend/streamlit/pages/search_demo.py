@@ -39,7 +39,7 @@ SEARCH_API_URL = Config.SEARCH_API_URL
 UPLOAD_API_URL = Config.UPLOAD_API_URL
 STATUS_API_URL = Config.STATUS_API_URL
 LIST_VIDEOS_API_URL = Config.LIST_VIDEOS_API_URL
-# DELETE_VIDEO_API_URL = Config.DELETE_VIDEO_API_URL
+DELETE_VIDEO_API_URL = Config.DELETE_VIDEO_API_URL
 NAMESPACE = Config.NAMESPACE
 ENVIRONMENT = Config.ENVIRONMENT
 IS_INTERNAL_ENV = Config.IS_INTERNAL_ENV
@@ -172,30 +172,29 @@ def delete_video(hashed_identifier: str, filename: str):
         st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
         return
 
-    # try:
-    #     resp = requests.delete(
-    #         DELETE_VIDEO_API_URL,
-    #         params={
-    #             "hashed_identifier": hashed_identifier,
-    #             "filename": filename,
-    #             "namespace": NAMESPACE
-    #         },
-    #         timeout=30
-    #     )
-    #     if resp.status_code == 200:
-    #         _ = resp.json() # TODO: should do smth with result
-    #         st.toast(f"✅ Video '{filename}' deleted successfully!", icon="✅")
-    #         st.session_state.search_results = None  # Clear search results to refresh the display
-    #         reset_repository_state()
-    #         st.rerun()  # Force refresh UI
-    #     elif resp.status_code == 404:
-    #         st.toast(f"⚠️ Video '{filename}' not found", icon="⚠️")
-    #     elif resp.status_code == 403:
-    #         st.toast(f"🚫 Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
-    #     else:
-    #         st.toast(f"❌ Delete failed with status {resp.status_code}", icon="❌")
-    # except requests.RequestException as e:
-    #     st.toast(f"❌ Network error: {str(e)}", icon="❌")
+    try:
+        resp = requests.delete(
+            DELETE_VIDEO_API_URL.format(hashed_identifier=hashed_identifier),
+            params={
+                "filename": filename,
+                "namespace": NAMESPACE
+            },
+            timeout=30
+        )
+        if resp.status_code == 200:
+            _ = resp.json() # TODO: should do smth with result
+            st.toast(f"✅ Video '{filename}' deleted successfully!", icon="✅")
+            st.session_state.search_results = None  # Clear search results to refresh the display
+            reset_repository_state()
+            st.rerun()  # Force refresh UI
+        elif resp.status_code == 404:
+            st.toast(f"⚠️ Video '{filename}' not found", icon="⚠️")
+        elif resp.status_code == 403:
+            st.toast(f"🚫 Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
+        else:
+            st.toast(f"❌ Delete failed with status {resp.status_code}", icon="❌")
+    except requests.RequestException as e:
+        st.toast(f"❌ Network error: {str(e)}", icon="❌")
 
 # Upload dialog (handles single and multiple files)
 @st.fragment
