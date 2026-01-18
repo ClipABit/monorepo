@@ -4,10 +4,10 @@ import logging
 import time
 import boto3
 from botocore.exceptions import ClientError
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List
 import base64
 
-from database.url_cache_connector import UrlCacheConnector, VIDEO_PAGE_TTL_SECONDS
+from database.url_cache_connector import UrlCacheConnector
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +180,6 @@ class R2Connector:
             filename = self._sanitize_filename(filename)
             
             # Append timestamp to filename to ensure uniqueness
-            import time
             filename = f"{int(time.time())}_{filename}"
             
             # Create encoded identifier

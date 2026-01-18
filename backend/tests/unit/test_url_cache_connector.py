@@ -1,5 +1,3 @@
-import pytest
-
 from database.url_cache_connector import UrlCacheConnector, VIDEO_PAGE_TTL_SECONDS
 
 
