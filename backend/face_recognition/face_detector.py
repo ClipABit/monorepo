@@ -82,8 +82,8 @@ class FaceDetector:
                 enforce_detection=self.enforce_detection,
                 align=self.align,
             )
-        except Exception as e:
-            logger.error(f"FaceDetector: Error during face detection and embedding on image {img}: {e}\nreturning empty face list.")
+        except ValueError:
+            logger.warning(f"FaceDetector: No face detected in image {img}: {e}\nreturning empty face list.")
             return []
 
         for r in rep:
