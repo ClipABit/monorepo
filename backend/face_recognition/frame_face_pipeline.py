@@ -21,16 +21,22 @@ class FrameFacePipeline:
         self.face_detector = face_detector
         self.face_repository = face_repository
 
-    def process_frame(self, frame: np.ndarray, chunk_id: str) -> dict[str, str]:
+    def process_frame(self, frame: np.ndarray, chunk_id: str) -> tuple[dict[str, str], list[str], list[str]]:
         """Process a video frame to detect faces and compute embeddings.
 
         Args:
             frame (np.ndarray): The input video frame.
 
         Returns:
-            a dictionary mapping face_id to img_access_id for each detected face.
+            tuple:
+                - dict mapping face_id to img_access_id for each detected face.
+                - list of created vector ids (from upserts) for this frame
+                - list of created image identifiers (uploaded to R2) for this frame
         """
-        face_access_id_map = {}
+        face_access_id_map: dict[str, str] = {}
+        created_vector_ids: list[str] = []
+        created_image_ids: list[str] = []
+
         faces = self.face_detector.detect_and_embed(frame)
         for face in faces:
             # The FaceRepository expects an embedding (np.ndarray) for lookup
@@ -45,19 +51,27 @@ class FrameFacePipeline:
                 )
                 if face_img_identifier is None:
                     logger.error("FrameFacePipeline: Failed to upload face image for face_id=%s", face_id)
-                    raise Exception("Failed to upload face image")
+                    # Skip this face but continue processing others
+                    continue
+                created_image_ids.append(face_img_identifier)
             else:
                 face_id = detected_face_data.face_id
                 face_img_identifier = detected_face_data.img_access_id
 
             # Use the FaceRepository upsert API (video_chunk_id, face_embedding)
-            self.face_repository.upsert_identified_face_embedding(
+            vector_id = self.face_repository.upsert_identified_face_embedding(
                 namespace=self.namespace,
                 face_id=face_id,
                 img_access_id=face_img_identifier,
                 video_chunk_id=chunk_id,
                 face_embedding=face.embedding,
             )
+
+            if vector_id:
+                created_vector_ids.append(vector_id)
+            else:
+                logger.error("FrameFacePipeline: Failed to upsert face embedding for face_id=%s in chunk=%s", face_id, chunk_id)
+
             face_access_id_map[face_id] = face_img_identifier
 
-        return face_access_id_map
+        return face_access_id_map, created_vector_ids, created_image_ids

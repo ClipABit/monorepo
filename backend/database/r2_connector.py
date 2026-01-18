@@ -349,6 +349,37 @@ class R2Connector:
         except Exception as e:
             logger.error(f"Error deleting video from R2: {e}")
             return False
+        
+    def delete_image(self, identifier: str) -> bool:
+        """
+        Delete an image from R2 storage using its identifier.
+
+        This mirrors `delete_video` but is provided as a clearer API for image deletions.
+
+        Args:
+            identifier: The base64-encoded identifier of the image
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """        
+        try:
+            # Get object key from identifier
+            object_key = self._get_object_key_from_identifier(identifier)
+            if not object_key:
+                logger.warning(f"Cannot delete image: invalid identifier {identifier}")
+                return False
+            
+            # Delete the object
+            self.s3_client.delete_object(
+                Bucket=self.bucket_name,
+                Key=object_key
+            )
+            
+            logger.info(f"Deleted image with identifier: {identifier}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error deleting image from R2: {e}")
+            return False
 
     def fetch_all_video_data(self, namespace: str = "__default__", expiration: int = 3600) -> list[dict]:
         """

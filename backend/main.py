@@ -126,6 +126,8 @@ class Server:
         
         hashed_identifier = None
         upserted_chunk_ids = []
+        created_face_embedding_ids = []
+        created_face_image_ids = []
 
         try:
             # Upload original video to R2 bucket
@@ -222,12 +224,18 @@ class Server:
                     face_map = {}
                     for f in sampled:
                         try:
-                            mapping = pipeline.process_frame(f, chunk_id=chunk['chunk_id'])
+                            mapping, vec_ids, img_ids = pipeline.process_frame(f, chunk_id=chunk['chunk_id'])
                             # mapping may contain multiple faces; merge into face_map
                             for k, v in mapping.items():
                                 face_map.setdefault(k, v)
+
+                            # collect created resource ids for potential rollback
+                            if vec_ids:
+                                created_face_embedding_ids.extend(vec_ids)
+                            if img_ids:
+                                created_face_image_ids.extend(img_ids)
                         except Exception as fe:
-                            logger.error(f"Face processing failed for chunk {chunk['chunk_id']}: {fe}")
+                            logger.exception(f"Face processing failed for chunk {chunk['chunk_id']}: {fe}")
                 except Exception as e:
                     logger.error(f"Failed to run face recognition for chunk {chunk['chunk_id']}: {e}")
                     face_map = {}
@@ -278,11 +286,19 @@ class Server:
                     logger.error(f"[Job {job_id}] Rollback failed for Pinecone chunks deletion: {len(upserted_chunk_ids)} chunks")
             
             # 3. Delete face embeddings from Pinecone
-            # TODO
-
+            if created_face_embedding_ids:
+                logger.info(f"[Job {job_id}] Rolling back: Deleting {len(created_face_embedding_ids)} face embeddings from Pinecone")
+                success = self.face_recognition_pinecone_connector.delete_chunks(created_face_embedding_ids, namespace=namespace)
+                if not success:
+                    logger.error(f"[Job {job_id}] Rollback failed for face embeddings deletion: {len(created_face_embedding_ids)} embeddings")
+                
             # 4. Delete face images from R2
-            # TODO
-
+            if created_face_image_ids:
+                logger.info(f"[Job {job_id}] Rolling back: Deleting {len(created_face_image_ids)} face images from R2")
+                for ident in created_face_image_ids:
+                    success = self.r2_connector.delete_image(ident)
+                    if not success:
+                        logger.error(f"[Job {job_id}] Rollback failed for R2 face image deletion: {ident}")
 
             logger.info(f"[Job {job_id}] Rollback complete.")
             # ----------------------

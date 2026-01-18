@@ -93,19 +93,28 @@ class FaceRepository:
         return identifier
 
     # upsert the face embedding with metadata into pinecone vector database
-    def upsert_identified_face_embedding(self, namespace: str, face_id: str, img_access_id: str, video_chunk_id: str, face_embedding: np.ndarray) -> bool:
+    def upsert_identified_face_embedding(self, namespace: str, face_id: str, img_access_id: str, video_chunk_id: str, face_embedding: np.ndarray) -> str | None:
+        """
+        Upsert the face embedding into Pinecone and return the vector id on success.
+
+        Returns:
+            str: generated vector id if upsert succeeded
+            None: if upsert failed
+        """
         try:
+            vector_id = str(uuid.uuid4())
             success = self.pinecone_connector.upsert_chunk(
-                chunk_id=str(uuid.uuid4()),
+                chunk_id=vector_id,
                 chunk_embedding=face_embedding,
                 namespace=namespace,
                 metadata={"face_id": face_id, "img_access_id": img_access_id, "chunk_id": video_chunk_id}
             )
         except Exception as e:
-            logger.error(f"FaceRepository: Error upserting face embedding for face_id {face_id} in chunk_id {video_chunk_id}: {e}")
-            return False
-        
+            logger.exception(f"FaceRepository: Error upserting face embedding for face_id {face_id} in chunk_id {video_chunk_id}: {e}")
+            return None
+
         if not success:
             logger.error(f"FaceRepository: Failed to upsert face embedding for face_id {face_id} in chunk_id {video_chunk_id}.")
-            return False
-        return True
+            return None
+
+        return vector_id
