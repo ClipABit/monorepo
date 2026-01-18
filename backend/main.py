@@ -2,8 +2,6 @@ import os
 import logging
 import modal
 
-from cache.video_cache import VideoCache
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -127,8 +125,6 @@ class Server:
         self.fastapi_app = FastAPI()
         self.api = FastAPIRouter(self, IS_INTERNAL_ENV)
         self.fastapi_app.include_router(self.api.router)
-
-        self.video_cache = VideoCache(environment=ENVIRONMENT)
 
         logger.info("Container modules initialized and ready!")
 
@@ -259,8 +255,7 @@ class Server:
 
             # Invalidate cached pages for namespace after successful processing
             try:
-                if hasattr(self, "video_cache"):
-                    self.video_cache.clear_namespace(namespace or "__default__")
+                self.r2_connector.clear_cache(namespace or "__default__")
             except Exception as cache_exc:
                 logger.error(f"[Job {job_id}] Failed to clear cache for namespace {namespace}: {cache_exc}")
 
@@ -404,8 +399,7 @@ class Server:
             self.job_store.set_job_completed(job_id, result)
 
             try:
-                if hasattr(self, "video_cache"):
-                    self.video_cache.clear_namespace(namespace or "__default__")
+                self.r2_connector.clear_cache(namespace or "__default__")
             except Exception as cache_exc:
                 logger.error(
                     f"[Job {job_id}] Failed to clear cache after deletion for namespace {namespace}: {cache_exc}"
