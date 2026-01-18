@@ -133,7 +133,12 @@ class FastAPIRouter:
             logger.error(f"[Search] Error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def list_videos(self, namespace: str = "__default__"):
+    async def list_videos(
+        self,
+        namespace: str = "__default__",
+        page_size: int = 20,
+        page_token: str | None = None,
+    ):
         """
         List all videos stored in R2 for the given namespace.
         
@@ -146,13 +151,30 @@ class FastAPIRouter:
         Raises:
             HTTPException: If fetching videos fails (500 Internal Server Error)
         """
-        logger.info(f"[List Videos] Fetching videos for namespace: {namespace}")
+        if page_size <= 0:
+            raise HTTPException(status_code=400, detail="page_size must be positive")
+
+        logger.info(
+            "[List Videos] Fetching videos for namespace: %s (page_size=%s, page_token=%s)",
+            namespace,
+            page_size,
+            page_token,
+        )
         try:
-            video_data = self.server_instance.r2_connector.fetch_all_video_data(namespace)
+            videos, next_token, total_videos, total_pages = (
+                self.server_instance.r2_connector.list_videos_page(
+                    namespace=namespace,
+                    page_size=page_size,
+                    continuation_token=page_token,
+                )
+            )
             return {
                 "status": "success",
                 "namespace": namespace,
-                "videos": video_data
+                "videos": videos,
+                "next_page_token": next_token,
+                "total_videos": total_videos,
+                "total_pages": total_pages,
             }
         except Exception as e:
             logger.error(f"[List Videos] Error fetching videos: {e}")
