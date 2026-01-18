@@ -40,7 +40,7 @@ class FrameFacePipeline:
                 face_id = self.face_repository.generate_face_id()
                 logger.info("FrameFacePipeline: New face detected, generated face_id=%s", face_id)
                 face_img_identifier = self.face_repository.upload_face_image(
-                    face_image=face.img,
+                    face_image=face.face_image,
                     face_id=face_id,
                 )
                 if face_img_identifier is None:

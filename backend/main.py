@@ -22,6 +22,7 @@ image = (
                 "models",
                 "database",
                 "search",
+                "face_recognition",
             )
         )
 
@@ -58,6 +59,7 @@ class Server:
         from database.job_store_connector import JobStoreConnector
         from search.searcher import Searcher
         from database.r2_connector import R2Connector
+        from face_recognition import FaceDetector, FaceRepository
 
 
         logger.info(f"Container starting up! Environment = {env}")
@@ -86,13 +88,16 @@ class Server:
         logger.info(f"Running in environment: {ENVIRONMENT}")
 
         # Select Pinecone index based on environment
-        pinecone_index = f"{ENVIRONMENT}-chunks"
+        pinecone_index = f"{ENVIRONMENT}-chunks"    # video chunks index
         logger.info(f"Using Pinecone index: {pinecone_index}")
+        pinecone_face_index = f"{ENVIRONMENT}-faces"  # face embeddings index
+        logger.info(f"Using Pinecone face index: {pinecone_face_index}")
 
         # Instantiate classes
         self.preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
         self.video_embedder = VideoEmbedder()
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=pinecone_index)
+        self.face_recognition_pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=pinecone_face_index)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
 
         self.r2_connector = R2Connector(
@@ -107,6 +112,9 @@ class Server:
             index_name=pinecone_index,
             r2_connector=self.r2_connector
         )
+
+        self.face_detector = FaceDetector()
+        self.face_repository = FaceRepository(self.face_recognition_pinecone_connector, self.r2_connector, threshold=0.35)
 
         logger.info("Container modules initialized and ready!")
 
@@ -192,10 +200,43 @@ class Server:
                 else:
                     raise Exception(f"Failed to upsert chunk {chunk['chunk_id']} to Pinecone")
 
+                # Face recognition for this chunk
+                try:
+                    from face_recognition.frame_face_pipeline import FrameFacePipeline
+
+                    pipeline = FrameFacePipeline(namespace=namespace, face_detector=self.face_detector, face_repository=self.face_repository)
+
+                    # sample up to 8 frames evenly from the chunk for face processing
+                    frames = chunk.get('frames')
+                    sampled = []
+                    if frames is not None and len(frames) > 0:
+                        n = min(8, len(frames))
+                        if len(frames) <= n:
+                            sampled = list(frames)
+                        else:
+                            import numpy as _np
+                            idx = _np.linspace(0, len(frames) - 1, n).astype(int)
+                            sampled = [frames[i] for i in idx]
+
+                    # Aggregate face mappings for the chunk (face_id -> img_access_id)
+                    face_map = {}
+                    for f in sampled:
+                        try:
+                            mapping = pipeline.process_frame(f, chunk_id=chunk['chunk_id'])
+                            # mapping may contain multiple faces; merge into face_map
+                            for k, v in mapping.items():
+                                face_map.setdefault(k, v)
+                        except Exception as fe:
+                            logger.error(f"Face processing failed for chunk {chunk['chunk_id']}: {fe}")
+                except Exception as e:
+                    logger.error(f"Failed to run face recognition for chunk {chunk['chunk_id']}: {e}")
+                    face_map = {}
+
                 chunk_details.append({
                     "chunk_id": chunk['chunk_id'],
                     "metadata": chunk['metadata'],
                     "memory_mb": chunk['memory_mb'],
+                    "faces": face_map,
                 })
 
             result = {
@@ -236,6 +277,13 @@ class Server:
                 if not success:
                     logger.error(f"[Job {job_id}] Rollback failed for Pinecone chunks deletion: {len(upserted_chunk_ids)} chunks")
             
+            # 3. Delete face embeddings from Pinecone
+            # TODO
+
+            # 4. Delete face images from R2
+            # TODO
+
+
             logger.info(f"[Job {job_id}] Rollback complete.")
             # ----------------------
 
