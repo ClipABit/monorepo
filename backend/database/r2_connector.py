@@ -1,15 +1,17 @@
 import os
+import math
 import logging
+import time
 import boto3
 from botocore.exceptions import ClientError
 from typing import Optional, Tuple, List
 import base64
 
+from database.url_cache_connector import UrlCacheConnector
+
 logger = logging.getLogger(__name__)
 
-
 DEFAULT_PRESIGNED_URL_TTL = 60 * 60  # 1 hour
-
 
 class R2Connector:
     """
@@ -49,6 +51,8 @@ class R2Connector:
         )
         
         logger.info(f"Initialized R2Connector for bucket: {self.bucket_name}")
+
+        self.url_cache_connnector = UrlCacheConnector(environment=environment)
     
     def _sanitize_filename(self, filename: str) -> str:
         """
@@ -176,7 +180,6 @@ class R2Connector:
             filename = self._sanitize_filename(filename)
             
             # Append timestamp to filename to ensure uniqueness
-            import time
             filename = f"{int(time.time())}_{filename}"
             
             # Create encoded identifier
@@ -427,6 +430,51 @@ class R2Connector:
             )
             return [], None
 
+    def list_videos_page(
+        self,
+        namespace: str = "__default__",
+        page_size: int = 20,
+        continuation_token: Optional[str] = None,
+    ) -> Tuple[List[dict], Optional[str], int, int]:
+        normalized_token = continuation_token or None
+        videos: List[dict] = []
+        next_token: Optional[str] = None
+        total_videos: Optional[int] = None
+        cache_hit = False
+
+        if self.url_cache_connnector:
+            cached = self.url_cache_connnector.get_page(namespace, normalized_token, page_size)
+            if cached:
+                videos = cached.get("videos", [])
+                next_token = cached.get("next_token")
+                cache_hit = True
+
+            metadata = self.url_cache_connnector.get_namespace_metadata(namespace)
+            if metadata is not None:
+                total_videos = metadata.get("total_videos")
+
+        if not cache_hit:
+            videos, next_token = self.fetch_video_page(
+                namespace=namespace,
+                page_size=page_size,
+                continuation_token=normalized_token,
+            )
+            if self.url_cache_connnector:
+                self.url_cache_connnector.set_page(namespace, normalized_token, page_size, videos, next_token)
+
+        if total_videos is None:
+            total_videos = self.count_videos(namespace=namespace)
+            if self.url_cache_connnector:
+                self.url_cache_connnector.set_namespace_metadata(
+                    namespace,
+                    {
+                        "total_videos": int(total_videos),
+                    },
+                )
+
+        total_pages = math.ceil(total_videos / page_size) if page_size and total_videos else 0
+        return videos, next_token, total_videos, total_pages
+
     def count_videos(self, namespace: str = "__default__") -> int:
         """Return total number of stored video objects for a namespace."""
         try:
@@ -507,3 +555,6 @@ class R2Connector:
             namespace,
         )
         return video_data_list
+
+    def clear_cache(self, namespace: str) -> int:
+        return self.url_cache_connnector.clear_namespace(namespace or "__default__")

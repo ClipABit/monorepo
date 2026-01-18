@@ -9,7 +9,7 @@ on:
 
 jobs:
   check-source-branch:
-    if: github.ref == 'refs/heads/main'
+    if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Verify Staging to Main
