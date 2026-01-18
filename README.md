@@ -14,12 +14,12 @@ Open two terminals:
 # Terminal 1: Backend
 cd backend
 uv sync
-uv run modal serve main.py
+uv run dev
 
 # Terminal 2: Frontend
 cd frontend/streamlit
 uv sync
-uv run streamlit run app.py
+uv run dev
 ```
 
 Backend runs on Modal, frontend opens at `localhost:8501`.
