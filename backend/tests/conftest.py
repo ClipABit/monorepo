@@ -391,3 +391,12 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
+
+
+def pytest_collection_modifyitems(session, config, items):
+    """Ensure API endpoint tests execute after the rest for isolation."""
+    api_items = [item for item in items if "tests/integration/test_api_endpoints.py" in item.nodeid]
+    if not api_items:
+        return
+    remaining = [item for item in items if item not in api_items]
+    items[:] = remaining + api_items
