@@ -45,7 +45,7 @@ app = modal.App(
 )
 
 
-@app.cls(cpu=4.0, memory=4096, timeout=600, min_containers=1)
+@app.cls(cpu=4.0, memory=4096, timeout=600)
 class Server:
 
     @modal.enter()
