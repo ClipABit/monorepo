@@ -52,7 +52,7 @@ class R2Connector:
         
         logger.info(f"Initialized R2Connector for bucket: {self.bucket_name}")
 
-        self._video_cache = UrlCacheConnector(environment=environment)
+        self.url_cache_connnector = UrlCacheConnector(environment=environment)
     
     def _sanitize_filename(self, filename: str) -> str:
         """
@@ -442,14 +442,14 @@ class R2Connector:
         total_videos: Optional[int] = None
         cache_hit = False
 
-        if self._video_cache:
-            cached = self._video_cache.get_page(namespace, normalized_token, page_size)
+        if self.url_cache_connnector:
+            cached = self.url_cache_connnector.get_page(namespace, normalized_token, page_size)
             if cached:
                 videos = cached.get("videos", [])
                 next_token = cached.get("next_token")
                 cache_hit = True
 
-            metadata = self._video_cache.get_namespace_metadata(namespace)
+            metadata = self.url_cache_connnector.get_namespace_metadata(namespace)
             if metadata is not None:
                 total_videos = metadata.get("total_videos")
 
@@ -459,13 +459,13 @@ class R2Connector:
                 page_size=page_size,
                 continuation_token=normalized_token,
             )
-            if self._video_cache:
-                self._video_cache.set_page(namespace, normalized_token, page_size, videos, next_token)
+            if self.url_cache_connnector:
+                self.url_cache_connnector.set_page(namespace, normalized_token, page_size, videos, next_token)
 
         if total_videos is None:
             total_videos = self.count_videos(namespace=namespace)
-            if self._video_cache:
-                self._video_cache.set_namespace_metadata(
+            if self.url_cache_connnector:
+                self.url_cache_connnector.set_namespace_metadata(
                     namespace,
                     {
                         "total_videos": int(total_videos),
@@ -557,4 +557,4 @@ class R2Connector:
         return video_data_list
 
     def clear_cache(self, namespace: str) -> int:
-        return self._video_cache.clear_namespace(namespace or "__default__")
+        return self.url_cache_connnector.clear_namespace(namespace or "__default__")

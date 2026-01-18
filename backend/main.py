@@ -23,7 +23,6 @@ image = (
                 "database",
                 "search",
                 "services",
-                "cache",
             )
         )
 
