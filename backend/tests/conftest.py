@@ -315,7 +315,7 @@ def mock_pinecone_connector(mocker):
 
 
 @pytest.fixture
-def mock_r2_connector(mocker):
+def mock_r2_connector(mocker, mock_modal_dict):
     """Mock R2Connector with all necessary mocks set up"""
     mock_boto3 = mocker.patch('database.r2_connector.boto3')
     mock_client = mocker.MagicMock()

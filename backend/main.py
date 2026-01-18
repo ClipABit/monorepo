@@ -1,10 +1,7 @@
 import os
-import math
 import logging
 from fastapi import UploadFile, HTTPException, Form
 import modal
-
-from cache.video_cache import VideoCache
 
 # Configure logging
 logging.basicConfig(
@@ -124,8 +121,6 @@ class Server:
                 job_store=self.job_store,
                 process_video_method=self.process_video
             )
-
-            self.video_cache = VideoCache(environment=ENVIRONMENT)
 
             logger.info("Container modules initialized and ready!")
 
@@ -264,8 +259,7 @@ class Server:
 
             # Invalidate cached pages for namespace after successful processing
             try:
-                if hasattr(self, "video_cache"):
-                    self.video_cache.clear_namespace(namespace or "__default__")
+                self.r2_connector.clear_cache(namespace or "__default__")
             except Exception as cache_exc:
                 logger.error(f"[Job {job_id}] Failed to clear cache for namespace {namespace}: {cache_exc}")
 
@@ -409,8 +403,7 @@ class Server:
             self.job_store.set_job_completed(job_id, result)
 
             try:
-                if hasattr(self, "video_cache"):
-                    self.video_cache.clear_namespace(namespace or "__default__")
+                self.r2_connector.clear_cache(namespace or "__default__")
             except Exception as cache_exc:
                 logger.error(
                     f"[Job {job_id}] Failed to clear cache after deletion for namespace {namespace}: {cache_exc}"
@@ -668,51 +661,17 @@ class Server:
             if page_size > 100:
                 raise HTTPException(status_code=400, detail="page_size must be less than or equal to 100")
 
-            normalized_token = page_token or None
-
-            videos = []
-            next_token = None
-            cache_hit = False
-            total_videos: int | None = None
-
-            video_cache = getattr(self, "video_cache", None)
-            if video_cache:
-                cached = video_cache.get_page(namespace, normalized_token, page_size)
-                if cached:
-                    videos = cached.get("videos", [])
-                    next_token = cached.get("next_token")
-                    cache_hit = True
-
-                metadata = video_cache.get_namespace_metadata(namespace)
-                if metadata is not None:
-                    total_videos = metadata.get("total_videos")
-
-            if not cache_hit:
-                videos, next_token = self.r2_connector.fetch_video_page(
-                    namespace=namespace,
-                    page_size=page_size,
-                    continuation_token=normalized_token,
-                )
-                if video_cache:
-                    video_cache.set_page(namespace, normalized_token, page_size, videos, next_token)
-
-            if total_videos is None:
-                total_videos = self.r2_connector.count_videos(namespace=namespace)
-                if video_cache:
-                    video_cache.set_namespace_metadata(
-                        namespace,
-                        {
-                            "total_videos": int(total_videos),
-                        },
-                    )
-
-            total_pages = math.ceil(total_videos / page_size) if page_size and total_videos else 0
+            videos, next_token, total_videos, total_pages = self.r2_connector.list_videos_page(
+                namespace=namespace,
+                page_size=page_size,
+                continuation_token=page_token,
+            )
 
             return {
                 "status": "success",
                 "namespace": namespace,
                 "page_size": page_size,
-                "page_token": normalized_token,
+                "page_token": page_token or None,
                 "next_page_token": next_token,
                 "total_videos": total_videos,
                 "total_pages": total_pages,
