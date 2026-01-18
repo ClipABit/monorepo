@@ -39,7 +39,7 @@ class Config:
     UPLOAD_API_URL = f"{BASE_API_URL}/upload"
     STATUS_API_URL = f"{BASE_API_URL}/status"
     LIST_VIDEOS_API_URL = f"{BASE_API_URL}/videos"
-    # DELETE_VIDEO_API_URL = f"{BASE_API_URL}/videos"  # with path param on call
+    DELETE_VIDEO_API_URL = f"{BASE_API_URL}/videos/{{hashed_identifier}}"  # with path param on call
 
     # Namespace for Pinecone and R2 (web-demo for public demo)
     NAMESPACE = "web-demo"
@@ -64,7 +64,7 @@ class Config:
             "upload_api_url": cls.UPLOAD_API_URL,
             "status_api_url": cls.STATUS_API_URL,
             "list_videos_api_url": cls.LIST_VIDEOS_API_URL,
-            # "delete_video_api_url": cls.DELETE_VIDEO_API_URL,
+            "delete_video_api_url": cls.DELETE_VIDEO_API_URL,
         }
 
     @classmethod

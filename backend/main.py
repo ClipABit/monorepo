@@ -64,8 +64,8 @@ class Server:
         from search.searcher import Searcher
         from database.r2_connector import R2Connector
         from api import FastAPIRouter
-        from fastapi import FastAPI
         from services.upload import UploadHandler
+        from fastapi import FastAPI
 
         logger.info(f"Container starting up! Environment = {env}")
         self.start_time = datetime.now(timezone.utc)
