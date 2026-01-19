@@ -18,8 +18,8 @@ class FastAPIRouter:
         server_instance,
         is_internal_env: bool,
         environment: str = "dev",
-        search_worker_cls=None,
-        processing_worker_cls=None
+        search_service_cls=None,
+        processing_service_cls=None
     ):
         """
         Initializes the API routes, giving them access to the server instance
@@ -29,14 +29,14 @@ class FastAPIRouter:
             server_instance: The Modal server instance for accessing connectors and spawning local methods
             is_internal_env: Whether this is an internal (dev/staging) environment
             environment: Environment name (dev, staging, prod) for cross-app lookups
-            search_worker_cls: Optional SearchWorker class for dev combined mode (direct access)
-            processing_worker_cls: Optional ProcessingWorker class for dev combined mode (direct access)
+            search_service_cls: Optional SearchService class for dev combined mode (direct access)
+            processing_service_cls: Optional ProcessingService class for dev combined mode (direct access)
         """
         self.server_instance = server_instance
         self.is_internal_env = is_internal_env
         self.environment = environment
-        self.search_worker_cls = search_worker_cls
-        self.processing_worker_cls = processing_worker_cls
+        self.search_service_cls = search_service_cls
+        self.processing_service_cls = processing_service_cls
         self.router = APIRouter()
         self._register_routes()
 
@@ -107,21 +107,21 @@ class FastAPIRouter:
 
         # Spawn to processing app
         try:
-            if self.processing_worker_cls:
+            if self.processing_service_cls:
                 # Dev combined mode - direct access to worker in same app
-                self.processing_worker_cls().process_video_background.spawn(
+                self.processing_service_cls().process_video_background.spawn(
                     contents, file.filename, job_id, namespace
                 )
                 logger.info(f"[Upload] Spawned processing job {job_id} (dev combined mode)")
             else:
                 # Production mode - cross-app call via from_name
                 processing_app_name = f"{self.environment} processing"
-                ProcessingWorker = modal.Cls.from_name(
+                ProcessingService = modal.Cls.from_name(
                     processing_app_name,
-                    "ProcessingWorker",
+                    "ProcessingService",
                     environment_name=get_modal_environment()
                 )
-                ProcessingWorker().process_video_background.spawn(
+                ProcessingService().process_video_background.spawn(
                     contents, file.filename, job_id, namespace
                 )
                 logger.info(f"[Upload] Spawned processing job {job_id} to {processing_app_name}")
@@ -159,18 +159,18 @@ class FastAPIRouter:
             logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
 
             # Call search app
-            if self.search_worker_cls:
+            if self.search_service_cls:
                 # Dev combined mode - direct access to worker in same app
-                results = self.search_worker_cls().search.remote(query, namespace, top_k)
+                results = self.search_service_cls().search.remote(query, namespace, top_k)
             else:
                 # Production mode - cross-app call via from_name
                 search_app_name = f"{self.environment} search"
-                SearchWorker = modal.Cls.from_name(
+                SearchService = modal.Cls.from_name(
                     search_app_name,
-                    "SearchWorker",
+                    "SearchService",
                     environment_name=get_modal_environment()
                 )
-                results = SearchWorker().search.remote(query, namespace, top_k)
+                results = SearchService().search.remote(query, namespace, top_k)
 
             t_done = time.perf_counter()
             logger.info(f"[Search] Found {len(results)} results in {t_done - t_start:.3f}s")

@@ -12,7 +12,7 @@ import modal
 
 from shared.config import get_environment, get_secrets
 from shared.images import get_search_image
-from workers.search_worker import SearchWorker
+from shared.search_service import SearchService
 
 logger = logging.getLogger(__name__)
 
@@ -27,5 +27,5 @@ app = modal.App(
     secrets=[get_secrets()]
 )
 
-# Register SearchWorker with this app
-app.cls(cpu=2.0, memory=2048, timeout=60, scaledown_window=120)(SearchWorker)
+# Register SearchService with this app
+app.cls(cpu=2.0, memory=2048, timeout=60, scaledown_window=120)(SearchService)

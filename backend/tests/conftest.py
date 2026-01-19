@@ -332,9 +332,9 @@ def mock_r2_connector(mocker, mock_modal_dict):
 
 
 @pytest.fixture
-def processing_worker(mocker):
+def processing_service(mocker):
     """
-    Creates a ProcessingWorker instance with all dependencies mocked.
+    Creates a ProcessingService instance with all dependencies mocked.
     We bypass the actual startup() logic and manually inject mocks.
     Used for testing video processing pipeline.
     """
@@ -368,17 +368,17 @@ def processing_worker(mocker):
         else:
             import apps.processing_app as processing_app
         
-        # Now ProcessingWorker is a regular Python class
-        worker = processing_app.ProcessingWorker()
+        # Now ProcessingService is a regular Python class
+        service = processing_app.ProcessingService()
         
         # Mock all the components that would be set in startup()
-        worker.r2_connector = mocker.MagicMock()
-        worker.pinecone_connector = mocker.MagicMock()
-        worker.preprocessor = mocker.MagicMock()
-        worker.video_embedder = mocker.MagicMock()
-        worker.job_store = mocker.MagicMock()
+        service.r2_connector = mocker.MagicMock()
+        service.pinecone_connector = mocker.MagicMock()
+        service.preprocessor = mocker.MagicMock()
+        service.video_embedder = mocker.MagicMock()
+        service.job_store = mocker.MagicMock()
         
-        yield worker
+        yield service
 
 
 @pytest.fixture
@@ -418,8 +418,7 @@ def server_instance(mocker):
         else:
             import apps.server as server_module
         
-        # Now Server is a regular Python class
-        server = server_module.Server()
+        server = server_module.ServerService()
         
         # Mock all the components that would be set in startup()
         server.r2_connector = mocker.MagicMock()

@@ -9,7 +9,7 @@ import modal
 
 from shared.config import get_environment, get_secrets
 from shared.images import get_server_image
-from workers.server_worker import Server
+from shared.server_service import ServerService
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ app = modal.App(
 
 # Define ServerWithASGI to add the asgi_app method and FastAPI setup
 @app.cls(cpu=2.0, memory=2048, timeout=120)
-class ServerWithASGI(Server):
+class ServerWithASGI(ServerService):
     """Server with ASGI app for production deployment."""
     
     @modal.enter()
