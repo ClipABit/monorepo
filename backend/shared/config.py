@@ -68,6 +68,9 @@ def get_environment() -> str:
         raise ValueError(f"Invalid ENVIRONMENT: {env}. Must be one of: {VALID_ENVIRONMENTS}")
     return env
 
+def get_modal_environment() -> str:
+    """Get the modal environment name."""
+    return 'main'
 
 def get_secrets() -> modal.Secret:
     """
