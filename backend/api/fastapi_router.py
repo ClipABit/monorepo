@@ -94,8 +94,8 @@ class FastAPIRouter:
 
         # Spawn to processing app (cross-app call)
         try:
-            processing_app_name = f"processing-{self.environment}"
-            process_fn = modal.Function.lookup(processing_app_name, "ProcessingWorker.process_video_backgroundi")
+            processing_app_name = f"{self.environment} processing"
+            process_fn = modal.Function.from_name(processing_app_name, "ProcessingWorker.process_video_background")
             process_fn.spawn(contents, file.filename, job_id, namespace)
             logger.info(f"[Upload] Spawned processing job {job_id} to {processing_app_name}")
         except Exception as e:
@@ -132,8 +132,8 @@ class FastAPIRouter:
             logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
 
             # Call search app (cross-app call)
-            search_app_name = f"search-{self.environment}"
-            search_fn = modal.Function.lookup(search_app_name, "SearchWorker.search")
+            search_app_name = f"{self.environment} search"
+            search_fn = modal.Function.from_name(search_app_name, "SearchWorker.search")
             results = search_fn.remote(query, namespace, top_k)
 
             t_done = time.perf_counter()

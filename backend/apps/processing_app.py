@@ -27,7 +27,7 @@ logger.info(f"Starting Processing App in '{env}' environment")
 
 # Create Modal app with processing-specific image
 app = modal.App(
-    name=f"processing-{env}",
+    name=f"{env} processing",
     image=get_processing_image(),
     secrets=[get_secrets()]
 )
@@ -96,8 +96,8 @@ class ProcessingWorker:
 
         logger.info("Processing worker initialized and ready!")
 
-    @modal.method_background()
-    def process_video(
+    @modal.method()
+    def process_video_background(
         self,
         video_bytes: bytes,
         filename: str,

@@ -24,7 +24,7 @@ IS_INTERNAL_ENV = is_internal_env()
 
 # Create Modal app with minimal image
 app = modal.App(
-    name=f"{env} Server",
+    name=f"{env}-api",
     image=get_server_image(),
     secrets=[get_secrets()]
 )

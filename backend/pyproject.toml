@@ -20,7 +20,10 @@ dependencies = [
 ]
 
 [project.scripts]
-dev = "cli:serve"
+serve-all = "cli:serve_all"
+serve-server = "cli:serve_server"
+serve-search = "cli:serve_search"
+serve-processing = "cli:serve_processing"
 
 [build-system]
 requires = ["hatchling"]
