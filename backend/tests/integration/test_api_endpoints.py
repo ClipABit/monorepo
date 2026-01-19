@@ -92,7 +92,7 @@ class ServerStub:
 
 @pytest.fixture()
 def mock_modal_lookup():
-    """Mock modal.Function.lookup to return fake functions."""
+    """Mock modal.Cls.from_name to return fake service classes."""
     fake_process_fn = FakeModalFunction()
     fake_search_fn = FakeModalFunction()
     fake_search_fn.remote_return_value = [
@@ -108,15 +108,32 @@ def mock_modal_lookup():
         }
     ]
 
-    def lookup_side_effect(app_name: str, function_name: str):
-        if "processing" in app_name:
-            return fake_process_fn
-        elif "search" in app_name:
-            return fake_search_fn
-        raise ValueError(f"Unknown app: {app_name}")
+    class FakeServiceClass:
+        """Fake service class that returns fake modal functions."""
+        def __init__(self, func):
+            self.func = func
+        
+        def __call__(self):
+            """Return self to allow chaining like ServiceClass().method"""
+            return self
+        
+        @property
+        def process_video_background(self):
+            return self.func
+        
+        @property
+        def search(self):
+            return self.func
 
-    # Use patch.object with create=True to mock the from_name classmethod
-    with patch.object(modal.Function, "from_name", side_effect=lookup_side_effect, create=True):
+    def lookup_side_effect(app_name: str, class_name: str, **kwargs):
+        if "processing" in app_name or class_name == "ProcessingService":
+            return FakeServiceClass(fake_process_fn)
+        elif "search" in app_name or class_name == "SearchService":
+            return FakeServiceClass(fake_search_fn)
+        raise ValueError(f"Unknown app: {app_name}, class: {class_name}")
+
+    # Mock modal.Cls.from_name
+    with patch.object(modal.Cls, "from_name", side_effect=lookup_side_effect):
         yield {
             "process_fn": fake_process_fn,
             "search_fn": fake_search_fn,

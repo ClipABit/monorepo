@@ -18,10 +18,10 @@ but this is acceptable for local development where iteration speed matters more.
 import logging
 import modal
 
-from shared.config import get_environment, get_secrets, is_internal_env
-from workers.search_worker import SearchWorker
-from workers.processing_worker import ProcessingWorker
-from workers.server_worker import Server
+from shared.config import get_environment, get_secrets, is_internal_env, get_dev_image
+from shared.search_service import SearchService
+from shared.processing_service import ProcessingService
+from shared.server_service import ServerService
 
 logger = logging.getLogger(__name__)
 
@@ -37,56 +37,15 @@ if env != "dev":
 
 logger.info("Starting Combined Dev App - all services in one app for local iteration")
 
-# Combined image with ALL dependencies
-combined_image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .apt_install("ffmpeg", "libsm6", "libxext6")
-    .pip_install(
-        # Server deps
-        "fastapi[standard]",
-        "python-multipart",
-        # ML deps (for both search and processing)
-        "torch",
-        "torchvision",
-        "transformers",
-        # Video processing deps
-        "opencv-python-headless",
-        "scenedetect",
-        "pillow",
-        # Storage deps
-        "boto3",
-        "pinecone",
-        "numpy",
-    )
-    .add_local_python_source(
-        "database",
-        "preprocessing",
-        "embeddings",
-        "models",
-        "search",
-        "api",
-        "shared",
-        "workers",
-    )
-)
-
-# Create single Modal app for all services
 app = modal.App(
     name="dev monolith",
-    image=combined_image,
+    image=get_dev_image(),
     secrets=[get_secrets()]
 )
 
-# Register SearchWorker with this app
-app.cls(cpu=2.0, memory=2048, timeout=60, scaledown_window=120)(SearchWorker)
-
-# Register ProcessingWorker with this app
-app.cls(cpu=4.0, memory=4096, timeout=600)(ProcessingWorker)
-
-
-# Define ServerWithASGI to add the asgi_app method and pass worker classes
+# Define DevServer to add the asgi_app method and pass worker classes
 @app.cls(cpu=2.0, memory=2048, timeout=120)
-class ServerWithASGI(Server):
+class DevServer(ServerService):
     """Server with ASGI app for dev combined mode."""
     
     @modal.enter()
@@ -95,8 +54,8 @@ class ServerWithASGI(Server):
         super().startup()
         # Create FastAPI app with worker classes (dev combined mode)
         self.fastapi_app = self.create_fastapi_app(
-            search_worker_cls=SearchWorker,
-            processing_worker_cls=ProcessingWorker
+            search_service_cls=SearchService,
+            processing_service_cls=ProcessingService
         )
 
     @modal.asgi_app()

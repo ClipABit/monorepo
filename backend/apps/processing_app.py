@@ -12,7 +12,7 @@ import modal
 
 from shared.config import get_environment, get_secrets
 from shared.images import get_processing_image
-from workers.processing_worker import ProcessingWorker
+from shared.processing_service import ProcessingService
 
 logger = logging.getLogger(__name__)
 
@@ -27,5 +27,5 @@ app = modal.App(
     secrets=[get_secrets()]
 )
 
-# Register ProcessingWorker with this app
-app.cls(cpu=4.0, memory=4096, timeout=600)(ProcessingWorker)
+# Register ProcessingService with this app
+app.cls(cpu=4.0, memory=4096, timeout=600)(ProcessingService)

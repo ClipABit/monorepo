@@ -1,5 +1,5 @@
 """
-SearchWorker class - shared between search_app.py and dev_combined.py
+SearchService class - base class shared between search_app.py and dev_combined.py
 """
 
 import logging
@@ -10,9 +10,9 @@ from shared.config import get_environment, get_env_var, get_pinecone_index
 logger = logging.getLogger(__name__)
 
 
-class SearchWorker:
+class SearchService:
     """
-    Search worker class.
+    Search service base class.
     
     Loads CLIP text encoder on startup and handles semantic search queries.
     """
@@ -25,7 +25,7 @@ class SearchWorker:
         from search.embedder import TextEmbedder
 
         env = get_environment()
-        logger.info(f"[SearchWorker] Starting up in '{env}' environment")
+        logger.info(f"[{self.__class__.__name__}] Starting up in '{env}' environment")
 
         # Get environment variables
         PINECONE_API_KEY = get_env_var("PINECONE_API_KEY")
@@ -35,12 +35,12 @@ class SearchWorker:
         ENVIRONMENT = get_environment()
 
         pinecone_index = get_pinecone_index()
-        logger.info(f"[SearchWorker] Using Pinecone index: {pinecone_index}")
+        logger.info(f"[{self.__class__.__name__}] Using Pinecone index: {pinecone_index}")
 
         # Initialize text embedder (loads CLIP text encoder)
         self.embedder = TextEmbedder()
         self.embedder._load_model()
-        logger.info(f"[SearchWorker] CLIP text encoder loaded on device: {self.embedder.device}")
+        logger.info(f"[{self.__class__.__name__}] CLIP text encoder loaded on device: {self.embedder.device}")
 
         # Initialize connectors
         self.pinecone_connector = PineconeConnector(
@@ -54,12 +54,12 @@ class SearchWorker:
             environment=ENVIRONMENT
         )
 
-        logger.info("[SearchWorker] Initialized and ready!")
+        logger.info(f"[{self.__class__.__name__}] Initialized and ready!")
 
     @modal.method()
     def search(self, query: str, namespace: str = "", top_k: int = 10) -> list:
         """Perform semantic search using CLIP text embeddings."""
-        logger.info(f"[SearchWorker] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
+        logger.info(f"[{self.__class__.__name__}] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
 
         # Generate query embedding
         query_embedding = self.embedder.embed_text(query)
@@ -106,5 +106,5 @@ class SearchWorker:
             }
             results.append(result)
 
-        logger.info(f"[SearchWorker] Found {len(results)} results")
+        logger.info(f"[{self.__class__.__name__}] Found {len(results)} results")
         return results

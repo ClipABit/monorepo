@@ -1,5 +1,5 @@
 """
-ProcessingWorker class - shared between processing_app.py and dev_combined.py
+ProcessingService class - base class shared between processing_app.py and dev_combined.py
 """
 
 import logging
@@ -10,9 +10,9 @@ from shared.config import get_environment, get_env_var, get_pinecone_index
 logger = logging.getLogger(__name__)
 
 
-class ProcessingWorker:
+class ProcessingService:
     """
-    Processing worker class.
+    Processing service base class.
     
     Loads full CLIP model and preprocessing pipeline on startup.
     """
@@ -27,7 +27,7 @@ class ProcessingWorker:
         from database.r2_connector import R2Connector
 
         env = get_environment()
-        logger.info(f"[ProcessingWorker] Starting up in '{env}' environment")
+        logger.info(f"[{self.__class__.__name__}] Starting up in '{env}' environment")
 
         # Get environment variables
         PINECONE_API_KEY = get_env_var("PINECONE_API_KEY")
@@ -37,7 +37,7 @@ class ProcessingWorker:
         ENVIRONMENT = get_environment()
 
         pinecone_index = get_pinecone_index()
-        logger.info(f"[ProcessingWorker] Using Pinecone index: {pinecone_index}")
+        logger.info(f"[{self.__class__.__name__}] Using Pinecone index: {pinecone_index}")
 
         # Initialize preprocessor and embedder
         self.preprocessor = Preprocessor(
@@ -46,7 +46,7 @@ class ProcessingWorker:
             scene_threshold=13.0
         )
         self.video_embedder = VideoEmbedder()
-        logger.info("[ProcessingWorker] CLIP image encoder and preprocessor loaded")
+        logger.info(f"[{self.__class__.__name__}] CLIP image encoder and preprocessor loaded")
 
         # Initialize connectors
         self.pinecone_connector = PineconeConnector(
@@ -61,7 +61,7 @@ class ProcessingWorker:
             environment=ENVIRONMENT
         )
 
-        logger.info("[ProcessingWorker] Initialized and ready!")
+        logger.info(f"[{self.__class__.__name__}] Initialized and ready!")
 
     @modal.method()
     def process_video_background(
@@ -74,7 +74,7 @@ class ProcessingWorker:
     ):
         """Process an uploaded video through the full pipeline."""
         logger.info(
-            f"[ProcessingWorker][Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) "
+            f"[{self.__class__.__name__}][Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) "
             f"| namespace='{namespace}' | batch={parent_batch_id or 'None'}"
         )
 
@@ -111,12 +111,12 @@ class ProcessingWorker:
             )
 
             logger.info(
-                f"[ProcessingWorker][Job {job_id}] Complete: {len(processed_chunks)} chunks, "
+                f"[{self.__class__.__name__}][Job {job_id}] Complete: {len(processed_chunks)} chunks, "
                 f"{total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}"
             )
 
             # Stage 3-4: Embed frames and store in Pinecone
-            logger.info(f"[ProcessingWorker][Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
+            logger.info(f"[{self.__class__.__name__}][Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
 
             chunk_details = []
             for chunk in processed_chunks:
@@ -125,7 +125,7 @@ class ProcessingWorker:
                     num_frames=8
                 )
 
-                logger.info(f"[ProcessingWorker][Job {job_id}] Generated CLIP embedding for chunk {chunk['chunk_id']}")
+                logger.info(f"[{self.__class__.__name__}][Job {job_id}] Generated CLIP embedding for chunk {chunk['chunk_id']}")
 
                 # Transform metadata for Pinecone compatibility
                 if 'timestamp_range' in chunk['metadata']:
@@ -172,7 +172,7 @@ class ProcessingWorker:
                 "chunk_details": chunk_details,
             }
 
-            logger.info(f"[ProcessingWorker][Job {job_id}] Finished processing {filename}")
+            logger.info(f"[{self.__class__.__name__}][Job {job_id}] Finished processing {filename}")
 
             # Stage 5: Store result
             self.job_store.set_job_completed(job_id, result)
@@ -185,22 +185,22 @@ class ProcessingWorker:
                     result
                 )
                 if update_success:
-                    logger.info(f"[ProcessingWorker][Job {job_id}] Updated parent batch {parent_batch_id}")
+                    logger.info(f"[{self.__class__.__name__}][Job {job_id}] Updated parent batch {parent_batch_id}")
                 else:
                     logger.error(
-                        f"[ProcessingWorker][Job {job_id}] CRITICAL: Failed to update parent batch {parent_batch_id}"
+                        f"[{self.__class__.__name__}][Job {job_id}] CRITICAL: Failed to update parent batch {parent_batch_id}"
                     )
 
             # Invalidate cache
             try:
                 self.r2_connector.clear_cache(namespace or "__default__")
             except Exception as cache_exc:
-                logger.error(f"[ProcessingWorker][Job {job_id}] Failed to clear cache: {cache_exc}")
+                logger.error(f"[{self.__class__.__name__}][Job {job_id}] Failed to clear cache: {cache_exc}")
 
             return result
 
         except Exception as e:
-            logger.error(f"[ProcessingWorker][Job {job_id}] Processing failed: {e}")
+            logger.error(f"[{self.__class__.__name__}][Job {job_id}] Processing failed: {e}")
 
             # Rollback
             if hashed_identifier:
@@ -208,7 +208,7 @@ class ProcessingWorker:
                 self.r2_connector.delete_video(hashed_identifier)
 
             if upserted_chunk_ids:
-                logger.info(f"[ProcessingWorker][Job {job_id}] Rolling back: Deleting chunks from Pinecone")
+                logger.info(f"[{self.__class__.__name__}][Job {job_id}] Rolling back: Deleting chunks from Pinecone")
                 self.pinecone_connector.delete_chunks(upserted_chunk_ids, namespace=namespace)
 
             import traceback

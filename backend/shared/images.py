@@ -9,6 +9,40 @@ Separates dependencies to minimize cold start times:
 
 import modal
 
+def get_dev_image() -> modal.Image:
+    """
+    Create the Modal image for the dev app.
+    """
+    return (
+        modal.Image.debian_slim(python_version="3.12")
+        .add_local_python_source(
+            "database",
+            "models",
+            "api",
+            "shared",
+            "workers",
+        )
+        .pip_install(
+            "fastapi[standard]",
+            "python-multipart",
+            "boto3",
+            "pinecone",
+            "numpy",
+            "torch",
+            "torchvision",
+            "transformers",
+            "opencv-python-headless",
+            "scenedetect",
+            "pillow",
+        )
+        .add_local_python_source(
+            "database",
+            "models",
+            "api",
+            "shared",
+            "workers",
+        )
+    )
 
 def get_server_image() -> modal.Image:
     """

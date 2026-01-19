@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 class TestProcessingPipeline:
     """
-    Integration tests for the video processing pipeline (ProcessingWorker).
+    Integration tests for the video processing pipeline (ProcessingService).
     Covers success paths, failure/rollback scenarios, and edge cases.
     """
 
@@ -13,7 +13,7 @@ class TestProcessingPipeline:
     # ==========================================================================
 
     @pytest.mark.asyncio
-    async def test_process_video_success(self, processing_worker, sample_video_bytes):
+    async def test_process_video_success(self, processing_service, sample_video_bytes):
         """
         Scenario: Happy path - everything succeeds.
         Expectation:
@@ -26,7 +26,7 @@ class TestProcessingPipeline:
         """
         # Setup
         hashed_id = "hash-success"
-        processing_worker.r2_connector.upload_video.return_value = (True, hashed_id)
+        processing_service.r2_connector.upload_video.return_value = (True, hashed_id)
         
         # Mock Preprocessor output
         chunks = [
@@ -43,18 +43,18 @@ class TestProcessingPipeline:
                 "memory_mb": 1.5
             }
         ]
-        processing_worker.preprocessor.process_video_from_bytes.return_value = chunks
+        processing_service.preprocessor.process_video_from_bytes.return_value = chunks
         
         # Mock Embedder
         mock_embedding = MagicMock()
         mock_embedding.numpy.return_value = [0.1, 0.2]
-        processing_worker.video_embedder._generate_clip_embedding.return_value = mock_embedding
+        processing_service.video_embedder._generate_clip_embedding.return_value = mock_embedding
         
         # Mock Pinecone success
-        processing_worker.pinecone_connector.upsert_chunk.return_value = True
+        processing_service.pinecone_connector.upsert_chunk.return_value = True
 
         # Execute
-        result = processing_worker.process_video_background(
+        result = processing_service.process_video_background(
             video_bytes=sample_video_bytes,
             filename="success.mp4",
             job_id="job-success",
@@ -69,16 +69,16 @@ class TestProcessingPipeline:
         assert result["total_memory_mb"] == 2.5
         
         # Verify Interactions
-        processing_worker.r2_connector.upload_video.assert_called_once()
-        processing_worker.preprocessor.process_video_from_bytes.assert_called_once()
-        assert processing_worker.video_embedder._generate_clip_embedding.call_count == 2
-        assert processing_worker.pinecone_connector.upsert_chunk.call_count == 2
+        processing_service.r2_connector.upload_video.assert_called_once()
+        processing_service.preprocessor.process_video_from_bytes.assert_called_once()
+        assert processing_service.video_embedder._generate_clip_embedding.call_count == 2
+        assert processing_service.pinecone_connector.upsert_chunk.call_count == 2
         
         # Verify Job Store Update
-        processing_worker.job_store.set_job_completed.assert_called_once_with("job-success", result)
+        processing_service.job_store.set_job_completed.assert_called_once_with("job-success", result)
 
     @pytest.mark.asyncio
-    async def test_process_video_empty_result(self, processing_worker):
+    async def test_process_video_empty_result(self, processing_service):
         """
         Scenario: Video processed but resulted in 0 chunks (e.g. too short).
         Expectation:
@@ -87,11 +87,11 @@ class TestProcessingPipeline:
             - No Pinecone upserts.
         """
         # Setup
-        processing_worker.r2_connector.upload_video.return_value = (True, "hash-empty")
-        processing_worker.preprocessor.process_video_from_bytes.return_value = []  # No chunks
+        processing_service.r2_connector.upload_video.return_value = (True, "hash-empty")
+        processing_service.preprocessor.process_video_from_bytes.return_value = []  # No chunks
 
         # Execute
-        result = processing_worker.process_video_background(
+        result = processing_service.process_video_background(
             video_bytes=b"short-video",
             filename="short.mp4",
             job_id="job-empty",
@@ -102,15 +102,15 @@ class TestProcessingPipeline:
         assert result["status"] == "completed"
         assert result["chunks"] == 0
         
-        processing_worker.video_embedder._generate_clip_embedding.assert_not_called()
-        processing_worker.pinecone_connector.upsert_chunk.assert_not_called()
+        processing_service.video_embedder._generate_clip_embedding.assert_not_called()
+        processing_service.pinecone_connector.upsert_chunk.assert_not_called()
 
     # ==========================================================================
     # ROLLBACK / FAILURE SCENARIOS
     # ==========================================================================
 
     @pytest.mark.asyncio
-    async def test_rollback_on_r2_upload_failure(self, processing_worker):
+    async def test_rollback_on_r2_upload_failure(self, processing_service):
         """
         Scenario: R2 upload fails immediately.
         Expectation: 
@@ -118,10 +118,10 @@ class TestProcessingPipeline:
             - No rollback actions (delete_video, delete_chunks) because nothing was created.
         """
         # Setup
-        processing_worker.r2_connector.upload_video.side_effect = Exception("R2 Upload Error")
+        processing_service.r2_connector.upload_video.side_effect = Exception("R2 Upload Error")
 
         # Execute
-        result = processing_worker.process_video_background(
+        result = processing_service.process_video_background(
             video_bytes=b"fake-video-data",
             filename="test.mp4",
             job_id="job-1",
@@ -133,11 +133,11 @@ class TestProcessingPipeline:
         assert "R2 Upload Error" in result["error"]
 
         # Rollback checks
-        processing_worker.r2_connector.delete_video.assert_not_called()
-        processing_worker.pinecone_connector.delete_chunks.assert_not_called()
+        processing_service.r2_connector.delete_video.assert_not_called()
+        processing_service.pinecone_connector.delete_chunks.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_rollback_on_preprocessing_failure(self, processing_worker):
+    async def test_rollback_on_preprocessing_failure(self, processing_service):
         """
         Scenario: R2 upload succeeds, but Preprocessing fails.
         Expectation:
@@ -147,11 +147,11 @@ class TestProcessingPipeline:
         """
         # Setup
         hashed_id = "hash-123"
-        processing_worker.r2_connector.upload_video.return_value = (True, hashed_id)
-        processing_worker.preprocessor.process_video_from_bytes.side_effect = Exception("Preprocessing Failed")
+        processing_service.r2_connector.upload_video.return_value = (True, hashed_id)
+        processing_service.preprocessor.process_video_from_bytes.side_effect = Exception("Preprocessing Failed")
 
         # Execute
-        result = processing_worker.process_video_background(
+        result = processing_service.process_video_background(
             video_bytes=b"fake-video-data",
             filename="test.mp4",
             job_id="job-2",
@@ -163,11 +163,11 @@ class TestProcessingPipeline:
         assert "Preprocessing Failed" in result["error"]
 
         # Rollback checks
-        processing_worker.r2_connector.delete_video.assert_called_once_with(hashed_id)
-        processing_worker.pinecone_connector.delete_chunks.assert_not_called()
+        processing_service.r2_connector.delete_video.assert_called_once_with(hashed_id)
+        processing_service.pinecone_connector.delete_chunks.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_rollback_on_embedding_failure(self, processing_worker):
+    async def test_rollback_on_embedding_failure(self, processing_service):
         """
         Scenario: R2 upload & Preprocessing succeed, but Embedding generation fails.
         Expectation:
@@ -177,7 +177,7 @@ class TestProcessingPipeline:
         """
         # Setup
         hashed_id = "hash-456"
-        processing_worker.r2_connector.upload_video.return_value = (True, hashed_id)
+        processing_service.r2_connector.upload_video.return_value = (True, hashed_id)
         
         # Mock preprocessor to return one chunk
         chunk = {
@@ -186,13 +186,13 @@ class TestProcessingPipeline:
             "metadata": {"frame_count": 10, "complexity_score": 0.5},
             "memory_mb": 1.0
         }
-        processing_worker.preprocessor.process_video_from_bytes.return_value = [chunk]
+        processing_service.preprocessor.process_video_from_bytes.return_value = [chunk]
         
         # Fail embedding
-        processing_worker.video_embedder._generate_clip_embedding.side_effect = Exception("Embedding Model Error")
+        processing_service.video_embedder._generate_clip_embedding.side_effect = Exception("Embedding Model Error")
 
         # Execute
-        result = processing_worker.process_video_background(
+        result = processing_service.process_video_background(
             video_bytes=b"fake-video-data",
             filename="test.mp4",
             job_id="job-3",
@@ -204,11 +204,11 @@ class TestProcessingPipeline:
         assert "Embedding Model Error" in result["error"]
 
         # Rollback checks
-        processing_worker.r2_connector.delete_video.assert_called_once_with(hashed_id)
-        processing_worker.pinecone_connector.delete_chunks.assert_not_called()
+        processing_service.r2_connector.delete_video.assert_called_once_with(hashed_id)
+        processing_service.pinecone_connector.delete_chunks.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_rollback_on_partial_pinecone_failure(self, processing_worker):
+    async def test_rollback_on_partial_pinecone_failure(self, processing_service):
         """
         Scenario: 
             - R2 upload succeeds.
@@ -222,7 +222,7 @@ class TestProcessingPipeline:
         """
         # Setup
         hashed_id = "hash-789"
-        processing_worker.r2_connector.upload_video.return_value = (True, hashed_id)
+        processing_service.r2_connector.upload_video.return_value = (True, hashed_id)
         
         chunks = [
             {
@@ -238,18 +238,18 @@ class TestProcessingPipeline:
                 "memory_mb": 1.0
             }
         ]
-        processing_worker.preprocessor.process_video_from_bytes.return_value = chunks
+        processing_service.preprocessor.process_video_from_bytes.return_value = chunks
         
         # Mock embedding to succeed
         mock_embedding = MagicMock()
         mock_embedding.numpy.return_value = [0.1, 0.2]
-        processing_worker.video_embedder._generate_clip_embedding.return_value = mock_embedding
+        processing_service.video_embedder._generate_clip_embedding.return_value = mock_embedding
 
         # Mock Pinecone upsert: First succeeds, Second fails
-        processing_worker.pinecone_connector.upsert_chunk.side_effect = [True, False]
+        processing_service.pinecone_connector.upsert_chunk.side_effect = [True, False]
 
         # Execute
-        result = processing_worker.process_video_background(
+        result = processing_service.process_video_background(
             video_bytes=b"fake-video-data",
             filename="test.mp4",
             job_id="job-4",
@@ -261,16 +261,16 @@ class TestProcessingPipeline:
         assert "Failed to upsert chunk chunk-2" in result["error"]
 
         # Rollback checks
-        processing_worker.r2_connector.delete_video.assert_called_once_with(hashed_id)
+        processing_service.r2_connector.delete_video.assert_called_once_with(hashed_id)
         
         # Should delete the one that succeeded (chunk-1)
-        processing_worker.pinecone_connector.delete_chunks.assert_called_once_with(
+        processing_service.pinecone_connector.delete_chunks.assert_called_once_with(
             ["chunk-1"], 
             namespace="test-ns"
         )
 
     @pytest.mark.asyncio
-    async def test_rollback_best_effort_when_cleanup_fails(self, processing_worker):
+    async def test_rollback_best_effort_when_cleanup_fails(self, processing_service):
         """
         Scenario: 
             - Pipeline fails (triggering rollback).
@@ -280,31 +280,31 @@ class TestProcessingPipeline:
         """
         # Setup failure in pipeline (Partial Pinecone failure to ensure we have chunks to delete)
         hashed_id = "hash-fail-cleanup"
-        processing_worker.r2_connector.upload_video.return_value = (True, hashed_id)
+        processing_service.r2_connector.upload_video.return_value = (True, hashed_id)
         
         chunks = [
             {"chunk_id": "c1", "frames": [], "metadata": {"frame_count": 10, "complexity_score": 0.5}, "memory_mb": 1},
             {"chunk_id": "c2", "frames": [], "metadata": {"frame_count": 10, "complexity_score": 0.5}, "memory_mb": 1}
         ]
-        processing_worker.preprocessor.process_video_from_bytes.return_value = chunks
-        processing_worker.video_embedder._generate_clip_embedding.return_value = MagicMock(numpy=lambda: [0.1])
+        processing_service.preprocessor.process_video_from_bytes.return_value = chunks
+        processing_service.video_embedder._generate_clip_embedding.return_value = MagicMock(numpy=lambda: [0.1])
         
         # Upsert: True, False (Trigger rollback)
-        processing_worker.pinecone_connector.upsert_chunk.side_effect = [True, False]
+        processing_service.pinecone_connector.upsert_chunk.side_effect = [True, False]
         
         # Setup failure in R2 cleanup
-        processing_worker.r2_connector.delete_video.return_value = False
+        processing_service.r2_connector.delete_video.return_value = False
         
         # Execute
-        result = processing_worker.process_video_background(
+        result = processing_service.process_video_background(
             video_bytes=b"data", filename="test.mp4", job_id="job-5", namespace="ns"
         )
             
         # Verify R2 delete was called (and failed)
-        processing_worker.r2_connector.delete_video.assert_called_once_with(hashed_id)
+        processing_service.r2_connector.delete_video.assert_called_once_with(hashed_id)
         
         # Verify Pinecone delete was called DESPITE R2 delete failure
-        processing_worker.pinecone_connector.delete_chunks.assert_called_once_with(["c1"], namespace="ns")
+        processing_service.pinecone_connector.delete_chunks.assert_called_once_with(["c1"], namespace="ns")
         
         # Verify result is still failed
         assert result["status"] == "failed"
@@ -314,7 +314,7 @@ class TestProcessingPipeline:
     # ==========================================================================
 
     @pytest.mark.asyncio
-    async def test_metadata_transformation(self, processing_worker):
+    async def test_metadata_transformation(self, processing_service):
         """
         Scenario: Metadata contains complex types (timestamp_range, file_info) that need flattening.
         Expectation:
@@ -323,7 +323,7 @@ class TestProcessingPipeline:
             - Null values are removed.
         """
         # Setup
-        processing_worker.r2_connector.upload_video.return_value = (True, "hash-meta")
+        processing_service.r2_connector.upload_video.return_value = (True, "hash-meta")
         
         raw_metadata = {
             "frame_count": 10,
@@ -339,17 +339,17 @@ class TestProcessingPipeline:
             "metadata": raw_metadata, 
             "memory_mb": 1.0
         }]
-        processing_worker.preprocessor.process_video_from_bytes.return_value = chunks
+        processing_service.preprocessor.process_video_from_bytes.return_value = chunks
         
         # Mock embedding
-        processing_worker.video_embedder._generate_clip_embedding.return_value = MagicMock(numpy=lambda: [0.1])
-        processing_worker.pinecone_connector.upsert_chunk.return_value = True
+        processing_service.video_embedder._generate_clip_embedding.return_value = MagicMock(numpy=lambda: [0.1])
+        processing_service.pinecone_connector.upsert_chunk.return_value = True
 
         # Execute
-        processing_worker.process_video_background(b"data", "test.mp4", "job-meta", "ns")
+        processing_service.process_video_background(b"data", "test.mp4", "job-meta", "ns")
 
         # Verify Upsert Call Arguments
-        call_args = processing_worker.pinecone_connector.upsert_chunk.call_args
+        call_args = processing_service.pinecone_connector.upsert_chunk.call_args
         upserted_metadata = call_args.kwargs['metadata']
         
         # Check transformations
@@ -366,7 +366,7 @@ class TestProcessingPipeline:
 
 class TestDeletionPipeline:
     """
-    Integration tests for the video deletion pipeline (Server.delete_video_background).
+    Integration tests for the video deletion pipeline (ServerService.delete_video_background).
     """
 
     # ==========================================================================
