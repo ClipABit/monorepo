@@ -7,6 +7,8 @@ import uuid
 import modal
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 
+from shared.config import get_modal_environment
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,8 +97,8 @@ class FastAPIRouter:
         # Spawn to processing app (cross-app call)
         try:
             processing_app_name = f"{self.environment} processing"
-            process_fn = modal.Function.from_name(processing_app_name, "ProcessingWorker.process_video_background")
-            process_fn.spawn(contents, file.filename, job_id, namespace)
+            ProcessingWorker = modal.Cls.from_name(processing_app_name, "ProcessingWorker", environment_name=get_modal_environment())
+            ProcessingWorker().process_video_background.spawn(contents, file.filename, job_id, namespace)
             logger.info(f"[Upload] Spawned processing job {job_id} to {processing_app_name}")
         except Exception as e:
             logger.error(f"[Upload] Failed to spawn processing job: {e}")
@@ -133,8 +135,8 @@ class FastAPIRouter:
 
             # Call search app (cross-app call)
             search_app_name = f"{self.environment} search"
-            search_fn = modal.Function.from_name(search_app_name, "SearchWorker.search")
-            results = search_fn.remote(query, namespace, top_k)
+            SearchWorker = modal.Cls.from_name(search_app_name, "SearchWorker", environment_name=get_modal_environment())
+            results = SearchWorker().search.remote(query, namespace, top_k)
 
             t_done = time.perf_counter()
             logger.info(f"[Search] Found {len(results)} results in {t_done - t_start:.3f}s")

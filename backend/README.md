@@ -24,7 +24,7 @@ uv sync
 uv run modal token new
 
 # 3. Start dev server
-uv run serve-all
+uv run dev
 ```
 
 Note: `uv run` automatically uses the virtual environment - no need to activate it manually.
@@ -33,10 +33,10 @@ Note: `uv run` automatically uses the virtual environment - no need to activate 
 
 | Command | Description |
 |---------|-------------|
-| `uv run serve-all` | Run all 3 apps in one terminal (color-coded logs, Ctrl+C stops all) |
-| `uv run serve-server` | Run just the API server |
-| `uv run serve-search` | Run just the search app |
-| `uv run serve-processing` | Run just the processing app |
+| `uv run dev` | Run all 3 apps in one terminal (color-coded logs, Ctrl+C stops all) |
+| `uv run server` | Run just the API server |
+| `uv run search` | Run just the search app |
+| `uv run processing` | Run just the processing app |
 
 You can also run apps directly with Modal:
 
