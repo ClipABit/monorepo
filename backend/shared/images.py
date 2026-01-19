@@ -31,6 +31,7 @@ def get_server_image() -> modal.Image:
             "models",
             "api",
             "shared",
+            "workers",
         )
     )
 
@@ -55,6 +56,7 @@ def get_search_image() -> modal.Image:
             "database",
             "search",
             "shared",
+            "workers",
         )
     )
 
@@ -86,5 +88,6 @@ def get_processing_image() -> modal.Image:
             "embeddings",
             "models",
             "shared",
+            "workers",
         )
     )

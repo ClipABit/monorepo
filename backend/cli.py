@@ -5,6 +5,10 @@ import subprocess
 import sys
 import threading
 
+# Dev combined app - all services in one for local iteration
+DEV_COMBINED_APP = "apps/dev_combined.py"
+
+# Individual apps for staging/prod deployment
 APPS = {
     "server": ("apps/server.py", "\033[36m"),      # Cyan
     "search": ("apps/search_app.py", "\033[33m"),  # Yellow
@@ -26,64 +30,19 @@ def _prefix_output(process, name, color):
 
 
 def serve_all():
-    """Serve all 3 Modal apps concurrently with color-coded prefixes."""
-    processes = []
-    threads = []
+    """
+    Serve the combined dev app (all services in one).
     
-    def cleanup(signum=None, frame=None):
-        """Handle Ctrl+C - terminate all processes."""
-        print(f"\n{RESET}Shutting down all apps...")
-        
-        # First, try graceful termination
-        for p in processes:
-            try:
-                p.terminate()
-            except OSError:
-                pass
-        
-        # Wait up to 3 seconds for graceful shutdown
-        for p in processes:
-            try:
-                p.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                # Force kill if still running
-                print(f"  Force killing process {p.pid}...")
-                p.kill()
-            except OSError:
-                pass
-        
-        print("Done.")
-        sys.exit(0)
+    For local development, we use dev_combined.py which includes
+    Server, Search, and Processing in a single Modal app.
+    This allows hot-reload on all services without cross-app lookup issues.
+    """
+    print(f"Starting combined dev app (all services in one)...\n")
+    print(f"  \033[32m●{RESET} dev-combined (server + search + processing)\n")
+    print(f"Note: For staging/prod, deploy individual apps separately.\n")
+    print("-" * 60 + "\n")
     
-    signal.signal(signal.SIGINT, cleanup)
-    signal.signal(signal.SIGTERM, cleanup)
-    
-    print("Starting all Modal apps...\n")
-    for name, (path, color) in APPS.items():
-        print(f"  {color}●{RESET} {name}")
-        p = subprocess.Popen(
-            ["modal", "serve", path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-        processes.append(p)
-        
-        # Start a thread to read and prefix output
-        t = threading.Thread(target=_prefix_output, args=(p, name, color), daemon=True)
-        t.start()
-        threads.append(t)
-    
-    print(f"\nAll {len(APPS)} apps running. Press Ctrl+C to stop all.\n")
-    print("-" * 60)
-    
-    # Wait for any process to exit (or Ctrl+C)
-    try:
-        for p in processes:
-            p.wait()
-    except KeyboardInterrupt:
-        cleanup()
+    subprocess.run(["modal", "serve", DEV_COMBINED_APP])
 
 
 def serve_server():

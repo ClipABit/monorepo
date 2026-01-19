@@ -12,6 +12,10 @@ concurrency:
 permissions:
   contents: write
 
+# Note: We deploy the individual apps (server.py, search_app.py, processing_app.py)
+# for optimal cold start performance. The dev_combined.py app is ONLY for local
+# development and should never be deployed to staging/prod.
+
 jobs:
   # ------------------------------------------------------------------
   # STAGING DEPLOYMENT (Runs on push to 'staging')
