@@ -38,15 +38,29 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Deploy to Modal (Staging)
+      - name: Deploy Processing App (Staging)
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-          ENVIRONMENT: staging # for OS
-        run: uv run modal deploy main.py
+          ENVIRONMENT: staging
+        run: uv run modal deploy apps/processing_app.py
+
+      - name: Deploy Search App (Staging)
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ENVIRONMENT: staging
+        run: uv run modal deploy apps/search_app.py
+
+      - name: Deploy Server (Staging)
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ENVIRONMENT: staging
+        run: uv run modal deploy apps/server.py
 
   # ------------------------------------------------------------------
-  # PRODUCTION DEPLOYMENT (Runs only when manually triggered)
+  # PRODUCTION DEPLOYMENT (Runs on push to 'main')
   # ------------------------------------------------------------------
   deploy-prod:
     name: Deploy Production
@@ -69,9 +83,23 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Deploy to Modal (Prod)
+      - name: Deploy Processing App (Prod)
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           ENVIRONMENT: prod
-        run: uv run modal deploy main.py
+        run: uv run modal deploy apps/processing_app.py
+
+      - name: Deploy Search App (Prod)
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ENVIRONMENT: prod
+        run: uv run modal deploy apps/search_app.py
+
+      - name: Deploy Server (Prod)
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ENVIRONMENT: prod
+        run: uv run modal deploy apps/server.py
