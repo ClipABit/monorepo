@@ -1,4 +1,4 @@
 import subprocess
 
 def serve():
-    subprocess.run(["modal", "serve", "main.py"])
+    subprocess.run(["modal", "serve", "apps/server.py"])

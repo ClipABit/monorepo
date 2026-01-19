@@ -3,18 +3,27 @@ __all__ = ["FastAPIRouter"]
 import logging
 import time
 import uuid
+
+import modal
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 
 logger = logging.getLogger(__name__)
 
+
 class FastAPIRouter:
-    def __init__(self, server_instance, is_internal_env):
+    def __init__(self, server_instance, is_internal_env: bool, environment: str = "dev"):
         """
         Initializes the API routes, giving them access to the server instance
         for calling background tasks and accessing shared state.
+        
+        Args:
+            server_instance: The Modal server instance for accessing connectors and spawning local methods
+            is_internal_env: Whether this is an internal (dev/staging) environment
+            environment: Environment name (dev, staging, prod) for cross-app lookups
         """
         self.server_instance = server_instance
         self.is_internal_env = is_internal_env
+        self.environment = environment
         self.router = APIRouter()
         self._register_routes()
 
@@ -83,7 +92,16 @@ class FastAPIRouter:
             "namespace": namespace
         })
 
-        self.server_instance.process_video_background.spawn(contents, file.filename, job_id, namespace)
+        # Spawn to processing app (cross-app call)
+        try:
+            processing_app_name = f"processing-{self.environment}"
+            process_fn = modal.Function.lookup(processing_app_name, "ProcessingWorker.process_video_backgroundi")
+            process_fn.spawn(contents, file.filename, job_id, namespace)
+            logger.info(f"[Upload] Spawned processing job {job_id} to {processing_app_name}")
+        except Exception as e:
+            logger.error(f"[Upload] Failed to spawn processing job: {e}")
+            self.server_instance.job_store.set_job_failed(job_id, f"Failed to start processing: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to start processing: {str(e)}")
 
         return {
             "job_id": job_id,
@@ -113,14 +131,13 @@ class FastAPIRouter:
             t_start = time.perf_counter()
             logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
 
-            results = self.server_instance.searcher.search(
-                query=query,
-                top_k=top_k,
-                namespace=namespace
-            )
+            # Call search app (cross-app call)
+            search_app_name = f"search-{self.environment}"
+            search_fn = modal.Function.lookup(search_app_name, "SearchWorker.search")
+            results = search_fn.remote(query, namespace, top_k)
 
             t_done = time.perf_counter()
-            logger.info(f"[Search] Found {len(results)} chunk-level results in {t_done - t_start:.3f}s")
+            logger.info(f"[Search] Found {len(results)} results in {t_done - t_start:.3f}s")
 
             return {
                 "query": query,
