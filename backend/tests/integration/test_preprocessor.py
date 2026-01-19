@@ -1,12 +1,29 @@
 import pytest
 import numpy as np
 import os
+import shutil
 from preprocessing.preprocessor import Preprocessor
+
+
+# Check if ffmpeg is available on the system
+FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
+FFPROBE_AVAILABLE = shutil.which("ffprobe") is not None
+
+requires_ffmpeg = pytest.mark.skipif(
+    not FFMPEG_AVAILABLE,
+    reason="ffmpeg not installed on this system"
+)
+
+requires_ffprobe = pytest.mark.skipif(
+    not FFPROBE_AVAILABLE,
+    reason="ffprobe not installed on this system"
+)
 
 
 class TestEndToEndProcessing:
     """Test complete preprocessing pipeline."""
 
+    @requires_ffmpeg
     def test_process_video_from_bytes(self, preprocessor, sample_video_bytes):
         """Verify processing from video bytes works."""
         result = preprocessor.process_video_from_bytes(
@@ -206,6 +223,7 @@ class TestMetadataCaching:
 class TestErrorHandling:
     """Test error handling and edge cases."""
 
+    @requires_ffmpeg
     def test_invalid_video_bytes_raises_error(self, preprocessor):
         """Verify invalid video data is handled gracefully."""
         with pytest.raises(RuntimeError):
@@ -235,6 +253,7 @@ class TestErrorHandling:
 class TestCodecSupport:
     """Test codec detection and transcoding capabilities."""
 
+    @requires_ffprobe
     def test_detects_av1_codec(self, preprocessor, sample_video_av1):
         """Verify AV1 codec is correctly identified."""
         # Ensure the file exists
@@ -244,18 +263,21 @@ class TestCodecSupport:
         codec = preprocessor._get_video_codec(str(sample_video_av1))
         assert codec == "av1"
 
+    @requires_ffprobe
     def test_detects_h264_codec(self, preprocessor, sample_video_h264):
         """Verify H.264 codec is correctly identified."""
         assert os.path.exists(sample_video_h264)
         codec = preprocessor._get_video_codec(str(sample_video_h264))
         assert codec == "h264"
 
+    @requires_ffprobe
     def test_detects_vp9_codec(self, preprocessor, sample_video_vp9):
         """Verify VP9 codec is correctly identified."""
         assert os.path.exists(sample_video_vp9)
         codec = preprocessor._get_video_codec(str(sample_video_vp9))
         assert codec == "vp9"
 
+    @requires_ffmpeg
     def test_transcodes_av1_to_h264(self, preprocessor, sample_video_av1):
         """Verify AV1 video is transcoded and processed."""
         with open(sample_video_av1, "rb") as f:
@@ -275,6 +297,7 @@ class TestCodecSupport:
         # Verify chunks have frames
         assert all(len(chunk['frames']) > 0 for chunk in result)
 
+    @requires_ffmpeg
     def test_transcodes_vp9_to_h264(self, preprocessor, sample_video_vp9):
         """Verify VP9 video is transcoded and processed."""
         with open(sample_video_vp9, "rb") as f:
@@ -292,6 +315,7 @@ class TestCodecSupport:
         assert len(result) > 0
         assert all(len(chunk['frames']) > 0 for chunk in result)
 
+    @requires_ffmpeg
     def test_h264_codec_skips_transcoding(self, preprocessor, sample_video_5s):
         """Verify non-AV1 video is processed without transcoding."""
         with open(sample_video_5s, "rb") as f:

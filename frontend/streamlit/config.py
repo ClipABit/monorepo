@@ -31,8 +31,9 @@ class Config:
     url_portion = "" if ENVIRONMENT in ["prod", "staging"] else f"-{ENVIRONMENT}"
 
     # Base URL for single ASGI app exposed via Modal
-    # Pattern: https://clipabit01--{env}-server-asgi-app-{env}.modal.run (dev/staging)
-    BASE_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-asgi-app{url_portion}.modal.run"
+    # Pattern: https://clipabit01--{env}-api-server-asgi-app-{env}.modal.run (dev/staging)
+    # URL structure: {workspace}--{app-name}-{class-name}-asgi-app-{label}.modal.run
+    BASE_API_URL = f"https://clipabit01--{ENVIRONMENT}-api-server-asgi-app{url_portion}.modal.run"
 
     # API Endpoints routed through the single FastAPI app
     SEARCH_API_URL = f"{BASE_API_URL}/search"
