@@ -13,7 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 class FastAPIRouter:
-    def __init__(self, server_instance, is_internal_env: bool, environment: str = "dev"):
+    def __init__(
+        self,
+        server_instance,
+        is_internal_env: bool,
+        environment: str = "dev",
+        search_worker_cls=None,
+        processing_worker_cls=None
+    ):
         """
         Initializes the API routes, giving them access to the server instance
         for calling background tasks and accessing shared state.
@@ -22,10 +29,14 @@ class FastAPIRouter:
             server_instance: The Modal server instance for accessing connectors and spawning local methods
             is_internal_env: Whether this is an internal (dev/staging) environment
             environment: Environment name (dev, staging, prod) for cross-app lookups
+            search_worker_cls: Optional SearchWorker class for dev combined mode (direct access)
+            processing_worker_cls: Optional ProcessingWorker class for dev combined mode (direct access)
         """
         self.server_instance = server_instance
         self.is_internal_env = is_internal_env
         self.environment = environment
+        self.search_worker_cls = search_worker_cls
+        self.processing_worker_cls = processing_worker_cls
         self.router = APIRouter()
         self._register_routes()
 
@@ -94,12 +105,26 @@ class FastAPIRouter:
             "namespace": namespace
         })
 
-        # Spawn to processing app (cross-app call)
+        # Spawn to processing app
         try:
-            processing_app_name = f"{self.environment} processing"
-            ProcessingWorker = modal.Cls.from_name(processing_app_name, "ProcessingWorker", environment_name=get_modal_environment())
-            ProcessingWorker().process_video_background.spawn(contents, file.filename, job_id, namespace)
-            logger.info(f"[Upload] Spawned processing job {job_id} to {processing_app_name}")
+            if self.processing_worker_cls:
+                # Dev combined mode - direct access to worker in same app
+                self.processing_worker_cls().process_video_background.spawn(
+                    contents, file.filename, job_id, namespace
+                )
+                logger.info(f"[Upload] Spawned processing job {job_id} (dev combined mode)")
+            else:
+                # Production mode - cross-app call via from_name
+                processing_app_name = f"{self.environment} processing"
+                ProcessingWorker = modal.Cls.from_name(
+                    processing_app_name,
+                    "ProcessingWorker",
+                    environment_name=get_modal_environment()
+                )
+                ProcessingWorker().process_video_background.spawn(
+                    contents, file.filename, job_id, namespace
+                )
+                logger.info(f"[Upload] Spawned processing job {job_id} to {processing_app_name}")
         except Exception as e:
             logger.error(f"[Upload] Failed to spawn processing job: {e}")
             self.server_instance.job_store.set_job_failed(job_id, f"Failed to start processing: {str(e)}")
@@ -133,10 +158,19 @@ class FastAPIRouter:
             t_start = time.perf_counter()
             logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
 
-            # Call search app (cross-app call)
-            search_app_name = f"{self.environment} search"
-            SearchWorker = modal.Cls.from_name(search_app_name, "SearchWorker", environment_name=get_modal_environment())
-            results = SearchWorker().search.remote(query, namespace, top_k)
+            # Call search app
+            if self.search_worker_cls:
+                # Dev combined mode - direct access to worker in same app
+                results = self.search_worker_cls().search.remote(query, namespace, top_k)
+            else:
+                # Production mode - cross-app call via from_name
+                search_app_name = f"{self.environment} search"
+                SearchWorker = modal.Cls.from_name(
+                    search_app_name,
+                    "SearchWorker",
+                    environment_name=get_modal_environment()
+                )
+                results = SearchWorker().search.remote(query, namespace, top_k)
 
             t_done = time.perf_counter()
             logger.info(f"[Search] Found {len(results)} results in {t_done - t_start:.3f}s")
