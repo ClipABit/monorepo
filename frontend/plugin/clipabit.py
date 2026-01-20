@@ -6,7 +6,7 @@ import hashlib
 import platform
 import json
 import time
-import io
+import traceback
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -14,7 +14,8 @@ from typing import Dict, List, Optional
 try:
     from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                                  QLabel, QPushButton, QMessageBox, QLineEdit,
-                                 QScrollArea, QFrame, QSplitter, QListWidget, QListWidgetItem)
+                                 QScrollArea, QFrame, QSplitter, QListWidget, QListWidgetItem,
+                                 QDialog, QCheckBox)
     from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 except ImportError:
     print("Error: PyQt6 not found. Please run 'pip install PyQt6'")
@@ -33,16 +34,16 @@ class Config:
     SEARCH_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-search{url_portion}.modal.run"
     UPLOAD_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-upload{url_portion}.modal.run"
     STATUS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-status{url_portion}.modal.run"
-    LIST_VIDEOS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-list-videos{url_portion}.modal.run"
+    DELETE_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-delete-video{url_portion}.modal.run"
+    CHECK_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-check-video{url_portion}.modal.run"
     
-    # Namespace - use default namespace for consistency with backend
-    NAMESPACE = "__default__"
     
     # Timeouts and delays
     UPLOAD_TIMEOUT = 300
     STATUS_CHECK_TIMEOUT = 10
     STATUS_CHECK_INTERVAL = 2
     QUEUE_DELAY = 1000  # milliseconds
+    
 
 # --- Background Job Tracker Thread ---
 class JobTracker(QThread):
@@ -81,7 +82,8 @@ class JobTracker(QThread):
                             jobs_to_remove.append(job_id)
                         
                 except Exception as e:
-                    print(f"Error checking job {job_id}: {e}")
+                    error_msg = f"Error checking job {job_id}: {e}\n{traceback.format_exc()}"
+                    print(error_msg)
                     
             # Remove completed/failed jobs
             for job_id in jobs_to_remove:
@@ -96,11 +98,10 @@ class JobTracker(QThread):
 # --- Setup Resolve API ---
 # We use a try-block so this script doesn't crash if you test it outside of Resolve
 try:
-    resolve = app.GetResolve()
+    resolve = app.GetResolve()  # type: ignore  # app is provided by Resolve environment
     project_manager = resolve.GetProjectManager()
     project = project_manager.GetCurrentProject()
     media_pool = project.GetMediaPool()
-    project_timeline = project.GetCurrentTimeline()
 except NameError:
     print("Warning: Resolve API not found. Running in simulation mode (external).")
     resolve, project, media_pool, = None, None, None
@@ -113,7 +114,6 @@ class ClipABitApp(QWidget):
         self.clip_map = {}
         self.processed_files = self._load_processed_files()
         self.current_jobs = {}  # job_id -> job_info
-        self.search_results = []
         
         # Upload queue system
         self.upload_queue = []  # List of files waiting to be uploaded
@@ -128,7 +128,7 @@ class ClipABitApp(QWidget):
         
         # Build clip map and check for new files (only if Resolve is available)
         if resolve:
-            self.clip_map = self._build_clip_map()
+            self.clip_map = self._build_clip_map(debug=False)
             print(f"Found {len(self.clip_map)} clips in media pool")
         else:
             self.clip_map = {}
@@ -139,15 +139,12 @@ class ClipABitApp(QWidget):
         self.resize(800, 600)
         self.init_ui()
         
-        # Setup refresh timer
+        # Setup refresh timer (disabled by default; refresh on demand)
         self.refresh_timer = QTimer()
-        self.refresh_timer.timeout.connect(self._refresh_media_pool)
-        self.refresh_timer.start(5000)  # Refresh every 5 seconds
+        self.refresh_timer.timeout.connect(lambda: self._refresh_media_pool(debug=False))
         
-        # Setup job recovery timer to handle Modal container scaling issues
-        self.job_recovery_timer = QTimer()
-        self.job_recovery_timer.timeout.connect(self._recover_lost_jobs)
-        self.job_recovery_timer.start(30000)  # Check every 30 seconds
+        # Run consistency check on startup
+        self._run_consistency_check("startup")
         
     def init_ui(self):
         # Main layout
@@ -195,16 +192,11 @@ class ClipABitApp(QWidget):
         upload_title = QLabel("<b>Upload Media</b>")
         upload_layout.addWidget(upload_title)
         
-        # Upload buttons
-        self.btn_upload_new = QPushButton("Process New Files")
-        self.btn_upload_new.setMinimumHeight(35)
-        self.btn_upload_new.clicked.connect(lambda: self._upload_files(new_only=True))
-        upload_layout.addWidget(self.btn_upload_new)
-        
-        self.btn_upload_all = QPushButton("Process All Files")
-        self.btn_upload_all.setMinimumHeight(35)
-        self.btn_upload_all.clicked.connect(lambda: self._upload_files(new_only=False))
-        upload_layout.addWidget(self.btn_upload_all)
+        # Upload button
+        self.btn_select_files = QPushButton("Select Files to Upload")
+        self.btn_select_files.setMinimumHeight(35)
+        self.btn_select_files.clicked.connect(self._select_files_to_upload)
+        upload_layout.addWidget(self.btn_select_files)
         
         # Clear queue button
         self.btn_clear_queue = QPushButton("Clear Queue")
@@ -235,6 +227,50 @@ class ClipABitApp(QWidget):
         
         jobs_frame.setLayout(jobs_layout)
         layout.addWidget(jobs_frame)
+        
+        # Debug/Testing section
+        debug_frame = QFrame()
+        debug_frame.setFrameStyle(QFrame.Shape.Box)
+        debug_layout = QVBoxLayout()
+        
+        debug_title = QLabel("<b>Debug Info</b>")
+        debug_layout.addWidget(debug_title)
+        
+        # Storage path
+        storage_path = self._get_storage_path()
+        self.storage_path_label = QLabel(f"Storage: {storage_path}")
+        self.storage_path_label.setWordWrap(True)
+        self.storage_path_label.setStyleSheet("color: gray; font-size: 9px;")
+        debug_layout.addWidget(self.storage_path_label)
+        
+        # Processed files count
+        self.processed_count_label = QLabel("Processed: 0 files")
+        self.processed_count_label.setStyleSheet("color: gray; font-size: 9px;")
+        debug_layout.addWidget(self.processed_count_label)
+        
+        # View processed files button
+        btn_view_processed = QPushButton("View Processed Files")
+        btn_view_processed.setMinimumHeight(25)
+        btn_view_processed.clicked.connect(self._show_processed_files)
+        btn_view_processed.setStyleSheet("font-size: 9px;")
+        debug_layout.addWidget(btn_view_processed)
+
+        # Verify backend button
+        btn_verify_backend = QPushButton("Verify Backend")
+        btn_verify_backend.setMinimumHeight(25)
+        btn_verify_backend.clicked.connect(self._verify_backend_records)
+        btn_verify_backend.setStyleSheet("font-size: 9px; background-color: #6c8cff; color: white;")
+        debug_layout.addWidget(btn_verify_backend)
+        
+        # Clear processed files button
+        btn_clear_processed = QPushButton("Clear Processed Files")
+        btn_clear_processed.setMinimumHeight(25)
+        btn_clear_processed.clicked.connect(self._clear_processed_files)
+        btn_clear_processed.setStyleSheet("font-size: 9px; background-color: #ffaa00; color: white;")
+        debug_layout.addWidget(btn_clear_processed)
+        
+        debug_frame.setLayout(debug_layout)
+        layout.addWidget(debug_frame)
         
         layout.addStretch()
         panel.setLayout(layout)
@@ -292,8 +328,17 @@ class ClipABitApp(QWidget):
         return panel
     def _get_storage_path(self) -> Path:
         """Get path for local storage."""
-        device_path = self._get_device_id_path()
-        return device_path.parent / "processed_files.json"
+        try:
+            script_path = Path(__file__).resolve()
+        except Exception:
+            script_arg = sys.argv[0] if len(sys.argv) > 0 else ""
+            if script_arg:
+                script_path = Path(script_arg)
+                if not script_path.is_absolute():
+                    script_path = (Path.cwd() / script_path).resolve()
+            else:
+                script_path = Path.cwd()
+        return script_path.parent / "processed_files.json"
         
     def _load_processed_files(self) -> Dict[str, Dict]:
         """Load list of processed files from local storage."""
@@ -325,58 +370,21 @@ class ClipABitApp(QWidget):
             return hashlib.md5(content.encode()).hexdigest()
         except Exception:
             return hashlib.md5(filepath.encode()).hexdigest()
+
+    def _get_hashed_identifier(self, filepath: str, namespace: str, filename: str) -> str:
+        """Match backend identifier generation for plugin uploads."""
+        identifier_source = filepath if filepath else f"{namespace}/{filename}"
+        return hashlib.sha256(identifier_source.encode()).hexdigest()
             
-    def _refresh_media_pool(self):
+    def _refresh_media_pool(self, debug: bool = False):
         """Refresh media pool and update file status."""
         if not resolve:
             return
             
-        self.clip_map = self._build_clip_map()
+        self.clip_map = self._build_clip_map(debug=debug)
+        if debug:
+            print(f"[MediaPool] Refreshed clip map: {len(self.clip_map)} unique filenames")
         self._update_file_status()
-        
-    def _recover_lost_jobs(self):
-        """Recover jobs that may have completed but were lost due to Modal container scaling."""
-        if not self.current_jobs:
-            return  # No jobs to recover
-            
-        print(f"🔄 Checking {len(self.current_jobs)} active jobs for recovery...")
-        
-        jobs_to_recover = []
-        for job_id, job_info in self.current_jobs.items():
-            # Skip temporary queue jobs
-            if job_info.get('temp_job'):
-                continue
-                
-            filename = job_info['filename']
-            
-            # Check if this file now exists in backend (meaning job completed but we lost tracking)
-            if self._check_if_file_exists_in_backend(filename):
-                jobs_to_recover.append((job_id, job_info))
-                
-        # Recover found jobs
-        for job_id, job_info in jobs_to_recover:
-            filename = job_info['filename']
-            file_hash = job_info['file_hash']
-            
-            print(f"🔄 Recovering lost job: {filename}")
-            
-            # Mark as processed
-            self.processed_files[file_hash] = {
-                'filename': filename,
-                'job_id': job_id,
-                'processed_at': time.time(),
-                'result': {'status': 'recovered_lost_job', 'recovered_at': time.time()}
-            }
-            self._save_processed_files()
-            
-            # Remove from current jobs
-            del self.current_jobs[job_id]
-            
-        if jobs_to_recover:
-            self._update_jobs_display()
-            self._update_file_status()
-            self.status_label.setText(f"Recovered {len(jobs_to_recover)} lost jobs")
-            print(f"✅ Recovered {len(jobs_to_recover)} lost jobs")
         
     def _clear_upload_queue(self):
         """Clear the upload queue."""
@@ -451,87 +459,167 @@ class ClipABitApp(QWidget):
         status_text = ", ".join(status_parts)
         self.file_status_label.setText(status_text)
         
+        # Update processed files count in debug section
+        if hasattr(self, 'processed_count_label'):
+            total_processed = len(self.processed_files)
+            self.processed_count_label.setText(f"Processed: {total_processed} files")
+        
         # Update button states - disable during upload
-        self.btn_upload_new.setEnabled(new_count > 0 and not self.is_uploading)
-        self.btn_upload_all.setEnabled(total_files > 0 and not self.is_uploading)
+        self.btn_select_files.setEnabled(not self.is_uploading)
         self.btn_clear_queue.setEnabled(queued_count > 0 or self.is_uploading)
         
-    def _upload_files(self, new_only: bool = True):
-        """Upload files to backend using queue system."""
+    def _select_files_to_upload(self):
+        """Select media pool clips and add them to the upload queue."""
         if not resolve:
-            QMessageBox.warning(self, "Error", "Resolve API not available.")
+            QMessageBox.warning(self, "Resolve Not Available", "Resolve API is not available. Media pool selection is disabled.")
             return
-            
+
+        # Refresh media pool so we show the latest clips
+        self._refresh_media_pool(debug=False)
+
         files_to_upload = []
-        
-        for filename, clip_info in self.clip_map.items():
-            clips = clip_info if isinstance(clip_info, list) else [clip_info]
-            
-            for clip in clips:
-                filepath = clip.get('filepath')
-                if not filepath or not os.path.exists(filepath):
-                    continue
-                    
-                file_hash = self._get_file_hash(filepath)
-                
-                if new_only and file_hash in self.processed_files:
-                    continue  # Skip already processed files
-                
-                # ALSO check if file is currently being processed
-                if self._is_file_being_processed(file_hash):
-                    print(f"Skipping {filename} - already in processing queue")
-                    continue
-                
-                # ALSO check if file already exists in backend (in case local tracking failed)
-                if new_only and self._check_if_file_exists_in_backend(filename):
-                    print(f"Skipping {filename} - already exists in backend")
-                    # Mark it as processed locally so we don't check again
-                    self.processed_files[file_hash] = {
-                        'filename': filename,
-                        'job_id': 'backend_existing',
-                        'processed_at': time.time(),
-                        'result': {'status': 'found_in_backend'}
-                    }
-                    self._save_processed_files()
-                    continue
-                    
-                files_to_upload.append({
-                    'filepath': filepath,
-                    'filename': filename,
-                    'hash': file_hash,
-                    'clip_info': clip
-                })
-        
+        skipped_processed = 0
+        skipped_queued = 0
+        skipped_missing = 0
+        seen_paths = set()
+
+        def collect_candidate(entry):
+            nonlocal skipped_processed, skipped_queued, skipped_missing
+            filepath = entry.get('filepath')
+            if not filepath:
+                skipped_missing += 1
+                return
+            if filepath in seen_paths:
+                return
+            seen_paths.add(filepath)
+
+            if not os.path.exists(filepath):
+                skipped_missing += 1
+                return
+
+            filename = os.path.basename(filepath)
+            file_hash = self._get_file_hash(filepath)
+
+            if file_hash in self.processed_files:
+                skipped_processed += 1
+                return
+
+            if self._is_file_being_processed(file_hash):
+                skipped_queued += 1
+                return
+
+            files_to_upload.append({
+                'filepath': filepath,
+                'filename': filename,
+                'hash': file_hash
+            })
+
+        for _, clip_info in self.clip_map.items():
+            if isinstance(clip_info, list):
+                for entry in clip_info:
+                    collect_candidate(entry)
+            else:
+                collect_candidate(clip_info)
+
         if not files_to_upload:
-            msg = "No new files to upload" if new_only else "No files to upload"
-            QMessageBox.information(self, "Info", msg)
+            QMessageBox.information(
+                self,
+                "Info",
+                f"No eligible media pool clips to upload.\nProcessed: {skipped_processed}, In queue: {skipped_queued}, Missing path: {skipped_missing}"
+            )
             return
-            
+
+        # Build selection dialog from media pool candidates
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select Media Pool Clips")
+        dialog.resize(700, 500)
+        dialog.setModal(True)
+
+        layout = QVBoxLayout()
+        header = QLabel(f"<b>Select clips to upload ({len(files_to_upload)} available)</b>")
+        layout.addWidget(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout()
+
+        checkboxes = []
+        for entry in files_to_upload:
+            filename = entry.get('filename', 'Unknown')
+            filepath = entry.get('filepath', '')
+            checkbox = QCheckBox(f"{filename}\n{filepath}")
+            checkbox.setChecked(False)
+            checkbox.setToolTip(filepath)
+            checkbox.setStyleSheet("font-size: 11px;")
+            scroll_layout.addWidget(checkbox)
+            checkboxes.append((checkbox, entry))
+
+        scroll_layout.addStretch()
+        scroll_widget.setLayout(scroll_layout)
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll)
+
+        # Buttons
+        button_row = QHBoxLayout()
+        btn_select_all = QPushButton("Select All")
+        btn_select_none = QPushButton("Select None")
+        btn_cancel = QPushButton("Cancel")
+        btn_add = QPushButton("Add Selected")
+
+        def set_all(state: bool):
+            for cb, _ in checkboxes:
+                cb.setChecked(state)
+
+        btn_select_all.clicked.connect(lambda: set_all(True))
+        btn_select_none.clicked.connect(lambda: set_all(False))
+        btn_cancel.clicked.connect(dialog.reject)
+        btn_add.clicked.connect(dialog.accept)
+
+        button_row.addWidget(btn_select_all)
+        button_row.addWidget(btn_select_none)
+        button_row.addStretch()
+        button_row.addWidget(btn_cancel)
+        button_row.addWidget(btn_add)
+
+        layout.addLayout(button_row)
+        dialog.setLayout(layout)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        selected_files = [entry for cb, entry in checkboxes if cb.isChecked()]
+
+        if not selected_files:
+            QMessageBox.information(self, "Info", "No clips selected for upload.")
+            return
+
         # Add files to upload queue
-        self.upload_queue.extend(files_to_upload)
-        
-        # IMMEDIATELY add all files to jobs display with "queued" status
-        for file_info in files_to_upload:
-            # Create a temporary job ID for display purposes
+        self.upload_queue.extend(selected_files)
+
+        # Create temporary job entries for UI
+        for file_info in selected_files:
             temp_job_id = f"queued_{file_info['hash'][:8]}"
             self.current_jobs[temp_job_id] = {
                 'filename': file_info['filename'],
                 'filepath': file_info['filepath'],
                 'file_hash': file_info['hash'],
                 'status': 'queued',
-                'temp_job': True  # Mark as temporary for queue display
+                'temp_job': True
             }
-        
-        # Update jobs display immediately
+
         self._update_jobs_display()
-        
-        # Update status
-        total_queued = len(self.upload_queue)
-        self.status_label.setText(f"Added {len(files_to_upload)} files to upload queue ({total_queued} total)")
-        
-        # Start processing queue if not already uploading
+        self._update_file_status()
+
+        # Start processing queue
         if not self.is_uploading:
             self._process_upload_queue()
+
+        QMessageBox.information(
+            self,
+            "Queued",
+            f"Added {len(selected_files)} file(s) to upload queue.\nSkipped processed: {skipped_processed}, in queue: {skipped_queued}, missing: {skipped_missing}"
+        )
             
     def _is_file_being_processed(self, file_hash: str) -> bool:
         """Check if file is currently being processed."""
@@ -547,32 +635,144 @@ class ClipABitApp(QWidget):
                 
         return False
         
-    def _check_if_file_exists_in_backend(self, filename: str) -> bool:
-        """Check if file already exists in backend by searching for it."""
+    def _check_if_file_exists_in_backend(self, filename: str, namespace: Optional[str] = None, hashed_identifier: Optional[str] = None) -> bool:
+        """Check if file exists in backend by hashed identifier."""
         try:
-            # Search for the exact filename in the backend with longer timeout for cold starts
-            params = {"query": filename, "namespace": Config.NAMESPACE}
-            response = requests.get(Config.SEARCH_API_URL, params=params, timeout=30)
+            # Build namespace from user_id and project_name (same as upload/search)
+            if namespace is None:
+                user_id = self.get_or_create_device_id()
+                project_name = self.get_project_name() or "default"
+                user_id_safe = user_id.lower().replace(" ", "_")
+                project_safe = project_name.lower().replace(" ", "_")
+                namespace = f"{user_id_safe}-{project_safe}"
             
-            if response.status_code == 200:
-                result = response.json()
-                results = result.get("results", [])
-                
-                # Check if any result matches this exact filename
-                for result in results:
-                    metadata = result.get('metadata', {})
-                    backend_filename = metadata.get('file_filename', '')
-                    if backend_filename == filename:
-                        print(f"File {filename} already exists in backend (found {len(results)} total results)")
-                        return True
-                        
-            return False
-        except requests.exceptions.Timeout:
-            print(f"Timeout checking backend for file {filename} - assuming it doesn't exist")
-            return False  # If timeout, assume it doesn't exist to avoid blocking uploads
+            if not hashed_identifier:
+                return False
+
+            count = self._get_backend_vector_count(hashed_identifier, namespace, filename=filename)
+            if count is None:
+                return False
+            return count > 0
         except Exception as e:
             print(f"Error checking backend for file {filename}: {e}")
             return False  # If we can't check, assume it doesn't exist
+
+    def _get_backend_vector_count(self, hashed_identifier: str, namespace: str, filename: Optional[str] = None) -> Optional[int]:
+        """Return vector count for a file by hashed identifier, or None on failure."""
+        if not hashed_identifier:
+            return 0
+
+        try:
+            params = {"hashed_identifier": hashed_identifier, "namespace": namespace}
+            response = requests.get(Config.CHECK_API_URL, params=params, timeout=20)
+            if response.status_code == 200:
+                result = response.json()
+                count = result.get("vector_count")
+                if count is None:
+                    return None
+                return int(count)
+
+            name = filename or hashed_identifier[:8]
+            print(f"Check endpoint failed for {name}: HTTP {response.status_code} {response.text}")
+            return None
+        except Exception as e:
+            name = filename or hashed_identifier[:8]
+            print(f"Error checking backend count for {name}: {e}")
+            return None
+
+    def _delete_backend_entry(self, filename: str, hashed_identifier: str, namespace: str):
+        """Request backend deletion for a file's Pinecone data."""
+        try:
+            params = {
+                "hashed_identifier": hashed_identifier,
+                "filename": filename,
+                "namespace": namespace
+            }
+            response = requests.delete(Config.DELETE_API_URL, params=params, timeout=15)
+            if response.status_code != 200:
+                print(f"Delete failed for {filename}: HTTP {response.status_code} {response.text}")
+            else:
+                print(f"Requested backend deletion for {filename}")
+        except Exception as e:
+            print(f"Error requesting deletion for {filename}: {e}")
+
+    def _run_consistency_check(self, reason: str):
+        """Sync local tracking with backend and remove dangling entries."""
+        if not self.processed_files:
+            return {"checked": 0, "removed": 0, "updated": 0}
+
+        removed_count = 0
+        checked_count = 0
+        updated_count = 0
+        now = time.time()
+
+        for file_hash, info in list(self.processed_files.items()):
+            filename = info.get("filename", "")
+            filepath = info.get("filepath", "")
+            namespace = info.get("namespace")
+            expected_count = info.get("expected_vector_count")
+
+            if not namespace:
+                user_id = self.get_or_create_device_id()
+                project_name = self.get_project_name() or "default"
+                user_id_safe = user_id.lower().replace(" ", "_")
+                project_safe = project_name.lower().replace(" ", "_")
+                namespace = f"{user_id_safe}-{project_safe}"
+
+            hashed_identifier = info.get("hashed_identifier") or self._get_hashed_identifier(filepath, namespace, filename)
+
+            checked_count += 1
+
+            if filepath and not os.path.exists(filepath):
+                print(f"[Consistency] Missing local file: {filename}. Deleting from backend.")
+                self._delete_backend_entry(filename, hashed_identifier, namespace)
+                del self.processed_files[file_hash]
+                removed_count += 1
+                continue
+
+            if filename:
+                count = self._get_backend_vector_count(hashed_identifier, namespace, filename=filename)
+                if count is None:
+                    # Skip update if backend check failed
+                    continue
+
+                info['last_backend_check'] = now
+                info['vector_count'] = count
+                updated_count += 1
+
+                if count <= 0:
+                    print(f"[Consistency] Backend missing for: {filename}. Removing local record.")
+                    del self.processed_files[file_hash]
+                    removed_count += 1
+                elif expected_count is not None and count != expected_count:
+                    print(
+                        f"[Consistency] Vector count mismatch for {filename}: "
+                        f"expected {expected_count}, found {count}. Keeping local record."
+                    )
+
+        if removed_count > 0 or updated_count > 0:
+            self._save_processed_files()
+            self._update_file_status()
+
+        if checked_count > 0:
+            print(f"[Consistency] {reason}: checked {checked_count}, removed {removed_count}, updated {updated_count}")
+        return {"checked": checked_count, "removed": removed_count, "updated": updated_count}
+
+    def _verify_backend_records(self):
+        """Manually verify backend vector counts for processed files."""
+        if not self.processed_files:
+            QMessageBox.information(self, "Verify Backend", "No processed files to verify.")
+            return
+
+        self.status_label.setText("Verifying backend records (forced)...")
+        result = self._run_consistency_check("manual_verify")
+        self._update_file_status()
+
+        QMessageBox.information(
+            self,
+            "Verify Backend",
+            f"Verification complete.\nChecked: {result.get('checked', 0)}\nUpdated: {result.get('updated', 0)}\nRemoved: {result.get('removed', 0)}"
+        )
             
     def _process_upload_queue(self):
         """Process the next file in the upload queue."""
@@ -595,41 +795,72 @@ class ClipABitApp(QWidget):
         filename = file_info['filename']
         self.status_label.setText(f"Uploading: {filename} ({remaining} remaining in queue)")
         
-        # Use configured namespace
-        namespace = Config.NAMESPACE
+        # Build namespace from user_id and project_name
+        user_id = self.get_or_create_device_id()
+        project_name = self.get_project_name() or "default"
+        
+        # Simple namespace format: user_id-project_name (sanitized)
+        user_id_safe = user_id.lower().replace(" ", "_")
+        project_safe = project_name.lower().replace(" ", "_")
+        namespace = f"{user_id_safe}-{project_safe}"
         
         # Upload the file
         self._upload_single_file(file_info, namespace)
             
-    def _upload_single_file(self, file_info: Dict, namespace: str):
-        """Upload a single file to the backend."""
+    def _upload_single_file(self, file_info: Dict, namespace: str, retry_count: int = 0, max_retries: int = 3):
+        """Upload a single file to the backend with retry logic."""
         filepath = file_info['filepath']
         filename = file_info['filename']
         file_hash = file_info['hash']
         
-        # Remove the temporary "queued" job entry
-        temp_job_id = f"queued_{file_hash[:8]}"
-        if temp_job_id in self.current_jobs:
-            del self.current_jobs[temp_job_id]
-        
         try:
-            # Read file
-            with open(filepath, 'rb') as f:
-                file_bytes = f.read()
+            if retry_count > 0:
+                print(f"[Upload] Retry attempt {retry_count}/{max_retries} for {filename}")
+            else:
+                print(f"[Upload] Starting upload for {filename}")
+            print(f"[Upload] File path: {filepath}")
+            print(f"[Upload] Namespace: {namespace}")
+            
+            # Get file size first
+            file_size = os.path.getsize(filepath)
+            file_size_mb = file_size / (1024 * 1024)
+            print(f"[Upload] File size: {file_size_mb:.2f} MB")
                 
-            # Upload to backend
-            files = {"file": (filename, io.BytesIO(file_bytes), "video/mp4")}
-            data = {"namespace": namespace}
+            # Upload to backend - use file object directly for streaming
+            # This is more memory efficient and may help with connection stability
+            with open(filepath, 'rb') as f:
+                files = {"file": (filename, f, "video/mp4")}
+                data = {"namespace": namespace, "original_filepath": filepath}
+                
+                self.status_label.setText(f"Uploading {filename}... (attempt {retry_count + 1})")
+                print(f"[Upload] Sending POST request to {Config.UPLOAD_API_URL}")
+                
+                # Use a session for better connection management
+                session = requests.Session()
+                # Increase timeout for larger files (calculate based on file size)
+                # Allow at least 1 minute per MB, minimum 60 seconds, max 10 minutes
+                upload_timeout = min(600, max(60, int(file_size_mb * 60)))
+                print(f"[Upload] Using timeout: {upload_timeout} seconds")
+                
+                response = session.post(
+                    Config.UPLOAD_API_URL, 
+                    files=files, 
+                    data=data, 
+                    timeout=upload_timeout,
+                    stream=False  # Don't stream response, we need the full response
+                )
             
-            self.status_label.setText(f"Uploading {filename}...")
-            
-            response = requests.post(Config.UPLOAD_API_URL, files=files, data=data, timeout=Config.UPLOAD_TIMEOUT)
+            print(f"[Upload] Response status: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
                 job_id = result.get("job_id")
                 
                 if job_id:
+                    print(f"[Upload] ✅ Upload successful, job_id: {job_id}")
+                    temp_job_id = f"queued_{file_hash[:8]}"
+                    if temp_job_id in self.current_jobs:
+                        del self.current_jobs[temp_job_id]
                     # Replace temp job with real job
                     job_info = {
                         'filename': filename,
@@ -645,16 +876,91 @@ class ClipABitApp(QWidget):
                     
                     self.status_label.setText(f"Upload started: {filename}")
                 else:
-                    QMessageBox.warning(self, "Error", f"Upload failed for {filename}: No job ID returned")
+                    error_msg = f"Upload failed for {filename}: No job ID returned. Response: {result}"
+                    print(f"[Upload] ❌ {error_msg}")
+                    QMessageBox.warning(self, "Error", error_msg)
                     # Continue with next upload even if this one failed
                     self._on_upload_completed(False)
             else:
-                QMessageBox.warning(self, "Error", f"Upload failed for {filename}: {response.status_code}")
+                error_msg = f"Upload failed for {filename}: HTTP {response.status_code}\n{response.text}"
+                print(f"[Upload] ❌ {error_msg}")
+                QMessageBox.warning(self, "Error", error_msg)
+                temp_job_id = f"queued_{file_hash[:8]}"
+                if temp_job_id in self.current_jobs:
+                    del self.current_jobs[temp_job_id]
                 # Continue with next upload even if this one failed
                 self._on_upload_completed(False)
                 
+        except (requests.exceptions.ConnectionError, requests.exceptions.ProtocolError) as e:
+            # Retry connection errors with exponential backoff
+            if retry_count < max_retries:
+                wait_time = (2 ** retry_count) * 2  # 2, 4, 8 seconds
+                error_msg = f"Connection error uploading {filename} (attempt {retry_count + 1}/{max_retries + 1}): {str(e)}"
+                print(f"[Upload] ⚠️ {error_msg}")
+                print(f"[Upload] Retrying in {wait_time} seconds...")
+                self.status_label.setText(f"Connection error, retrying in {wait_time}s...")
+                
+                # Wait before retry
+                time.sleep(wait_time)
+                
+                # Retry the upload
+                self._upload_single_file(file_info, namespace, retry_count + 1, max_retries)
+            else:
+                error_msg = f"Connection error uploading {filename} after {max_retries + 1} attempts: {str(e)}"
+                print(f"[Upload] ❌ {error_msg}")
+                print(traceback.format_exc())
+                temp_job_id = f"queued_{file_hash[:8]}"
+                if temp_job_id in self.current_jobs:
+                    del self.current_jobs[temp_job_id]
+                QMessageBox.critical(self, "Network Error", f"{error_msg}\n\nPlease check your internet connection and try again.")
+                self._on_upload_completed(False)
+        except requests.exceptions.Timeout as e:
+            # Retry timeout errors too
+            if retry_count < max_retries:
+                wait_time = (2 ** retry_count) * 2
+                error_msg = f"Upload timeout for {filename} (attempt {retry_count + 1}/{max_retries + 1})"
+                print(f"[Upload] ⚠️ {error_msg}")
+                print(f"[Upload] Retrying in {wait_time} seconds...")
+                self.status_label.setText(f"Timeout, retrying in {wait_time}s...")
+                
+                time.sleep(wait_time)
+                
+                self._upload_single_file(file_info, namespace, retry_count + 1, max_retries)
+            else:
+                error_msg = f"Upload timeout for {filename} after {max_retries + 1} attempts: {str(e)}"
+                print(f"[Upload] ❌ {error_msg}")
+                print(traceback.format_exc())
+                temp_job_id = f"queued_{file_hash[:8]}"
+                if temp_job_id in self.current_jobs:
+                    del self.current_jobs[temp_job_id]
+                QMessageBox.critical(self, "Upload Timeout", f"{error_msg}\n\nFile may be too large or connection too slow.")
+                self._on_upload_completed(False)
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Network error uploading {filename}: {str(e)}"
+            print(f"[Upload] ❌ {error_msg}")
+            print(traceback.format_exc())
+            temp_job_id = f"queued_{file_hash[:8]}"
+            if temp_job_id in self.current_jobs:
+                del self.current_jobs[temp_job_id]
+            QMessageBox.critical(self, "Network Error", error_msg)
+            self._on_upload_completed(False)
+        except FileNotFoundError as e:
+            error_msg = f"File not found: {filepath}\n{str(e)}"
+            print(f"[Upload] ❌ {error_msg}")
+            print(traceback.format_exc())
+            temp_job_id = f"queued_{file_hash[:8]}"
+            if temp_job_id in self.current_jobs:
+                del self.current_jobs[temp_job_id]
+            QMessageBox.critical(self, "File Error", error_msg)
+            self._on_upload_completed(False)
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to upload {filename}: {str(e)}")
+            error_msg = f"Failed to upload {filename}: {str(e)}"
+            print(f"[Upload] ❌ {error_msg}")
+            print(traceback.format_exc())
+            temp_job_id = f"queued_{file_hash[:8]}"
+            if temp_job_id in self.current_jobs:
+                del self.current_jobs[temp_job_id]
+            QMessageBox.critical(self, "Error", error_msg)
             self._on_upload_completed(False)
             
     def _on_job_completed(self, job_id: str, result: dict):
@@ -662,14 +968,30 @@ class ClipABitApp(QWidget):
         if job_id in self.current_jobs:
             job_info = self.current_jobs[job_id]
             filename = job_info['filename']
+            filepath = job_info['filepath']
             file_hash = job_info['file_hash']
+            namespace = job_info['namespace']
+            hashed_identifier = self._get_hashed_identifier(filepath, namespace, filename)
+            expected_vectors = None
+            try:
+                if isinstance(result, dict) and result.get("chunks") is not None:
+                    expected_vectors = int(result.get("chunks"))
+            except (TypeError, ValueError):
+                expected_vectors = None
             
-            # Mark file as processed
+            # Mark file as processed (keep existing tracking)
             self.processed_files[file_hash] = {
                 'filename': filename,
+                'filepath': filepath,
                 'job_id': job_id,
+                'namespace': namespace,
+                'hashed_identifier': hashed_identifier,
                 'processed_at': time.time(),
-                'result': result
+                'result': result,
+                'backend_miss_count': 0,
+                'last_backend_check': None,
+                'expected_vector_count': expected_vectors,
+                'vector_count': expected_vectors
             }
             self._save_processed_files()
             
@@ -683,6 +1005,7 @@ class ClipABitApp(QWidget):
             
             # Continue with next upload in queue
             self._on_upload_completed(True)
+            # Skip immediate consistency check; backend counts can lag right after upload
             
     def _on_job_failed(self, job_id: str, error: str):
         """Handle job failure."""
@@ -695,13 +1018,21 @@ class ClipABitApp(QWidget):
             
             # Before marking as failed, check if file actually exists in backend
             # (in case job tracking failed but processing succeeded)
-            if self._check_if_file_exists_in_backend(filename):
+            namespace = job_info.get('namespace')
+            if self._check_if_file_exists_in_backend(
+                filename,
+                namespace=namespace,
+                hashed_identifier=self._get_hashed_identifier(job_info.get('filepath', ''), namespace or "", filename)
+            ):
                 print(f"🔄 Job failed but file {filename} found in backend - marking as completed")
                 
                 # Mark as processed since it's actually in the backend
                 self.processed_files[file_hash] = {
                     'filename': filename,
+                    'filepath': job_info.get('filepath', ''),
                     'job_id': job_id,
+                    'namespace': namespace,
+                    'hashed_identifier': self._get_hashed_identifier(job_info.get('filepath', ''), namespace or "", filename),
                     'processed_at': time.time(),
                     'result': {'status': 'recovered_from_backend', 'error': error}
                 }
@@ -771,8 +1102,12 @@ class ClipABitApp(QWidget):
             QMessageBox.warning(self, "Error", "Please enter a search query")
             return
             
-        # Use configured namespace
-        namespace = Config.NAMESPACE
+        # Build namespace from user_id and project_name (same as upload)
+        user_id = self.get_or_create_device_id()
+        project_name = self.get_project_name() or "default"
+        user_id_safe = user_id.lower().replace(" ", "_")
+        project_safe = project_name.lower().replace(" ", "_")
+        namespace = f"{user_id_safe}-{project_safe}"
         
         self.status_label.setText(f"Searching for: {query}")
         self.btn_search.setEnabled(False)
@@ -863,52 +1198,234 @@ class ClipABitApp(QWidget):
         if not resolve:
             QMessageBox.warning(self, "Error", "Resolve API not available.")
             return
+        
+        # Refresh media pool to ensure we have latest clips
+        self._refresh_media_pool(debug=True)
+        print(f"[Timeline] clip_map entries: {len(self.clip_map)}")
             
+        def _normalize_path(path_value: Optional[str]) -> Optional[str]:
+            if not path_value:
+                return None
+            try:
+                return os.path.normcase(os.path.normpath(path_value))
+            except Exception:
+                return path_value
+
         metadata = result.get('metadata', {})
         filename = metadata.get('file_filename', 'Unknown')
+        file_path = metadata.get('file_path')
+        normalized_file_path = _normalize_path(file_path)
+        print(f"[Timeline] Target filename: {filename}")
+        print(f"[Timeline] Target file_path: {file_path}")
         start_time = metadata.get('start_time_s', 0)
         end_time = metadata.get('end_time_s', 0)
+
+        # Validate time range
+        try:
+            if float(end_time) <= float(start_time):
+                QMessageBox.warning(self, "Error", f"Invalid time range for {filename}: {start_time} - {end_time}")
+                return
+        except Exception:
+            QMessageBox.warning(self, "Error", f"Invalid time range metadata for {filename}.")
+            return
         
         # Find the clip in media pool
         matching_clip = None
-        for clip_filename, clip_info in self.clip_map.items():
-            if filename in clip_filename or clip_filename in filename:
+        matching_clip_info = None
+        if normalized_file_path:
+            for _, clip_info in self.clip_map.items():
                 if isinstance(clip_info, list):
-                    matching_clip = clip_info[0]['media_pool_item']
+                    for entry in clip_info:
+                        if _normalize_path(entry.get('filepath')) == normalized_file_path:
+                            matching_clip_info = entry
+                            matching_clip = entry.get('media_pool_item')
+                            break
                 else:
-                    matching_clip = clip_info['media_pool_item']
-                break
+                    if _normalize_path(clip_info.get('filepath')) == normalized_file_path:
+                        matching_clip_info = clip_info
+                        matching_clip = clip_info.get('media_pool_item')
+                if matching_clip:
+                    break
+
+        if not matching_clip:
+            filename_lower = filename.lower()
+            for clip_filename, clip_info in self.clip_map.items():
+                clip_filename_lower = clip_filename.lower()
+                if filename_lower in clip_filename_lower or clip_filename_lower in filename_lower:
+                    matching_clip_info = clip_info
+                    if isinstance(clip_info, list):
+                        matching_clip = clip_info[0]['media_pool_item']
+                    else:
+                        matching_clip = clip_info['media_pool_item']
+                    break
                 
         if not matching_clip:
+            # Debug logging to diagnose mismatches
+            print("[Timeline] Failed to match clip in media pool")
+            print(f"[Timeline] Result filename: {filename}")
+            print(f"[Timeline] Result file_path: {file_path}")
+            sample_paths = []
+            total_paths = 0
+            for _, clip_info in self.clip_map.items():
+                if isinstance(clip_info, list):
+                    for entry in clip_info:
+                        path = entry.get('filepath')
+                        if path:
+                            total_paths += 1
+                            if len(sample_paths) < 5:
+                                sample_paths.append(path)
+                else:
+                    path = clip_info.get('filepath')
+                    if path:
+                        total_paths += 1
+                        if len(sample_paths) < 5:
+                            sample_paths.append(path)
+            print(f"[Timeline] Media pool file paths: {total_paths} total")
+            for p in sample_paths:
+                print(f"[Timeline] Sample path: {p}")
             QMessageBox.warning(self, "Error", f"Could not find {filename} in media pool")
             return
+
+        try:
+            clip_name = matching_clip.GetName()
+        except Exception:
+            clip_name = None
+        print(f"[Timeline] Matched clip: {clip_name or '<unnamed>'}")
             
         # Ensure timeline exists
         if not self._ensure_timeline():
             return
+        try:
+            timeline = project.GetCurrentTimeline()
+            if timeline:
+                project.SetCurrentTimeline(timeline)
+            resolve.OpenPage("edit")
+        except Exception:
+            pass
             
-        # Convert seconds to frames (assuming 24fps, should get from clip)
-        fps = 24  # Default fallback
-        if isinstance(clip_info, dict):
-            fps = clip_info.get('fps', 24) or 24
-        elif isinstance(clip_info, list) and clip_info:
-            fps = clip_info[0].get('fps', 24) or 24
-            
-        start_frame = int(start_time * fps)
-        end_frame = int(end_time * fps)
-        
+        def _count_timeline_items(tl) -> Optional[int]:
+            try:
+                total = 0
+                track_count = tl.GetTrackCount("video")
+                for i in range(1, int(track_count) + 1):
+                    items = tl.GetItemListInTrack("video", i) or []
+                    total += len(items)
+                return total
+            except Exception:
+                return None
+
         # Add to timeline
         try:
-            result = media_pool.AppendToTimeline([{
+            # Ensure current folder is the root (some Resolve versions require it)
+            try:
+                root_folder = media_pool.GetRootFolder()
+                if root_folder:
+                    media_pool.SetCurrentFolder(root_folder)
+            except Exception:
+                pass
+
+            # Determine clip length (frames) and fps
+            clip_frames = None
+            if matching_clip_info:
+                for key in ("Frames", "Frame Count", "Duration"):
+                    try:
+                        val = matching_clip_info["media_pool_item"].GetClipProperty(key)
+                        if val:
+                            clip_frames = int(float(val))
+                            break
+                    except Exception:
+                        pass
+            if clip_frames is None:
+                clip_frames = 1000
+
+            fps = 24.0
+            if isinstance(matching_clip_info, dict):
+                fps = matching_clip_info.get("fps") or 24.0
+            elif isinstance(matching_clip_info, list) and matching_clip_info:
+                fps = matching_clip_info[0].get("fps") or 24.0
+
+            start_frame = int(float(start_time) * float(fps))
+            end_frame = int(float(end_time) * float(fps))
+            start_frame = max(0, min(start_frame, clip_frames))
+            end_frame = max(0, min(end_frame, clip_frames))
+            if end_frame <= start_frame:
+                end_frame = start_frame + 1
+
+            print(f"[Timeline] Using fps={fps}, start_frame={start_frame}, end_frame={end_frame}, clip_frames={clip_frames}")
+
+            # Ensure at least one video/audio track exists (AppendToTimeline can fail on empty timelines)
+            try:
+                if timeline and int(timeline.GetTrackCount("video") or 0) == 0:
+                    timeline.AddTrack("video")
+                    print("[Timeline] Added missing video track 1.")
+                if timeline and int(timeline.GetTrackCount("audio") or 0) == 0:
+                    timeline.AddTrack("audio")
+                    print("[Timeline] Added missing audio track 1.")
+            except Exception as e:
+                print(f"[Timeline] Failed to ensure video track: {e}")
+
+            # Best-effort track selection (blue source + red target) with diagnostics only.
+            if timeline:
+                enable_fn = getattr(timeline, "SetTrackEnable", None)
+                autoselect_fn = getattr(timeline, "SetTrackAutoSelect", None)
+                lock_fn = getattr(timeline, "SetTrackLock", None)
+                print(
+                    "[Timeline] Track methods:",
+                    f"Enable={callable(enable_fn)}, AutoSelect={callable(autoselect_fn)}, Lock={callable(lock_fn)}"
+                )
+                for track_type in ("video", "audio"):
+                    for name, fn, args in (
+                        ("Enable", enable_fn, (track_type, 1, True)),
+                        ("AutoSelect", autoselect_fn, (track_type, 1, True)),
+                        ("Lock", lock_fn, (track_type, 1, False)),
+                    ):
+                        if not callable(fn):
+                            continue
+                        try:
+                            result = fn(*args)
+                            print(f"[Timeline] {name} {track_type}1 -> {result}")
+                        except Exception as e:
+                            print(f"[Timeline] {name} {track_type}1 failed: {e}")
+
+            before_count = _count_timeline_items(timeline) if timeline else None
+            print(f"[Timeline] Items before append: {before_count}")
+
+            clip_info = {
                 "mediaPoolItem": matching_clip,
                 "startFrame": start_frame,
-                "endFrame": end_frame
-            }])
-            
-            if result:
+                "endFrame": end_frame,
+            }
+            result = media_pool.AppendToTimeline([clip_info])
+            print(f"[Timeline] AppendToTimeline result: {result!r} (type={type(result).__name__})")
+
+            def _is_append_success(value) -> bool:
+                if value is True:
+                    return True
+                if isinstance(value, list):
+                    return any(item is not None for item in value)
+                return bool(value)
+
+            success = _is_append_success(result)
+            if not success:
+                print("[Timeline] Timed append failed, trying full clip fallback.")
+                result_fallback = media_pool.AppendToTimeline([matching_clip])
+                print(f"[Timeline] Fallback AppendToTimeline result: {result_fallback!r} (type={type(result_fallback).__name__})")
+                success = _is_append_success(result_fallback)
+
+            after_count = _count_timeline_items(timeline) if timeline else None
+            print(f"[Timeline] Items after append: {after_count}")
+
+            if success:
                 self.status_label.setText(f"Added {filename} ({start_time:.1f}s-{end_time:.1f}s) to timeline")
             else:
-                QMessageBox.warning(self, "Error", "Failed to add clip to timeline")
+                print("[Timeline] AppendToTimeline returned False")
+                QMessageBox.warning(
+                    self,
+                    "Failed to Add Clip",
+                    "Resolve could not insert the clip. If this is an empty timeline, "
+                    "please enable Edit -> Edit Options -> Automatically Create Tracks on Edit, "
+                    "or drag any clip into the timeline once to initialize track patching."
+                )
                 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to add clip: {str(e)}")
@@ -920,8 +1437,6 @@ class ClipABitApp(QWidget):
             self.job_tracker.wait()
         if hasattr(self, 'refresh_timer'):
             self.refresh_timer.stop()
-        if hasattr(self, 'job_recovery_timer'):
-            self.job_recovery_timer.stop()
         event.accept()
 
     def _ensure_timeline(self):
@@ -976,7 +1491,7 @@ class ClipABitApp(QWidget):
                         continue
         return None
 
-    def _build_clip_map(self):
+    def _build_clip_map(self, debug: bool = False):
         """Scan media pool clips that match the current filter and build a mapping.
 
         The filter used is the same as in `_action_append_chunk`: keep clips
@@ -988,11 +1503,39 @@ class ClipABitApp(QWidget):
         if not resolve:
             return {}  # Return empty dict instead of raising error
 
+        def _get_subfolders(folder):
+            if not folder:
+                return []
+            for method in ("GetSubFolderList", "GetSubFolders"):
+                try:
+                    result = getattr(folder, method)()
+                    if result is not None:
+                        return result
+                except Exception:
+                    continue
+            return []
+
+        def _collect_clips(folder):
+            if not folder:
+                return []
+            collected = []
+            try:
+                collected.extend(folder.GetClipList() or [])
+            except Exception:
+                pass
+            for sub in _get_subfolders(folder):
+                collected.extend(_collect_clips(sub))
+            return collected
+
         root_folder = media_pool.GetRootFolder()
-        clips = root_folder.GetClipList() if root_folder else []
+        clips = _collect_clips(root_folder)
+        if debug:
+            print(f"[MediaPool] Total clips found (pre-filter): {len(clips)}")
 
         # Apply same filter as the append action
         filtered = [c for c in clips if c and c.GetClipProperty("Type") and "Video" in c.GetClipProperty("Type")]
+        if debug:
+            print(f"[MediaPool] Video clips after filter: {len(filtered)}")
 
         mapping = {}
         for clip in filtered:
@@ -1070,7 +1613,7 @@ class ClipABitApp(QWidget):
 
         return new_id
 
-    def get_project_name(self) -> str | None:
+    def get_project_name(self) -> Optional[str]:
         """Return the current Resolve project name, or None if unavailable."""
         if not resolve or not project:
             return None
@@ -1096,6 +1639,156 @@ class ClipABitApp(QWidget):
             pass
 
         return None
+    
+    def _show_processed_files(self):
+        """Show processed files in a dialog window."""
+        if not self.processed_files:
+            QMessageBox.information(self, "Processed Files", "No files have been processed yet.")
+            return
+        
+        try:
+            # Create dialog window (modal to prevent it from closing)
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Processed Files")
+            dialog.resize(600, 400)
+            dialog.setModal(True)  # Make it modal so it stays open
+            
+            layout = QVBoxLayout()
+            
+            # Header
+            header = QLabel(f"<b>Processed Files ({len(self.processed_files)} total)</b>")
+            layout.addWidget(header)
+            
+            # Scrollable list
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll_widget = QWidget()
+            scroll_layout = QVBoxLayout()
+            
+            # Display each processed file
+            for file_hash, file_info in sorted(self.processed_files.items(), 
+                                              key=lambda x: x[1].get('processed_at', 0), 
+                                              reverse=True):
+                file_frame = QFrame()
+                file_frame.setFrameStyle(QFrame.Shape.Box)
+                file_layout = QVBoxLayout()
+                
+                filename = file_info.get('filename', 'Unknown')
+                job_id = file_info.get('job_id', 'Unknown')
+                processed_at = file_info.get('processed_at', 0)
+                result = file_info.get('result', {})
+                
+                # Format timestamp
+                if processed_at:
+                    import datetime
+                    dt = datetime.datetime.fromtimestamp(processed_at)
+                    time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    time_str = "Unknown"
+                
+                # File info
+                file_label = QLabel(f"<b>{filename}</b>")
+                file_layout.addWidget(file_label)
+                
+                info_label = QLabel(f"Job ID: {job_id} | Processed: {time_str}")
+                info_label.setStyleSheet("color: gray; font-size: 9px;")
+                file_layout.addWidget(info_label)
+                
+                # Status
+                status = result.get('status', 'unknown')
+                status_label = QLabel(f"Status: {status}")
+                status_label.setStyleSheet("color: blue; font-size: 9px;")
+                file_layout.addWidget(status_label)
+
+                vector_count = file_info.get('vector_count')
+                vector_text = f"Vectors: {vector_count}" if vector_count is not None else "Vectors: unknown"
+                vector_label = QLabel(vector_text)
+                vector_label.setStyleSheet("color: gray; font-size: 9px;")
+                file_layout.addWidget(vector_label)
+                
+                file_frame.setLayout(file_layout)
+                scroll_layout.addWidget(file_frame)
+            
+            scroll_layout.addStretch()
+            scroll_widget.setLayout(scroll_layout)
+            scroll.setWidget(scroll_widget)
+            layout.addWidget(scroll)
+            
+            # Close button
+            btn_close = QPushButton("Close")
+            btn_close.clicked.connect(dialog.accept)
+            layout.addWidget(btn_close)
+            
+            dialog.setLayout(layout)
+            dialog.exec()  # Use exec() instead of show() to make it modal
+        except Exception as e:
+            error_msg = f"Error showing processed files dialog: {e}\n{traceback.format_exc()}"
+            print(error_msg)
+            QMessageBox.critical(self, "Error", f"Failed to show processed files:\n{str(e)}")
+    
+    def _clear_processed_files(self):
+        """Clear all processed files tracking."""
+        if not self.processed_files:
+            QMessageBox.information(self, "Clear Processed Files", "No processed files to clear.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Clear Processed Files",
+            f"This will clear tracking for {len(self.processed_files)} processed files.\n\n"
+            "Do you also want to delete their vectors from Pinecone?\n\n"
+            "Yes = delete Pinecone + local\nNo = delete Pinecone only (keep local)\nCancel = do nothing",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+        )
+        
+        if reply == QMessageBox.StandardButton.Cancel:
+            return
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Delete from backend before clearing local
+            for _, info in list(self.processed_files.items()):
+                filename = info.get("filename", "")
+                filepath = info.get("filepath", "")
+                namespace = info.get("namespace")
+                if not namespace:
+                    user_id = self.get_or_create_device_id()
+                    project_name = self.get_project_name() or "default"
+                    user_id_safe = user_id.lower().replace(" ", "_")
+                    project_safe = project_name.lower().replace(" ", "_")
+                    namespace = f"{user_id_safe}-{project_safe}"
+
+                hashed_identifier = info.get("hashed_identifier") or self._get_hashed_identifier(filepath, namespace, filename)
+                if filename and hashed_identifier:
+                    self._delete_backend_entry(filename, hashed_identifier, namespace)
+
+            self.processed_files.clear()
+            self._save_processed_files()
+            self._update_file_status()
+            QMessageBox.information(self, "Cleared", "Processed files tracking has been cleared.")
+            print("Processed files tracking cleared")
+        elif reply == QMessageBox.StandardButton.No:
+            # Delete from backend only, keep local so verification can prune
+            for _, info in list(self.processed_files.items()):
+                filename = info.get("filename", "")
+                filepath = info.get("filepath", "")
+                namespace = info.get("namespace")
+                if not namespace:
+                    user_id = self.get_or_create_device_id()
+                    project_name = self.get_project_name() or "default"
+                    user_id_safe = user_id.lower().replace(" ", "_")
+                    project_safe = project_name.lower().replace(" ", "_")
+                    namespace = f"{user_id_safe}-{project_safe}"
+
+                hashed_identifier = info.get("hashed_identifier") or self._get_hashed_identifier(filepath, namespace, filename)
+                if filename and hashed_identifier:
+                    self._delete_backend_entry(filename, hashed_identifier, namespace)
+
+            QMessageBox.information(
+                self,
+                "Deleted from Pinecone",
+                "Pinecone data deleted. Local tracking kept for verification."
+            )
+            print("Pinecone data deleted; local tracking kept")
 
 # --- Main Execution ---
 if __name__ == "__main__":

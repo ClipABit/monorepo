@@ -1,5 +1,8 @@
 import os
 import logging
+import time
+import uuid
+import hashlib
 from fastapi import UploadFile, HTTPException, Form
 import modal
 
@@ -53,7 +56,6 @@ class Server:
         """
 
         # Import local module inside class
-        import os
         from datetime import datetime, timezone
 
         # Import classes here
@@ -62,7 +64,6 @@ class Server:
         from database.pinecone_connector import PineconeConnector
         from database.job_store_connector import JobStoreConnector
         from search.searcher import Searcher
-        from database.r2_connector import R2Connector
 
 
         logger.info(f"Container starting up! Environment = {env}")
@@ -73,18 +74,6 @@ class Server:
         if not PINECONE_API_KEY:
             raise ValueError("PINECONE_API_KEY not found in environment variables")
 
-        R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
-        if not R2_ACCOUNT_ID:
-            raise ValueError("R2_ACCOUNT_ID not found in environment variables")
-        
-        R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
-        if not R2_ACCESS_KEY_ID:
-            raise ValueError("R2_ACCESS_KEY_ID not found in environment variables")
-        
-        R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
-        if not R2_SECRET_ACCESS_KEY:
-            raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
-        
         ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
         if ENVIRONMENT not in ["dev", "prod", "staging"]:
             raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod, staging")
@@ -100,17 +89,9 @@ class Server:
         self.pinecone_connector = PineconeConnector(api_key=PINECONE_API_KEY, index_name=pinecone_index)
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
 
-        self.r2_connector = R2Connector(
-            account_id=R2_ACCOUNT_ID,
-            access_key_id=R2_ACCESS_KEY_ID,
-            secret_access_key=R2_SECRET_ACCESS_KEY,
-            environment=ENVIRONMENT
-        )
-
         self.searcher = Searcher(
             api_key=PINECONE_API_KEY,
-            index_name=pinecone_index,
-            r2_connector=self.r2_connector
+            index_name=pinecone_index
         )
 
         logger.info("Container modules initialized and ready!")
@@ -118,26 +99,16 @@ class Server:
         print(f"[Container] Started at {self.start_time.isoformat()}")
 
     @modal.method()
-    async def process_video_background(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = ""):
+    async def process_video_background(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = "", original_filepath: str = ""):
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}'")
         
         hashed_identifier = None
         upserted_chunk_ids = []
 
         try:
-            # Upload original video to R2 bucket
-            # TODO: do this in parallel with processing
-            success, hashed_identifier = self.r2_connector.upload_video(
-                video_data=video_bytes,
-                filename=filename,
-                namespace=namespace
-            )
-            if not success:
-                # Capture error details returned in hashed_identifier before resetting it
-                upload_error_details = hashed_identifier
-                # Reset hashed_identifier if upload failed to avoid rollback attempting to delete it
-                hashed_identifier = None
-                raise Exception(f"Failed to upload video to R2 storage: {upload_error_details}")
+            # Generate a deterministic identifier for Pinecone metadata
+            identifier_source = original_filepath if original_filepath else f"{namespace}/{filename}"
+            hashed_identifier = hashlib.sha256(identifier_source.encode()).hexdigest()
 
             # Process video through preprocessing pipeline
             processed_chunks = self.preprocessor.process_video_from_bytes(
@@ -177,6 +148,10 @@ class Server:
                     file_info = chunk['metadata'].pop('file_info')
                     for key, value in file_info.items():
                         chunk['metadata'][f'file_{key}'] = value
+                
+                # Add original file path if provided (for plugin uploads)
+                if original_filepath:
+                    chunk['metadata']['file_path'] = original_filepath
                         
                 # 3. Final Check: Remove Nulls (Optional but good practice)
                 # Pinecone rejects keys with null values.
@@ -227,14 +202,7 @@ class Server:
             # --- ROLLBACK LOGIC ---
             logger.warning(f"[Job {job_id}] Initiating rollback due to failure...")
             
-            # 1. Delete video from R2
-            if hashed_identifier:
-                logger.info(f"[Job {job_id}] Rolling back: Deleting video from R2 ({hashed_identifier})")
-                success = self.r2_connector.delete_video(hashed_identifier)
-                if not success:
-                    logger.error(f"[Job {job_id}] Rollback failed for R2 video deletion: {hashed_identifier}")
-            
-            # 2. Delete chunks from Pinecone
+            # 1. Delete chunks from Pinecone
             if upserted_chunk_ids:
                 logger.info(f"[Job {job_id}] Rolling back: Deleting {len(upserted_chunk_ids)} chunks from Pinecone")
                 success = self.pinecone_connector.delete_chunks(upserted_chunk_ids, namespace=namespace)
@@ -255,48 +223,13 @@ class Server:
     @modal.method()
     async def delete_video_background(self, job_id: str, hashed_identifier: str, namespace: str = ""):
         """
-        Background job that deletes a video and all associated chunks from R2 and Pinecone.
+        Background job that deletes all associated chunks from Pinecone.
 
-        This method is intended to run asynchronously as part of a job lifecycle. It:
-
+        This method:
         1. Attempts to delete all chunks in Pinecone associated with ``hashed_identifier`` and
            the given ``namespace`` using ``pinecone_connector.delete_by_identifier``.
-        2. If Pinecone deletion is successful, attempts to delete the corresponding video
-           object from R2 via ``r2_connector.delete_video``.
-        3. On full success (both deletions succeed), builds a result payload and records
-           the job as completed in ``self.job_store`` by calling
-           ``self.job_store.set_job_completed(job_id, result)``.
-        4. On any failure (including partial failures where Pinecone succeeds but R2 fails,
-           or Pinecone deletion itself fails), logs the error, records the job as failed in
-           ``self.job_store`` via ``self.job_store.set_job_failed(job_id, error_message)``,
-           and returns a failure payload.
-
-        The return value is the same object stored in ``job_store`` and has the following
-        general shape:
-
-        - On success::
-
-            {
-                "job_id": "<job id>",
-                "status": "completed",
-                "hashed_identifier": "<hashed id>",
-                "namespace": "<namespace>",
-                "r2": {"deleted": true},
-                "pinecone": {"deleted": true}
-            }
-
-        - On failure (including partial deletion failures)::
-
-            {
-                "job_id": "<job id>",
-                "status": "failed",
-                "error": "<human-readable error message>"
-            }
-
-        In particular, if Pinecone deletion succeeds but R2 deletion fails, the method logs
-        a critical inconsistency, raises an exception internally, and ultimately marks the
-        job as failed in ``job_store`` with an appropriate error message, indicating that
-        chunks may have been removed while the video object remains in R2.
+        2. On success, records the job as completed in ``self.job_store``.
+        3. On failure, records the job as failed in ``self.job_store``.
         """
         logger.info(f"[Job {job_id}] Deletion started: {hashed_identifier} | namespace='{namespace}'")
 
@@ -307,15 +240,8 @@ class Server:
                 namespace=namespace
             )
 
-            # NOTE: idk if we acc need to raise exception here because this isn't a critical failure
             if not pinecone_success:
                 raise Exception("Failed to delete chunks from Pinecone")
-            
-            # Delete from R2. If this fails, chunks are gone but video remains - notify client.
-            r2_success = self.r2_connector.delete_video(hashed_identifier)
-            if not r2_success:
-                logger.critical(f"[Job {job_id}] INCONSISTENCY: Chunks deleted but R2 deletion failed for {hashed_identifier}")
-                raise Exception("Failed to delete video from R2 after deleting chunks. System may be inconsistent.")
 
             # Build success response
             result = {
@@ -323,15 +249,12 @@ class Server:
                 "status": "completed",
                 "hashed_identifier": hashed_identifier,
                 "namespace": namespace,
-                "r2": {
-                    "deleted": r2_success
-                },
                 "pinecone": {
                     "deleted": pinecone_success
                 }
             }
 
-            logger.info(f"[Job {job_id}] Deletion completed: R2={r2_success}, Pinecone chunks={pinecone_success}")
+            logger.info(f"[Job {job_id}] Deletion completed: Pinecone chunks={pinecone_success}")
 
             # Store result for polling endpoint
             self.job_store.set_job_completed(job_id, result)
@@ -377,19 +300,19 @@ class Server:
         return job_data
 
     @modal.fastapi_endpoint(method="POST")
-    async def upload(self, file: UploadFile = None, namespace: str = Form("")):
+    async def upload(self, file: UploadFile = None, namespace: str = Form(""), original_filepath: str = Form("")):
         """
         Handle video file upload and start background processing.
 
         Args:
             file (UploadFile): The uploaded video file.
             namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
+            original_filepath (str, optional): Original file path for plugin uploads (default: "")
 
         Returns:
             dict: Contains job_id, filename, content_type, size_bytes, status, and message.
         """
         # TODO: Add error handling for file types and sizes
-        import uuid
         job_id = str(uuid.uuid4())
         contents = await file.read()
         file_size = len(contents)
@@ -399,11 +322,12 @@ class Server:
             "status": "processing",
             "size_bytes": file_size,
             "content_type": file.content_type,
-            "namespace": namespace
+            "namespace": namespace,
+            "original_filepath": original_filepath
         })
 
         # Spawn background processing (non-blocking - returns immediately)
-        self.process_video_background.spawn(contents, file.filename, job_id, namespace)
+        self.process_video_background.spawn(contents, file.filename, job_id, namespace, original_filepath)
 
         return {
             "job_id": job_id,
@@ -429,7 +353,6 @@ class Server:
         """
 
         try:
-            import time
             t_start = time.perf_counter()
 
             # Parse request
@@ -464,35 +387,46 @@ class Server:
             logger.error(f"[Search] Error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    
     @modal.fastapi_endpoint(method="GET")
-    async def list_videos(self, namespace: str = "__default__"):
+    async def check_video(self, hashed_identifier: str, namespace: str = ""):
         """
-        List all videos for a specific namespace (namespace).
-        Returns a list of video data objects containing filename, identifier, and presigned URL.
+        Check if a video's chunks exist in Pinecone by hashed_identifier.
+
+        Args:
+            hashed_identifier (str): The hashed identifier of the video.
+            namespace (str, optional): Namespace for Pinecone (default: "").
+
+        Returns:
+            dict: Contains existence boolean and vector count if available.
         """
-        logger.info(f"[List Videos] Fetching videos for namespace: {namespace}")
+        if not hashed_identifier:
+            raise HTTPException(status_code=400, detail="Missing 'hashed_identifier' parameter")
+
+        check_namespace = namespace or "__default__"
 
         try:
-            video_data = self.r2_connector.fetch_all_video_data(namespace)
+            count = self.pinecone_connector.count_by_identifier(hashed_identifier, namespace=check_namespace)
+            exists = bool(count) if count is not None else False
             return {
-                "status": "success",
-                "namespace": namespace,
-                "videos": video_data
+                "hashed_identifier": hashed_identifier,
+                "namespace": check_namespace,
+                "exists": exists,
+                "vector_count": count
             }
         except Exception as e:
-            logger.error(f"[List Videos] Error fetching videos: {e}")
+            logger.error(f"[Check Video] Error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
-        
+
+    
     @modal.fastapi_endpoint(method="DELETE")
     async def delete_video(self, hashed_identifier: str, filename: str, namespace: str = ""):
         """
-        Delete a video and its associated chunks from storage and database.
+        Delete a video's associated chunks from Pinecone.
 
         Args:
             hashed_identifier (str): The unique identifier of the video in R2 storage.
             filename (str): The original filename of the video.
-            namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
+            namespace (str, optional): Namespace for Pinecone (default: "")
 
         Returns:
             dict: Contains status and message about deletion result.
@@ -515,7 +449,6 @@ class Server:
 
 
         # Create job
-        import uuid
         job_id = str(uuid.uuid4())
         self.job_store.create_job(job_id, {
             "job_id": job_id,
