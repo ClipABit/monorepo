@@ -3,7 +3,6 @@
 import signal
 import subprocess
 import sys
-import threading
 
 # Dev combined app - all services in one for local iteration
 DEV_COMBINED_APP = "apps/dev_combined.py"
@@ -42,19 +41,64 @@ def serve_all():
     print(f"Note: For staging/prod, deploy individual apps separately.\n")
     print("-" * 60 + "\n")
     
-    subprocess.run(["modal", "serve", DEV_COMBINED_APP])
+    # Run with color-coded output prefixing
+    color = "\033[32m"  # Green for combined dev app
+    process = subprocess.Popen(
+        ["modal", "serve", DEV_COMBINED_APP],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    
+    # Handle graceful shutdown
+    def signal_handler(sig, frame):
+        process.terminate()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Stream output with color prefix
+    _prefix_output(process, "dev", color)
+    process.wait()
+
+
+def _serve_single_app(name: str):
+    """Serve a single app with color-coded output."""
+    path, color = APPS[name]
+    
+    process = subprocess.Popen(
+        ["modal", "serve", path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    
+    # Handle graceful shutdown
+    def signal_handler(sig, frame):
+        process.terminate()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Stream output with color prefix
+    _prefix_output(process, name, color)
+    process.wait()
 
 
 def serve_server():
     """Serve the API server app."""
-    subprocess.run(["modal", "serve", APPS["server"][0]])
+    _serve_single_app("server")
 
 
 def serve_search():
     """Serve the search app."""
-    subprocess.run(["modal", "serve", APPS["search"][0]])
+    _serve_single_app("search")
 
 
 def serve_processing():
     """Serve the processing app."""
-    subprocess.run(["modal", "serve", APPS["processing"][0]])
+    _serve_single_app("processing")

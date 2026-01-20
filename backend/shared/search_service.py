@@ -32,7 +32,6 @@ class SearchService:
         R2_ACCOUNT_ID = get_env_var("R2_ACCOUNT_ID")
         R2_ACCESS_KEY_ID = get_env_var("R2_ACCESS_KEY_ID")
         R2_SECRET_ACCESS_KEY = get_env_var("R2_SECRET_ACCESS_KEY")
-        ENVIRONMENT = get_environment()
 
         pinecone_index = get_pinecone_index()
         logger.info(f"[{self.__class__.__name__}] Using Pinecone index: {pinecone_index}")
@@ -51,7 +50,7 @@ class SearchService:
             account_id=R2_ACCOUNT_ID,
             access_key_id=R2_ACCESS_KEY_ID,
             secret_access_key=R2_SECRET_ACCESS_KEY,
-            environment=ENVIRONMENT
+            environment=env
         )
 
         logger.info(f"[{self.__class__.__name__}] Initialized and ready!")
