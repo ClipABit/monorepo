@@ -85,7 +85,7 @@ You can also run individual apps if needed:
 ### Local Development Architecture (dev)
 
 - `apps/dev_combined.py` - All three services in one app for easy iteration
-- No cross-app lookups needed - workers call each other directly within the same app
+- No cross-app lookups needed - services call each other directly within the same app
 - Uses `api/fastapi_router_dev.py` which accepts worker class references instead of doing lookups
 - Hot-reload works on all services simultaneously
 

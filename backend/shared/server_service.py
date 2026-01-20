@@ -15,15 +15,12 @@ class ServerService:
     Server service base class - handles HTTP endpoints and background deletion.
     """
 
-    @modal.enter()
-    def startup(self):
-        """Initialize connectors and FastAPI app."""
+    def _initialize_connectors(self):
+        """Initialize connectors (non-decorated, can be called from subclasses)."""
         from datetime import datetime, timezone
         from database.pinecone_connector import PineconeConnector
         from database.job_store_connector import JobStoreConnector
         from database.r2_connector import R2Connector
-        from api import FastAPIRouter
-        from fastapi import FastAPI
 
         env = get_environment()
         logger.info(f"[{self.__class__.__name__}] Starting up in '{env}' environment")
@@ -56,6 +53,11 @@ class ServerService:
         self.is_internal = env in ["dev", "staging"]
 
         logger.info(f"[{self.__class__.__name__}] Initialized and ready!")
+
+    @modal.enter()
+    def startup(self):
+        """Initialize connectors and FastAPI app."""
+        self._initialize_connectors()
 
     def create_fastapi_app(self, search_service_cls=None, processing_service_cls=None):
         """

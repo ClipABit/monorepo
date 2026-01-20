@@ -24,16 +24,15 @@ app = modal.App(
 )
 
 
-# Define ServerWithASGI to add the asgi_app method and FastAPI setup
 @app.cls(cpu=2.0, memory=2048, timeout=120)
-class ServerWithASGI(ServerService):
+class Server(ServerService):
     """Server with ASGI app for production deployment."""
     
     @modal.enter()
     def startup(self):
-        # Call parent startup
-        super().startup()
-        # Create FastAPI app (no worker classes for production - uses from_name)
+        """Initialize connectors and create FastAPI app."""
+        self._initialize_connectors()
+        # Create FastAPI app (no service classes for production - uses from_name)
         self.fastapi_app = self.create_fastapi_app()
 
     @modal.asgi_app()

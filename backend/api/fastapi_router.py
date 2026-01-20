@@ -81,17 +81,18 @@ class FastAPIRouter:
             }
         return job_data
 
-    async def upload(self, file: UploadFile, namespace: str = Form("")):
+    async def upload(self, files: list[UploadFile], namespace: str = Form("")):
         """
         Handle video file upload and start background processing.
 
         Args:
-            file (UploadFile): The uploaded video file.
+            files (list[UploadFile]): The uploaded video files.
             namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
 
         Returns:
             dict: Contains job_id, filename, content_type, size_bytes, status, and message.
         """
+        file = files[0]
         contents = await file.read()
         file_size = len(contents)
         job_id = str(uuid.uuid4())
