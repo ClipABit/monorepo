@@ -92,6 +92,21 @@ class FaceRepository:
         
         return identifier
 
+    def delete_face_image(self, identifier: str) -> bool:
+        """
+        Delete a face image from R2 storage using its identifier.
+
+        Args:
+            identifier: The base64-encoded identifier returned by upload_face_image
+
+        Returns:
+            bool: True if deletion succeeded, False otherwise
+        """
+        success = self.r2_connector.delete_image(identifier)
+        if not success:
+            logger.error(f"FaceRepository: Failed to delete face image identifier {identifier}")
+        return success
+
     # upsert the face embedding with metadata into pinecone vector database
     def upsert_identified_face_embedding(self, namespace: str, face_id: str, img_access_id: str, video_chunk_id: str, face_embedding: np.ndarray) -> str | None:
         """

@@ -50,7 +50,10 @@ class Server:
 
         # Import local module inside class
         import os
+        import json
         from datetime import datetime, timezone
+        import firebase_admin
+        from firebase_admin import credentials, firestore
 
         # Import classes here
         from preprocessing.preprocessor import Preprocessor
@@ -59,7 +62,7 @@ class Server:
         from database.job_store_connector import JobStoreConnector
         from search.searcher import Searcher
         from database.r2_connector import R2Connector
-        from face_recognition import FaceDetector, FaceRepository
+        from face_recognition import FaceDetector, FaceRepository, FaceMetadataRepository
 
 
         logger.info(f"Container starting up! Environment = {env}")
@@ -82,10 +85,21 @@ class Server:
         if not R2_SECRET_ACCESS_KEY:
             raise ValueError("R2_SECRET_ACCESS_KEY not found in environment variables")
         
+        FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+        if not FIREBASE_SERVICE_ACCOUNT_JSON:
+            raise ValueError("FIREBASE_SERVICE_ACCOUNT_JSON not found in environment variables")
+        
         ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
         if ENVIRONMENT not in ["dev", "prod"]:
             raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod")
         logger.info(f"Running in environment: {ENVIRONMENT}")
+
+        # initialize firebase
+        firebase_sa_info = json.loads(FIREBASE_SERVICE_ACCOUNT_JSON)
+        cred = credentials.Certificate(firebase_sa_info)
+        firebase_admin.initialize_app(cred)
+        db = firebase_admin.firestore.client()
+        logger.info("Initialized Firestore client")
 
         # Select Pinecone index based on environment
         pinecone_index = f"{ENVIRONMENT}-chunks"    # video chunks index
@@ -113,6 +127,8 @@ class Server:
             r2_connector=self.r2_connector
         )
 
+        self.face_metadata_repository = FaceMetadataRepository(db)
+
         self.face_detector = FaceDetector()
         self.face_repository = FaceRepository(self.face_recognition_pinecone_connector, self.r2_connector, threshold=0.35)
 
@@ -128,6 +144,7 @@ class Server:
         upserted_chunk_ids = []
         created_face_embedding_ids = []
         created_face_image_ids = []
+        created_face_metadata_ids = []
 
         try:
             # Upload original video to R2 bucket
@@ -206,7 +223,12 @@ class Server:
                 try:
                     from face_recognition.frame_face_pipeline import FrameFacePipeline
 
-                    pipeline = FrameFacePipeline(namespace=namespace, face_detector=self.face_detector, face_repository=self.face_repository)
+                    pipeline = FrameFacePipeline(
+                        namespace=namespace,
+                        face_detector=self.face_detector,
+                        face_repository=self.face_repository,
+                        face_metadata_repository=self.face_metadata_repository,
+                    )
 
                     # sample up to 8 frames evenly from the chunk for face processing
                     frames = chunk.get('frames')
@@ -224,7 +246,7 @@ class Server:
                     face_map = {}
                     for f in sampled:
                         try:
-                            mapping, vec_ids, img_ids = pipeline.process_frame(f, chunk_id=chunk['chunk_id'])
+                            mapping, vec_ids, img_ids, face_ids = pipeline.process_frame(f, chunk_id=chunk['chunk_id'])
                             # mapping may contain multiple faces; merge into face_map
                             for k, v in mapping.items():
                                 face_map.setdefault(k, v)
@@ -234,6 +256,8 @@ class Server:
                                 created_face_embedding_ids.extend(vec_ids)
                             if img_ids:
                                 created_face_image_ids.extend(img_ids)
+                            if face_ids:
+                                created_face_metadata_ids.extend(face_ids)
                         except Exception as fe:
                             logger.exception(f"Face processing failed for chunk {chunk['chunk_id']}: {fe}")
                 except Exception as e:
@@ -300,6 +324,14 @@ class Server:
                     if not success:
                         logger.error(f"[Job {job_id}] Rollback failed for R2 face image deletion: {ident}")
 
+            # 5. Delete face metadata from Firestore
+            if created_face_metadata_ids:
+                logger.info(f"[Job {job_id}] Rolling back: Deleting {len(created_face_metadata_ids)} face metadata records from Firestore")
+                for face_id in created_face_metadata_ids:
+                    success = self.face_metadata_repository.delete_face_metadata(user_id=namespace, face_id=face_id)
+                    if not success:
+                        logger.error(f"[Job {job_id}] Rollback failed for face metadata deletion: {face_id}")
+                    
             logger.info(f"[Job {job_id}] Rollback complete.")
             # ----------------------
 

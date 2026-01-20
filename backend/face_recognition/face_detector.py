@@ -83,7 +83,7 @@ class FaceDetector:
                 align=self.align,
             )
         except ValueError:
-            logger.warning(f"FaceDetector: No face detected in image {img}: {e}\nreturning empty face list.")
+            logger.warning(f"FaceDetector: No face detected in image {img}\nreturning empty face list.")
             return []
 
         for r in rep:
