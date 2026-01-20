@@ -15,13 +15,7 @@ def get_dev_image() -> modal.Image:
     """
     return (
         modal.Image.debian_slim(python_version="3.12")
-        .add_local_python_source(
-            "database",
-            "models",
-            "api",
-            "shared",
-            "workers",
-        )
+        .apt_install("ffmpeg", "libsm6", "libxext6")
         .pip_install(
             "fastapi[standard]",
             "python-multipart",
@@ -40,7 +34,10 @@ def get_dev_image() -> modal.Image:
             "models",
             "api",
             "shared",
-            "workers",
+            "preprocessing",
+            "embeddings",
+            "models",
+            "search",
         )
     )
 
@@ -65,10 +62,8 @@ def get_server_image() -> modal.Image:
             "models",
             "api",
             "shared",
-            "workers",
         )
     )
-
 
 def get_search_image() -> modal.Image:
     """
@@ -90,7 +85,6 @@ def get_search_image() -> modal.Image:
             "database",
             "search",
             "shared",
-            "workers",
         )
     )
 
@@ -122,6 +116,5 @@ def get_processing_image() -> modal.Image:
             "embeddings",
             "models",
             "shared",
-            "workers",
         )
     )

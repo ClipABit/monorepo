@@ -18,7 +18,8 @@ but this is acceptable for local development where iteration speed matters more.
 import logging
 import modal
 
-from shared.config import get_environment, get_secrets, is_internal_env, get_dev_image
+from shared.config import get_environment, get_secrets, is_internal_env
+from shared.images import get_dev_image
 from shared.search_service import SearchService
 from shared.processing_service import ProcessingService
 from shared.server_service import ServerService
@@ -38,24 +39,27 @@ if env != "dev":
 logger.info("Starting Combined Dev App - all services in one app for local iteration")
 
 app = modal.App(
-    name="dev monolith",
+    name=env,
     image=get_dev_image(),
     secrets=[get_secrets()]
 )
 
-# Define DevServer to add the asgi_app method and pass worker classes
+DevSearchService = app.cls(cpu=2.0, memory=2048, timeout=60, scaledown_window=120)(SearchService)
+DevProcessingService = app.cls(cpu=4.0, memory=4096, timeout=600)(ProcessingService)
+
+# Define DevServer to add the asgi_app method and pass service classes
 @app.cls(cpu=2.0, memory=2048, timeout=120)
 class DevServer(ServerService):
     """Server with ASGI app for dev combined mode."""
     
     @modal.enter()
     def startup(self):
-        # Call parent startup
-        super().startup()
-        # Create FastAPI app with worker classes (dev combined mode)
+        """Initialize connectors and create FastAPI app with service classes."""
+        self._initialize_connectors()
+        # Create FastAPI app with registered service classes (dev combined mode)
         self.fastapi_app = self.create_fastapi_app(
-            search_service_cls=SearchService,
-            processing_service_cls=ProcessingService
+            search_service_cls=DevSearchService,
+            processing_service_cls=DevProcessingService
         )
 
     @modal.asgi_app()
