@@ -30,14 +30,14 @@ def get_dev_image() -> modal.Image:
             "pillow",
         )
         .add_local_python_source(
-            "database",
-            "models",
             "api",
-            "shared",
-            "preprocessing",
+            "database",
             "embeddings",
             "models",
+            "shared",
+            "preprocessing",
             "search",
+            "services"
         )
     )
 
@@ -116,5 +116,6 @@ def get_processing_image() -> modal.Image:
             "embeddings",
             "models",
             "shared",
+            "services"
         )
     )

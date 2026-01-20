@@ -1,6 +1,6 @@
 import io
 from typing import Any, Dict, List, Tuple
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import modal
 import pytest

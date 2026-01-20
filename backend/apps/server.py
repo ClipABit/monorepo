@@ -18,7 +18,7 @@ env = get_environment()
 
 # Create Modal app with minimal image
 app = modal.App(
-    name=f"{env}-api",
+    name=env,
     image=get_server_image(),
     secrets=[get_secrets()]
 )
