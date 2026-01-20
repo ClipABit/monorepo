@@ -36,9 +36,9 @@ def serve_all():
     Server, Search, and Processing in a single Modal app.
     This allows hot-reload on all services without cross-app lookup issues.
     """
-    print(f"Starting combined dev app (all services in one)...\n")
+    print("Starting combined dev app (all services in one)...\n")
     print(f"  \033[32m●{RESET} dev-combined (server + search + processing)\n")
-    print(f"Note: For staging/prod, deploy individual apps separately.\n")
+    print("Note: For staging/prod, deploy individual apps separately.\n")
     print("-" * 60 + "\n")
     
     # Run with color-coded output prefixing
