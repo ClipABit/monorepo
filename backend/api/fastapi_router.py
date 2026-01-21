@@ -88,6 +88,7 @@ class FastAPIRouter:
         self.router.add_api_route("/search", self.search, methods=["GET"])
         self.router.add_api_route("/videos", self.list_videos, methods=["GET"])
         self.router.add_api_route("/videos/{hashed_identifier}", self.delete_video, methods=["DELETE"])
+        self.router.add_api_route("/cache/clear", self.clear_cache, methods=["POST"])
 
     async def health(self):
         """
@@ -275,4 +276,34 @@ class FastAPIRouter:
             "status": "processing",
             "message": "Video deletion started, processing in background"
         }
+
+    async def clear_cache(self, namespace: str = "__default__"):
+        """
+        Clear the URL cache for a given namespace.
+        
+        Args:
+            namespace (str, optional): Namespace to clear cache for (default: "__default__")
+        
+        Returns:
+            dict: Contains status and number of entries cleared
+        
+        Raises:
+            HTTPException: If cache clearing is not allowed (403 Forbidden)
+        """
+        logger.info(f"[Clear Cache] Request to clear cache for namespace: {namespace}")
+        if not self.is_internal_env:
+            raise HTTPException(status_code=403, detail="Cache clearing is not allowed in the current environment.")
+        
+        try:
+            cleared_count = self.server_instance.r2_connector.clear_cache(namespace)
+            logger.info(f"[Clear Cache] Cleared {cleared_count} cache entries for namespace: {namespace}")
+            return {
+                "status": "success",
+                "namespace": namespace,
+                "cleared_entries": cleared_count,
+                "message": f"Successfully cleared {cleared_count} cache entries"
+            }
+        except Exception as e:
+            logger.error(f"[Clear Cache] Error clearing cache: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
