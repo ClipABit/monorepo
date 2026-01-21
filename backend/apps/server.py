@@ -9,7 +9,7 @@ import modal
 
 from shared.config import get_environment, get_secrets
 from shared.images import get_server_image
-from shared.server_service import ServerService
+from services.http_server import ServerService
 
 logger = logging.getLogger(__name__)
 

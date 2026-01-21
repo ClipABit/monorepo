@@ -20,9 +20,9 @@ import modal
 
 from shared.config import get_environment, get_secrets, is_internal_env
 from shared.images import get_dev_image
-from shared.search_service import SearchService
-from shared.processing_service import ProcessingService
-from shared.server_service import ServerService
+from services.search import SearchService
+from services.processing import ProcessingService
+from services.http_server import ServerService
 
 logger = logging.getLogger(__name__)
 
