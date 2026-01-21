@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Optional
 
 from database.pinecone_connector import PineconeConnector
 from database.r2_connector import R2Connector
-from search.embedder import TextEmbedder
+from search.text_embedder import TextEmbedder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
