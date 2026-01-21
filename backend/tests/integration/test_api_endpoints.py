@@ -15,6 +15,11 @@ class FakeJobStore:
         self._jobs: Dict[str, Dict[str, Any]] = {}
 
     def create_job(self, job_id: str, data: Dict[str, Any]) -> None:
+        # Add backward compatible fields if not present
+        if "job_type" not in data:
+            data["job_type"] = "video"
+        if "parent_batch_id" not in data:
+            data["parent_batch_id"] = None
         self._jobs[job_id] = data
 
     def get_job(self, job_id: str) -> Dict[str, Any] | None:
@@ -25,6 +30,63 @@ class FakeJobStore:
 
     def set_job_failed(self, job_id: str, error: str) -> None:
         self._jobs[job_id] = {"job_id": job_id, "status": "failed", "error": error}
+
+    def create_batch_job(
+        self, batch_job_id: str, child_job_ids: List[str], namespace: str
+    ) -> bool:
+        """Create a new batch job entry."""
+        batch_data = {
+            "batch_job_id": batch_job_id,
+            "job_type": "batch",
+            "status": "processing",
+            "namespace": namespace,
+            "total_videos": len(child_job_ids),
+            "child_job_ids": child_job_ids,
+            "completed_count": 0,
+            "failed_count": 0,
+            "processing_count": len(child_job_ids),
+        }
+        self._jobs[batch_job_id] = batch_data
+        return True
+
+    def update_batch_on_child_completion(
+        self, batch_job_id: str, child_job_id: str, child_result: Dict[str, Any]
+    ) -> bool:
+        """Update batch job when a child completes."""
+        if batch_job_id not in self._jobs:
+            return False
+
+        batch_job = self._jobs[batch_job_id]
+        child_status = child_result.get("status")
+
+        if child_status == "completed":
+            batch_job["completed_count"] += 1
+            batch_job["processing_count"] -= 1
+        elif child_status == "failed":
+            batch_job["failed_count"] += 1
+            batch_job["processing_count"] -= 1
+
+        # Update batch status
+        total = batch_job["total_videos"]
+        completed = batch_job["completed_count"]
+        failed = batch_job["failed_count"]
+
+        if completed + failed == total:
+            if failed == 0:
+                batch_job["status"] = "completed"
+            elif completed == 0:
+                batch_job["status"] = "failed"
+            else:
+                batch_job["status"] = "partial"
+
+        return True
+
+    def delete_job(self, job_id: str) -> bool:
+        """Delete a job from the store."""
+        if job_id in self._jobs:
+            del self._jobs[job_id]
+            return True
+        return False
 
 
 class FakeSpawner:
@@ -212,7 +274,7 @@ def test_upload_creates_job_and_spawns_processing_app(
     test_client_internal: Tuple[TestClient, ServerStub, dict]
 ) -> None:
     client, server, mock_fns = test_client_internal
-    files = {"file": ("clip.mp4", io.BytesIO(b"fake-bytes"), "video/mp4")}
+    files = [("files", ("clip.mp4", io.BytesIO(b"fake-bytes"), "video/mp4"))]
     resp = client.post("/upload", files=files, data={"namespace": "ns1"})
     assert resp.status_code == 200
     data = resp.json()
@@ -223,10 +285,94 @@ def test_upload_creates_job_and_spawns_processing_app(
     # Processing app spawn triggered
     assert len(mock_fns["process_fn"].spawn_calls) == 1
     call_args = mock_fns["process_fn"].spawn_calls[0]
-    # args: (contents, filename, job_id, namespace)
+    # args: (contents, filename, job_id, namespace, parent_batch_id)
     assert call_args[1] == "clip.mp4"
     assert call_args[2] == job_id
     assert call_args[3] == "ns1"
+    assert call_args[4] is None  # No parent batch
+
+
+def test_batch_upload_creates_batch_job_and_spawns_children(
+    test_client_internal: Tuple[TestClient, ServerStub, dict]
+) -> None:
+    client, server, mock_fns = test_client_internal
+    # Upload 3 videos
+    files = [
+        ("files", ("video1.mp4", io.BytesIO(b"fake-bytes-1"), "video/mp4")),
+        ("files", ("video2.mp4", io.BytesIO(b"fake-bytes-2"), "video/mp4")),
+        ("files", ("video3.mp4", io.BytesIO(b"fake-bytes-3"), "video/mp4")),
+    ]
+    resp = client.post("/upload", files=files, data={"namespace": "batch-ns"})
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Check batch response
+    assert data["status"] == "processing"
+    assert "batch_job_id" in data
+    assert data["total_videos"] == 3
+    assert data["successfully_spawned"] == 3
+    assert data["failed_validation"] == 0
+
+    batch_job_id = data["batch_job_id"]
+    assert batch_job_id.startswith("batch-")
+
+    # Batch job created
+    batch_job = server.job_store.get_job(batch_job_id)
+    assert batch_job is not None
+    assert batch_job["job_type"] == "batch"
+    assert len(batch_job["child_job_ids"]) == 3
+
+    # All child jobs spawned
+    assert len(mock_fns["process_fn"].spawn_calls) == 3
+
+    # Check each child job was created and linked to batch
+    for i, call_args in enumerate(mock_fns["process_fn"].spawn_calls):
+        filename = call_args[1]
+        job_id = call_args[2]
+        namespace = call_args[3]
+        parent_batch_id = call_args[4]
+
+        assert filename in ["video1.mp4", "video2.mp4", "video3.mp4"]
+        assert namespace == "batch-ns"
+        assert parent_batch_id == batch_job_id
+
+        # Child job exists and is linked to batch
+        child_job = server.job_store.get_job(job_id)
+        assert child_job is not None
+        assert child_job["parent_batch_id"] == batch_job_id
+
+
+def test_batch_upload_with_validation_failures(
+    test_client_internal: Tuple[TestClient, ServerStub, dict]
+) -> None:
+    client, server, mock_fns = test_client_internal
+    # Upload mix of valid and invalid files
+    files = [
+        ("files", ("video1.mp4", io.BytesIO(b"fake-bytes-1"), "video/mp4")),
+        ("files", ("bad.txt", io.BytesIO(b"not-a-video"), "text/plain")),  # Invalid extension
+        ("files", ("video2.mp4", io.BytesIO(b"fake-bytes-2"), "video/mp4")),
+    ]
+    resp = client.post("/upload", files=files, data={"namespace": "ns1"})
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Check that only valid files were processed
+    assert data["total_submitted"] == 3
+    assert data["failed_validation"] == 1
+    assert data["total_videos"] == 2
+    assert data["successfully_spawned"] == 2
+
+    # Only 2 spawns for valid files
+    assert len(mock_fns["process_fn"].spawn_calls) == 2
+
+
+def test_batch_upload_rejects_empty_list(
+    test_client_internal: Tuple[TestClient, ServerStub, dict]
+) -> None:
+    client, _, _ = test_client_internal
+    resp = client.post("/upload", files=[], data={"namespace": "ns1"})
+    assert resp.status_code == 400
+    assert "No files provided" in resp.json()["detail"]
 
 
 def test_status_completed_after_job_store_update(
