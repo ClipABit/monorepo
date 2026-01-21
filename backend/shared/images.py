@@ -44,7 +44,7 @@ def get_dev_image() -> modal.Image:
 def get_server_image() -> modal.Image:
     """
     Create the Modal image for the Server app.
-    
+
     Minimal dependencies for fast cold starts.
     Handles: health, status, upload, search, list_videos, delete operations.
     """
@@ -62,13 +62,14 @@ def get_server_image() -> modal.Image:
             "models",
             "api",
             "shared",
+            "services",
         )
     )
 
 def get_search_image() -> modal.Image:
     """
     Create the Modal image for the Search app.
-    
+
     Medium dependencies - includes CLIP text encoder only.
     The text encoder (~150MB) is much lighter than the full CLIP model (~350MB).
     """
@@ -85,6 +86,7 @@ def get_search_image() -> modal.Image:
             "database",
             "search",
             "shared",
+            "services",
         )
     )
 
