@@ -64,7 +64,7 @@ class FastAPIRouter:
                 else:
                     # Production mode - cross-app call
                     from shared.config import get_modal_environment
-                    processing_app_name = f"{self.environment} processing"
+                    processing_app_name = f"{self.environment}-processing"
                     ProcessingService = modal.Cls.from_name(
                         processing_app_name,
                         "ProcessingService",
@@ -166,7 +166,7 @@ class FastAPIRouter:
             else:
                 # Production mode - cross-app call via from_name
                 from shared.config import get_modal_environment
-                search_app_name = f"{self.environment} search"
+                search_app_name = f"{self.environment}-search"
                 SearchService = modal.Cls.from_name(
                     search_app_name,
                     "SearchService",
