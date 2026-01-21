@@ -76,6 +76,7 @@ def get_search_image() -> modal.Image:
     return (
         modal.Image.debian_slim(python_version="3.12")
         .pip_install(
+            "fastapi[standard]",
             "torch",
             "transformers",
             "pinecone",
