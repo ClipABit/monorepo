@@ -12,7 +12,7 @@ import modal
 
 from shared.config import get_environment, get_secrets
 from shared.images import get_search_image
-from services.search import SearchService
+from services.search_service import SearchService
 
 logger = logging.getLogger(__name__)
 

@@ -38,7 +38,7 @@ class FastAPIRouter:
         self.router = APIRouter()
 
         # Initialize UploadHandler with process_video spawn function
-        from services.upload import UploadHandler
+        from services.upload_handler import UploadHandler
         self.upload_handler = UploadHandler(
             job_store=server_instance.job_store,
             process_video_spawn_fn=self._get_process_video_spawn_fn()
