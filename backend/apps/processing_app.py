@@ -12,7 +12,7 @@ import modal
 
 from shared.config import get_environment, get_secrets
 from shared.images import get_processing_image
-from services.processing import ProcessingService
+from services.processing_service import ProcessingService
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ logger.info(f"Starting Processing App in '{env}' environment")
 
 # Create Modal app with processing-specific image
 app = modal.App(
-    name=f"{env} processing",
+    name=f"{env}-processing",
     image=get_processing_image(),
     secrets=[get_secrets()]
 )
