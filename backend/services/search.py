@@ -22,7 +22,7 @@ class SearchService:
         """Load CLIP text encoder and initialize connectors."""
         from database.pinecone_connector import PineconeConnector
         from database.r2_connector import R2Connector
-        from search.embedder import TextEmbedder
+        from search.text_embedder import TextEmbedder
 
         env = get_environment()
         logger.info(f"[{self.__class__.__name__}] Starting up in '{env}' environment")
