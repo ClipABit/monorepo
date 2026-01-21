@@ -21,7 +21,7 @@ class ProcessingService:
     def startup(self):
         """Load CLIP model and initialize all connectors."""
         from preprocessing.preprocessor import Preprocessor
-        from embeddings.embedder import VideoEmbedder
+        from embeddings.video_embedder import VideoEmbedder
         from database.pinecone_connector import PineconeConnector
         from database.job_store_connector import JobStoreConnector
         from database.r2_connector import R2Connector
