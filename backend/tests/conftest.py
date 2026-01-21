@@ -332,10 +332,61 @@ def mock_r2_connector(mocker, mock_modal_dict):
 
 
 @pytest.fixture
+def processing_service(mocker):
+    """
+    Creates a ProcessingService instance with all dependencies mocked.
+    We bypass the actual startup() logic and manually inject mocks.
+    Used for testing video processing pipeline.
+    """
+    # Create a mock for the modal module
+    mock_modal = MagicMock()
+    
+    # Configure the mock decorators to just return the original class/function
+    def identity_decorator(*args, **kwargs):
+        def wrapper(obj):
+            return obj
+        return wrapper
+    
+    # Handle @app.cls() -> returns decorator -> returns class
+    mock_modal.App.return_value.cls.side_effect = identity_decorator
+    
+    # Handle @modal.method() -> returns decorator -> returns function
+    mock_modal.method.side_effect = identity_decorator
+    
+    # Handle @modal.method_background() -> returns decorator -> returns function
+    mock_modal.method_background.side_effect = identity_decorator
+    
+    # Handle @modal.enter() -> returns decorator -> returns function
+    mock_modal.enter.side_effect = identity_decorator
+
+    # Patch sys.modules to use our mock_modal
+    with patch.dict(sys.modules, {'modal': mock_modal}):
+        # Import the processing app module
+        if 'apps.processing_app' in sys.modules:
+            import apps.processing_app as processing_app
+            importlib.reload(processing_app)
+        else:
+            import apps.processing_app as processing_app
+        
+        # Now ProcessingService is a regular Python class
+        service = processing_app.ProcessingService()
+        
+        # Mock all the components that would be set in startup()
+        service.r2_connector = mocker.MagicMock()
+        service.pinecone_connector = mocker.MagicMock()
+        service.preprocessor = mocker.MagicMock()
+        service.video_embedder = mocker.MagicMock()
+        service.job_store = mocker.MagicMock()
+        
+        yield service
+
+
+@pytest.fixture
 def server_instance(mocker):
     """
     Creates a Server instance with all dependencies mocked.
     We bypass the actual startup() logic and manually inject mocks.
+    Used for testing delete operations.
     """
     # Create a mock for the modal module
     mock_modal = MagicMock()
@@ -355,29 +406,24 @@ def server_instance(mocker):
     # Handle @modal.enter() -> returns decorator -> returns function
     mock_modal.enter.side_effect = identity_decorator
     
-    # Handle @modal.fastapi_endpoint() -> returns decorator -> returns function
-    mock_modal.fastapi_endpoint.side_effect = identity_decorator
+    # Handle @modal.asgi_app() -> returns decorator -> returns function
+    mock_modal.asgi_app.side_effect = identity_decorator
 
     # Patch sys.modules to use our mock_modal
     with patch.dict(sys.modules, {'modal': mock_modal}):
-        # Now import main. It will use the mocked modal.
-        # We need to reload it if it was already imported
-        if 'main' in sys.modules:
-            import main
-            importlib.reload(main)
+        # Import the server app module
+        if 'apps.server' in sys.modules:
+            import apps.server as server_module
+            importlib.reload(server_module)
         else:
-            import main
+            import apps.server as server_module
         
-        # Now Server is a regular Python class, not a Modal wrapped one
-        server = main.Server()
+        server = server_module.ServerService()
         
         # Mock all the components that would be set in startup()
         server.r2_connector = mocker.MagicMock()
         server.pinecone_connector = mocker.MagicMock()
-        server.preprocessor = mocker.MagicMock()
-        server.video_embedder = mocker.MagicMock()
         server.job_store = mocker.MagicMock()
-        server.searcher = mocker.MagicMock()
         
         yield server
 

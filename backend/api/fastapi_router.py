@@ -3,20 +3,82 @@ __all__ = ["FastAPIRouter"]
 import logging
 import time
 import uuid
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+
+import modal
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 logger = logging.getLogger(__name__)
 
+
 class FastAPIRouter:
-    def __init__(self, server_instance, is_internal_env):
+    def __init__(
+        self,
+        server_instance,
+        is_internal_env: bool,
+        environment: str = "dev",
+        search_service_cls=None,
+        processing_service_cls=None
+    ):
         """
         Initializes the API routes, giving them access to the server instance
         for calling background tasks and accessing shared state.
+
+        Args:
+            server_instance: The Modal server instance for accessing connectors and spawning local methods
+            is_internal_env: Whether this is an internal (dev/staging) environment
+            environment: Environment name (dev, staging, prod) for cross-app lookups
+            search_service_cls: Optional SearchService class for dev combined mode (direct access)
+            processing_service_cls: Optional ProcessingService class for dev combined mode (direct access)
         """
         self.server_instance = server_instance
         self.is_internal_env = is_internal_env
+        self.environment = environment
+        self.search_service_cls = search_service_cls
+        self.processing_service_cls = processing_service_cls
         self.router = APIRouter()
+
+        # Initialize UploadHandler with process_video spawn function
+        from services.upload import UploadHandler
+        self.upload_handler = UploadHandler(
+            job_store=server_instance.job_store,
+            process_video_spawn_fn=self._get_process_video_spawn_fn()
+        )
+
         self._register_routes()
+
+    def _get_process_video_spawn_fn(self):
+        """
+        Create a spawn function that works in both dev combined and production modes.
+
+        Returns:
+            Callable that spawns process_video_background
+        """
+        def spawn_process_video(video_bytes: bytes, filename: str, job_id: str, namespace: str, parent_batch_id: str):
+            try:
+                if self.processing_service_cls:
+                    # Dev combined mode - direct access
+                    self.processing_service_cls().process_video_background.spawn(
+                        video_bytes, filename, job_id, namespace, parent_batch_id
+                    )
+                    logger.info(f"[Upload] Spawned processing job {job_id} (dev combined mode)")
+                else:
+                    # Production mode - cross-app call
+                    from shared.config import get_modal_environment
+                    processing_app_name = f"{self.environment} processing"
+                    ProcessingService = modal.Cls.from_name(
+                        processing_app_name,
+                        "ProcessingService",
+                        environment_name=get_modal_environment()
+                    )
+                    ProcessingService().process_video_background.spawn(
+                        video_bytes, filename, job_id, namespace, parent_batch_id
+                    )
+                    logger.info(f"[Upload] Spawned processing job {job_id} to {processing_app_name}")
+            except Exception as e:
+                logger.error(f"[Upload] Failed to spawn processing job {job_id}: {e}")
+                raise
+
+        return spawn_process_video
 
     def _register_routes(self):
         """Registers all the FastAPI routes."""
@@ -59,40 +121,23 @@ class FastAPIRouter:
             }
         return job_data
 
-    async def upload(self, file: UploadFile, namespace: str = Form("")):
+    async def upload(self, files: list[UploadFile] = File(default=[]), namespace: str = Form("")):
         """
         Handle video file upload and start background processing.
+        Supports both single and batch uploads.
 
         Args:
-            file (UploadFile): The uploaded video file.
+            files (list[UploadFile]): List of uploaded video file(s). Client sends files with repeated 'files' field names, which FastAPI collects into a list.
             namespace (str, optional): Namespace for Pinecone and R2 storage (default: "")
 
         Returns:
-            dict: Contains job_id, filename, content_type, size_bytes, status, and message.
+            dict: For single upload: job_id, filename, etc.
+                  For batch upload: batch_job_id, total_videos, child_jobs, etc.
+
+        Raises:
+            HTTPException: 400 if validation fails, 500 if processing errors
         """
-        contents = await file.read()
-        file_size = len(contents)
-        job_id = str(uuid.uuid4())
-
-        self.server_instance.job_store.create_job(job_id, {
-            "job_id": job_id,
-            "filename": file.filename,
-            "status": "processing",
-            "size_bytes": file_size,
-            "content_type": file.content_type,
-            "namespace": namespace
-        })
-
-        self.server_instance.process_video_background.spawn(contents, file.filename, job_id, namespace)
-
-        return {
-            "job_id": job_id,
-            "filename": file.filename,
-            "content_type": file.content_type,
-            "size_bytes": file_size,
-            "status": "processing",
-            "message": "Video uploaded successfully, processing in background"
-        }
+        return await self.upload_handler.handle_upload(files, namespace)
 
     async def search(self, query: str, namespace: str = "", top_k: int = 10):
         """
@@ -113,14 +158,23 @@ class FastAPIRouter:
             t_start = time.perf_counter()
             logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
 
-            results = self.server_instance.searcher.search(
-                query=query,
-                top_k=top_k,
-                namespace=namespace
-            )
+            # Call search app
+            if self.search_service_cls:
+                # Dev combined mode - direct access to worker in same app
+                results = self.search_service_cls().search.remote(query, namespace, top_k)
+            else:
+                # Production mode - cross-app call via from_name
+                from shared.config import get_modal_environment
+                search_app_name = f"{self.environment} search"
+                SearchService = modal.Cls.from_name(
+                    search_app_name,
+                    "SearchService",
+                    environment_name=get_modal_environment()
+                )
+                results = SearchService().search.remote(query, namespace, top_k)
 
             t_done = time.perf_counter()
-            logger.info(f"[Search] Found {len(results)} chunk-level results in {t_done - t_start:.3f}s")
+            logger.info(f"[Search] Found {len(results)} results in {t_done - t_start:.3f}s")
 
             return {
                 "query": query,

@@ -1,5 +1,3 @@
-"""Upload validation and orchestration service."""
-
 import logging
 import uuid
 from typing import Tuple
@@ -26,18 +24,16 @@ class UploadHandler:
     MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
     MAX_BATCH_SIZE = 200
 
-    def __init__(self, job_store, process_video_spawn_fn):
+    def __init__(self, job_store, process_video_method):
         """
         Initialize upload handler.
 
         Args:
             job_store: JobStoreConnector instance for job tracking and status updates
-            process_video_spawn_fn: Callable that spawns async video processing
-                For dev mode: ProcessingService().process_video_background.spawn
-                For prod mode: modal.Cls.from_name(...).process_video_background.spawn
+            process_video_method: Modal method reference for spawning async video processing
         """
         self.job_store = job_store
-        self.process_video_spawn = process_video_spawn_fn
+        self.process_video = process_video_method
 
     def validate_file(self, file: UploadFile, file_contents: bytes = None) -> Tuple[bool, str]:
         """
@@ -116,7 +112,7 @@ class UploadHandler:
             "namespace": namespace
         })
 
-        self.process_video_spawn(contents, file.filename, job_id, namespace, None)
+        self.process_video.spawn(contents, file.filename, job_id, namespace, None)
 
         return {
             "job_id": job_id,
@@ -197,7 +193,7 @@ class UploadHandler:
                         "namespace": namespace
                     })
 
-                    self.process_video_spawn(
+                    self.process_video.spawn(
                         contents, meta["file"].filename, meta["job_id"], namespace, batch_job_id
                     )
                     spawned.append(meta["job_id"])
