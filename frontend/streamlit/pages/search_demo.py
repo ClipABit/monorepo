@@ -488,10 +488,13 @@ else:
     prev_disabled = st.session_state.repo_loading or current_page_idx <= 0
     if st.session_state.repo_loading:
         next_disabled = True
-    elif total_pages > 0:
-        next_disabled = (current_page_idx + 1) >= total_pages
     else:
-        next_disabled = True
+        # Enable next button if:
+        # 1. The next page is already cached in repo_pages, OR
+        # 2. There's a repo_next_token indicating more pages can be fetched
+        has_cached_next_page = (current_page_idx + 1) < total_loaded_pages
+        has_more_pages_to_fetch = st.session_state.repo_next_token is not None
+        next_disabled = not (has_cached_next_page or has_more_pages_to_fetch)
 
     nav_info_col, nav_prev_col, nav_next_col = st.columns([6, 0.3, 0.3])
 

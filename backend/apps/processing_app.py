@@ -12,7 +12,7 @@ import modal
 
 from shared.config import get_environment, get_secrets
 from shared.images import get_processing_image
-from services.processing import ProcessingService
+from services.processing_service import ProcessingService
 
 logger = logging.getLogger(__name__)
 

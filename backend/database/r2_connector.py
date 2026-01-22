@@ -364,15 +364,12 @@ class R2Connector:
             params = {
                 "Bucket": self.bucket_name,
                 "Prefix": prefix,
-                "MaxKeys": min(page_size + 1, 1000),
+                "MaxKeys": page_size,  # Request exactly page_size items
             }
 
             if continuation_token:
-                cursor_key = self._decode_cursor_token(continuation_token)
-                if cursor_key:
-                    params["StartAfter"] = cursor_key
-                else:
-                    params["ContinuationToken"] = continuation_token
+                # Use S3's native ContinuationToken
+                params["ContinuationToken"] = continuation_token
 
             response = self.s3_client.list_objects_v2(**params)
 
@@ -385,15 +382,19 @@ class R2Connector:
                     continue
                 filtered.append(obj)
 
-            has_more_flag = response.get("IsTruncated", False)
-            items = filtered[:page_size]
-            has_more = has_more_flag or len(filtered) > page_size
+            # Use S3's IsTruncated flag to determine if there are more pages
+            has_more = response.get("IsTruncated", False)
+            items = filtered  # Use all filtered items since we requested exactly page_size
 
             videos: List[dict] = []
             for obj in items:
                 object_key = obj.get("Key")
                 try:
-                    filename = object_key.split('/', 1)[1]
+                    parts = object_key.split('/', 1)
+                    if len(parts) != 2:
+                        logger.warning(f"Skipping object with unexpected key format: {object_key}")
+                        continue
+                    filename = parts[1]
                     identifier = self._encode_path(self.bucket_name, namespace, filename)
                     url = self.s3_client.generate_presigned_url(
                         'get_object',
@@ -406,12 +407,12 @@ class R2Connector:
                             "hashed_identifier": identifier,
                             "presigned_url": url,
                         })
-                except ClientError as e:
-                    logger.error(f"Error processing video {object_key}: {e}")
+                    else:
+                        logger.warning(f"Generated empty presigned URL for {object_key}")
+                except Exception as e:
+                    logger.error(f"Error processing video {object_key}: {e}", exc_info=True)
 
-            next_token = response.get("NextContinuationToken") if has_more_flag else None
-            if not next_token and has_more and videos:
-                next_token = self._encode_cursor_token(items[-1].get("Key"))
+            next_token = response.get("NextContinuationToken") if has_more else None
 
             logger.info(
                 "Fetched %s video objects for namespace %s (has_more=%s)",

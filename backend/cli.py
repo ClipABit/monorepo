@@ -9,9 +9,9 @@ DEV_COMBINED_APP = "apps/dev_combined.py"
 
 # Individual apps for staging/prod deployment
 APPS = {
-    "server": ("apps/server.py", "\033[36m"),      # Cyan
-    "search": ("apps/search_app.py", "\033[33m"),  # Yellow
-    "processing": ("apps/processing_app.py", "\033[35m"),  # Magenta
+    "server": ("services/http_server.py", "\033[36m"),      # Cyan
+    "search": ("services/search_service.py", "\033[33m"),  # Yellow
+    "processing": ("services/processing_service.py", "\033[35m"),  # Magenta
 }
 RESET = "\033[0m"
 
