@@ -142,7 +142,7 @@ class TestFetchVideoPage:
         mock_client.list_objects_v2.assert_called_once_with(
             Bucket="test",
             Prefix="ns/",
-            MaxKeys=3,
+            MaxKeys=3,  # Uses page_size + 1 for peek-ahead
         )
         for call in mock_client.generate_presigned_url.call_args_list:
             kwargs = call.kwargs
@@ -157,33 +157,50 @@ class TestFetchVideoPage:
         assert videos == []
         assert token is None
 
-    def test_fetch_page_cursor_fallback(self, mock_r2_connector):
+    def test_fetch_page_no_more_pages(self, mock_r2_connector):
+        """Test that no next_token is returned when S3 indicates no more pages."""
         connector, mock_client, _ = mock_r2_connector
 
         mock_client.list_objects_v2.return_value = {
             'Contents': [
                 {'Key': 'ns/vid1.mp4'},
                 {'Key': 'ns/vid2.mp4'},
-                {'Key': 'ns/vid3.mp4'},
             ],
-            'IsTruncated': False,
+            'IsTruncated': False,  # S3 says no more pages
         }
         mock_client.generate_presigned_url.return_value = "http://url"
 
         videos, token = connector.fetch_video_page(namespace="ns", page_size=2)
 
         assert len(videos) == 2
-        assert token is not None
-        assert token.startswith("cursor:")
+        assert token is None  # No more pages
 
-        mock_client.list_objects_v2.reset_mock()
-        connector.fetch_video_page(namespace="ns", page_size=2, continuation_token=token)
+    def test_fetch_page_with_continuation_token(self, mock_r2_connector):
+        """Test that continuation tokens are passed to S3 correctly."""
+        connector, mock_client, _ = mock_r2_connector
+
+        mock_client.list_objects_v2.return_value = {
+            'Contents': [
+                {'Key': 'ns/vid3.mp4'},
+                {'Key': 'ns/vid4.mp4'},
+            ],
+            'IsTruncated': False,
+        }
+        mock_client.generate_presigned_url.return_value = "http://url"
+
+        videos, token = connector.fetch_video_page(
+            namespace="ns", 
+            page_size=2, 
+            continuation_token="s3-native-token"
+        )
+        
         mock_client.list_objects_v2.assert_called_once_with(
             Bucket="test",
             Prefix="ns/",
-            MaxKeys=3,
-            StartAfter='ns/vid2.mp4',
+            MaxKeys=3,  # Uses page_size + 1 for peek-ahead
+            ContinuationToken="s3-native-token",
         )
+        assert len(videos) == 2
         for call in mock_client.generate_presigned_url.call_args_list:
             kwargs = call.kwargs
             assert kwargs['ExpiresIn'] == DEFAULT_PRESIGNED_URL_TTL

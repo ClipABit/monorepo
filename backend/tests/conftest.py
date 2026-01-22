@@ -411,12 +411,12 @@ def server_instance(mocker):
 
     # Patch sys.modules to use our mock_modal
     with patch.dict(sys.modules, {'modal': mock_modal}):
-        # Import the server app module
-        if 'apps.server' in sys.modules:
-            import apps.server as server_module
+        # Import the server service module
+        if 'services.http_server' in sys.modules:
+            import services.http_server as server_module
             importlib.reload(server_module)
         else:
-            import apps.server as server_module
+            import services.http_server as server_module
         
         server = server_module.ServerService()
         
