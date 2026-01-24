@@ -142,7 +142,7 @@ class TestFetchVideoPage:
         mock_client.list_objects_v2.assert_called_once_with(
             Bucket="test",
             Prefix="ns/",
-            MaxKeys=3,  # Uses page_size + 1 for peek-ahead
+            MaxKeys=2,  # Uses exact page_size
         )
         for call in mock_client.generate_presigned_url.call_args_list:
             kwargs = call.kwargs
@@ -197,7 +197,7 @@ class TestFetchVideoPage:
         mock_client.list_objects_v2.assert_called_once_with(
             Bucket="test",
             Prefix="ns/",
-            MaxKeys=3,  # Uses page_size + 1 for peek-ahead
+            MaxKeys=2,  # Uses exact page_size
             ContinuationToken="s3-native-token",
         )
         assert len(videos) == 2
