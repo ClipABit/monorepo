@@ -1,5 +1,7 @@
 """
 SearchService class - base class shared between search_app.py and dev_combined.py
+
+Exposes its own ASGI app for direct HTTP access (no server gateway hop).
 """
 
 import logging
@@ -12,9 +14,10 @@ logger = logging.getLogger(__name__)
 
 class SearchService:
     """
-    Search service base class.
-    
+    Search service with direct HTTP endpoint.
+
     Loads CLIP text encoder on startup and handles semantic search queries.
+    Exposes its own ASGI app for lower latency (bypasses server gateway).
     """
 
     @modal.enter()
@@ -53,11 +56,45 @@ class SearchService:
             environment=env
         )
 
+        # Create FastAPI app for direct HTTP access
+        self.fastapi_app = self._create_fastapi_app()
+
         logger.info(f"[{self.__class__.__name__}] Initialized and ready!")
 
-    @modal.method()
-    def search(self, query: str, namespace: str = "", top_k: int = 10) -> list:
-        """Perform semantic search using CLIP text embeddings."""
+    def _create_fastapi_app(self):
+        """Create FastAPI app with search routes."""
+        from fastapi import FastAPI
+        from fastapi.middleware.cors import CORSMiddleware
+        from api.search_fastapi_router import SearchFastAPIRouter
+
+        app = FastAPI(title="ClipABit Search API")
+
+        # Add CORS middleware
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+        # Add search routes
+        router = SearchFastAPIRouter(search_service_instance=self)
+        app.include_router(router.router)
+
+        return app
+
+    @modal.asgi_app()
+    def asgi_app(self):
+        """Expose FastAPI app as ASGI endpoint."""
+        return self.fastapi_app
+
+    def _search_internal(self, query: str, namespace: str = "", top_k: int = 10) -> list:
+        """
+        Internal search implementation.
+
+        Called directly by the FastAPI router (no RPC overhead).
+        """
         logger.info(f"[{self.__class__.__name__}] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
 
         # Generate query embedding

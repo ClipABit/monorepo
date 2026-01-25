@@ -11,8 +11,9 @@ For staging/prod deployments, use the separate apps:
 - apps/search_app.py
 - apps/processing_app.py
 
-Note: Cold starts will be slower (~20s) since all dependencies load together,
-but this is acceptable for local development where iteration speed matters more.
+Endpoints:
+- DevServer: /health, /status, /upload, /videos, /videos/{id}, /cache/clear
+- DevSearchService: /health, /search (separate ASGI app for lower latency)
 """
 
 import logging
@@ -44,6 +45,7 @@ app = modal.App(
     secrets=[get_secrets()]
 )
 
+# SearchService exposes its own ASGI app for direct HTTP access (no server hop)
 DevSearchService = app.cls(
     cpu=2.0,
     memory=2048,
@@ -51,20 +53,21 @@ DevSearchService = app.cls(
     scaledown_window=120,
     enable_memory_snapshot=True,  # Snapshot after @enter() for faster subsequent cold starts
 )(SearchService)
+
 DevProcessingService = app.cls(cpu=4.0, memory=4096, timeout=600)(ProcessingService)
+
 
 # Define DevServer to add the asgi_app method and pass service classes
 @app.cls(cpu=2.0, memory=2048, timeout=120, scaledown_window=120)
 class DevServer(ServerService):
-    """Server with ASGI app for dev combined mode."""
-    
+    """Server with ASGI app for dev combined mode (excludes search)."""
+
     @modal.enter()
     def startup(self):
         """Initialize connectors and create FastAPI app with service classes."""
         self._initialize_connectors()
-        # Create FastAPI app with registered service classes (dev combined mode)
+        # Create FastAPI app (search is handled by DevSearchService's own ASGI app)
         self.fastapi_app = self.create_fastapi_app(
-            search_service_cls=DevSearchService,
             processing_service_cls=DevProcessingService
         )
 

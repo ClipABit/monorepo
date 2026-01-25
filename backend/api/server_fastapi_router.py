@@ -1,7 +1,6 @@
-__all__ = ["FastAPIRouter"]
+__all__ = ["ServerFastAPIRouter"]
 
 import logging
-import time
 import uuid
 
 import modal
@@ -10,13 +9,19 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 logger = logging.getLogger(__name__)
 
 
-class FastAPIRouter:
+class ServerFastAPIRouter:
+    """
+    FastAPI router for the Server service.
+
+    Handles: health, status, upload, list_videos, delete, cache operations.
+    Search is handled separately by SearchService with its own ASGI app.
+    """
+
     def __init__(
         self,
         server_instance,
         is_internal_env: bool,
         environment: str = "dev",
-        search_service_cls=None,
         processing_service_cls=None
     ):
         """
@@ -27,13 +32,11 @@ class FastAPIRouter:
             server_instance: The Modal server instance for accessing connectors and spawning local methods
             is_internal_env: Whether this is an internal (dev/staging) environment
             environment: Environment name (dev, staging, prod) for cross-app lookups
-            search_service_cls: Optional SearchService class for dev combined mode (direct access)
             processing_service_cls: Optional ProcessingService class for dev combined mode (direct access)
         """
         self.server_instance = server_instance
         self.is_internal_env = is_internal_env
         self.environment = environment
-        self.search_service_cls = search_service_cls
         self.processing_service_cls = processing_service_cls
         self.router = APIRouter()
 
@@ -85,7 +88,6 @@ class FastAPIRouter:
         self.router.add_api_route("/health", self.health, methods=["GET"])
         self.router.add_api_route("/status", self.status, methods=["GET"])
         self.router.add_api_route("/upload", self.upload, methods=["POST"])
-        self.router.add_api_route("/search", self.search, methods=["GET"])
         self.router.add_api_route("/videos", self.list_videos, methods=["GET"])
         self.router.add_api_route("/videos/{hashed_identifier}", self.delete_video, methods=["DELETE"])
         self.router.add_api_route("/cache/clear", self.clear_cache, methods=["POST"])
@@ -139,54 +141,6 @@ class FastAPIRouter:
             HTTPException: 400 if validation fails, 500 if processing errors
         """
         return await self.upload_handler.handle_upload(files, namespace)
-
-    async def search(self, query: str, namespace: str = "", top_k: int = 10):
-        """
-        Search endpoint - accepts a text query and returns semantic search results.
-
-        Args:
-            query (str): The search query string (required)
-            namespace (str, optional): Namespace for Pinecone search (default: "")
-            top_k (int, optional): Number of top results to return (default: 10)
-
-        Returns: 
-            json: dict with 'query', 'results', and 'timing'
-        
-        Raises:
-            HTTPException: If search fails (500 Internal Server Error)
-        """
-        try:
-            t_start = time.perf_counter()
-            logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
-
-            # Call search app
-            if self.search_service_cls:
-                # Dev combined mode - direct access to worker in same app
-                results = self.search_service_cls().search.remote(query, namespace, top_k)
-            else:
-                # Production mode - cross-app call via from_name
-                from shared.config import get_modal_environment
-                search_app_name = f"{self.environment}-search"
-                SearchService = modal.Cls.from_name(
-                    search_app_name,
-                    "SearchService",
-                    environment_name=get_modal_environment()
-                )
-                results = SearchService().search.remote(query, namespace, top_k)
-
-            t_done = time.perf_counter()
-            logger.info(f"[Search] Found {len(results)} results in {t_done - t_start:.3f}s")
-
-            return {
-                "query": query,
-                "results": results,
-                "timing": {
-                    "total_s": round(t_done - t_start, 3)
-                }
-            }
-        except Exception as e:
-            logger.error(f"[Search] Error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
 
     async def list_videos(
         self,
