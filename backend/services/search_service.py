@@ -39,7 +39,7 @@ class SearchService:
         # Initialize text embedder (loads CLIP text encoder)
         self.embedder = TextEmbedder()
         self.embedder._load_model()
-        logger.info(f"[{self.__class__.__name__}] CLIP text encoder loaded on device: {self.embedder.device}")
+        logger.info(f"[{self.__class__.__name__}] CLIP text encoder (ONNX) loaded on CPU")
 
         # Initialize connectors
         self.pinecone_connector = PineconeConnector(

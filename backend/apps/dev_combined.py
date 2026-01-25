@@ -44,11 +44,17 @@ app = modal.App(
     secrets=[get_secrets()]
 )
 
-DevSearchService = app.cls(cpu=2.0, memory=2048, timeout=60, scaledown_window=120)(SearchService)
+DevSearchService = app.cls(
+    cpu=2.0,
+    memory=2048,
+    timeout=60,
+    scaledown_window=120,
+    enable_memory_snapshot=True,  # Snapshot after @enter() for faster subsequent cold starts
+)(SearchService)
 DevProcessingService = app.cls(cpu=4.0, memory=4096, timeout=600)(ProcessingService)
 
 # Define DevServer to add the asgi_app method and pass service classes
-@app.cls(cpu=2.0, memory=2048, timeout=120)
+@app.cls(cpu=2.0, memory=2048, timeout=120, scaledown_window=120)
 class DevServer(ServerService):
     """Server with ASGI app for dev combined mode."""
     
