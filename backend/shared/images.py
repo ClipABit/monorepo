@@ -153,14 +153,6 @@ def _export_clip_text_to_onnx():
     print("[BUILD TIME] ✓ Export complete!")
 
 
-def _preimport_search_modules():
-    """Pre-import modules at build time to cache them for faster cold starts."""
-    import onnxruntime
-    import tokenizers
-    import numpy
-    print("[BUILD TIME] Pre-imported: onnxruntime, tokenizers, numpy")
-
-
 def get_search_image() -> modal.Image:
     """
     Create the Modal image for the Search app.
@@ -175,7 +167,6 @@ def get_search_image() -> modal.Image:
     2. Export CLIP model to ONNX format and save tokenizer
     3. Uninstall torch + transformers to reduce image size
     4. Install lightweight runtime deps (onnxruntime, tokenizers)
-    5. Pre-import modules to cache them
     """
     return (
         modal.Image.debian_slim(python_version="3.12")
@@ -197,8 +188,6 @@ def get_search_image() -> modal.Image:
             "numpy",
             "tokenizers",  # Fast tokenizer without transformers overhead
         )
-        # Step 5: Pre-import modules to cache them
-        .run_function(_preimport_search_modules)
         .add_local_python_source(
             "database",
             "search",

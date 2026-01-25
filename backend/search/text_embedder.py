@@ -9,7 +9,6 @@ reducing cold start times significantly.
 """
 
 import logging
-from pathlib import Path
 from typing import Union, List
 import numpy as np
 
@@ -76,7 +75,6 @@ class TextEmbedder:
             self.tokenizer = Tokenizer.from_file(self.tokenizer_path)
 
             # Configure padding and truncation for CLIP (max 77 tokens)
-            from tokenizers import processors
             self.tokenizer.enable_padding(length=77, pad_id=0)
             self.tokenizer.enable_truncation(max_length=77)
 
