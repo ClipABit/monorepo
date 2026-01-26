@@ -190,6 +190,7 @@ def get_search_image() -> modal.Image:
             "fastapi[standard]",
         )
         .add_local_python_source(
+            "api",
             "database",
             "search",
             "shared",
