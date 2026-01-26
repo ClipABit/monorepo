@@ -275,6 +275,7 @@ class TestSearchServiceFastAPIApp:
         # Note: CORS middleware may appear differently in the list
         # The important thing is the app is configured
         assert app is not None
+        assert "Middleware" in middleware_classes
 
 
 class TestSearchServiceHTTPEndpoints:

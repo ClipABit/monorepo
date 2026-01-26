@@ -5,7 +5,6 @@ Tests the search API endpoint with mocked SearchService.
 """
 
 from typing import Any, List, Dict
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
