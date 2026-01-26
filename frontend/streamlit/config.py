@@ -35,7 +35,7 @@ class Config:
     SERVER_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-{url_portion1}server-asgi-app{url_portion2}.modal.run"
 
     # Search API URL
-    SEARCH_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-searchservice-asgi-app{url_portion2}.modal.run"
+    SEARCH_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-search-searchservice-asgi-app{url_portion2}.modal.run"
 
     # API Endpoints
     SERVER_UPLOAD_URL = f"{SERVER_BASE_URL}/upload"
