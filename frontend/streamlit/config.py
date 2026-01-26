@@ -32,7 +32,6 @@ class Config:
     url_portion2 = "-dev" if ENVIRONMENT == "dev" else ""
 
     # Server API URL (handles upload, status, videos, delete, cache)
-    # URL structure: {workspace}--{app-name}-{class-name}-asgi-app-{label}.modal.run
     SERVER_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-{url_portion1}server-asgi-app{url_portion2}.modal.run"
 
     # Search API URL
