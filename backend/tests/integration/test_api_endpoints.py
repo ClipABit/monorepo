@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.fastapi_router import FastAPIRouter
+from api.server_fastapi_router import ServerFastAPIRouter
 
 
 class FakeJobStore:
@@ -135,7 +135,7 @@ class FakeR2Connector:
 
 class ServerStub:
     """
-    Minimal server stub providing the attributes FastAPIRouter uses.
+    Minimal server stub providing the attributes ServerFastAPIRouter uses.
     """
 
     def __init__(self) -> None:
@@ -156,49 +156,29 @@ class ServerStub:
 def mock_modal_lookup():
     """Mock modal.Cls.from_name to return fake service classes."""
     fake_process_fn = FakeModalFunction()
-    fake_search_fn = FakeModalFunction()
-    fake_search_fn.remote_return_value = [
-        {
-            "id": "chunk-1",
-            "score": 0.99,
-            "metadata": {
-                "presigned_url": "https://example.com/video.mp4",
-                "start_time_s": 0,
-                "file_filename": "video.mp4",
-                "file_hashed_identifier": "abc123",
-            },
-        }
-    ]
 
     class FakeServiceClass:
         """Fake service class that returns fake modal functions."""
         def __init__(self, func):
             self.func = func
-        
+
         def __call__(self):
             """Return self to allow chaining like ServiceClass().method"""
             return self
-        
+
         @property
         def process_video_background(self):
-            return self.func
-        
-        @property
-        def search(self):
             return self.func
 
     def lookup_side_effect(app_name: str, class_name: str, **kwargs):
         if "processing" in app_name or class_name == "ProcessingService":
             return FakeServiceClass(fake_process_fn)
-        elif "search" in app_name or class_name == "SearchService":
-            return FakeServiceClass(fake_search_fn)
         raise ValueError(f"Unknown app: {app_name}, class: {class_name}")
 
     # Mock modal.Cls.from_name
     with patch.object(modal.Cls, "from_name", side_effect=lookup_side_effect):
         yield {
             "process_fn": fake_process_fn,
-            "search_fn": fake_search_fn,
         }
 
 
@@ -209,7 +189,7 @@ def test_client_internal(mock_modal_lookup) -> Tuple[TestClient, ServerStub, dic
     """
     server = ServerStub()
     app = FastAPI()
-    router = FastAPIRouter(server, is_internal_env=True, environment="dev")
+    router = ServerFastAPIRouter(server, is_internal_env=True, environment="dev")
     app.include_router(router.router)
     return TestClient(app), server, mock_modal_lookup
 
@@ -221,7 +201,7 @@ def test_client_external(mock_modal_lookup) -> Tuple[TestClient, ServerStub, dic
     """
     server = ServerStub()
     app = FastAPI()
-    router = FastAPIRouter(server, is_internal_env=False, environment="prod")
+    router = ServerFastAPIRouter(server, is_internal_env=False, environment="prod")
     app.include_router(router.router)
     return TestClient(app), server, mock_modal_lookup
 
@@ -246,20 +226,6 @@ def test_list_videos_returns_data(test_client_internal: Tuple[TestClient, Server
     assert data["total_pages"] == 1
     assert data["next_page_token"] is None
     assert server.r2_connector.last_namespace == "ns1"
-
-
-def test_search_invokes_search_app_and_returns_results(
-    test_client_internal: Tuple[TestClient, ServerStub, dict]
-) -> None:
-    client, _, mock_fns = test_client_internal
-    resp = client.get("/search", params={"query": "hello world", "namespace": "web-demo", "top_k": 5})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "results" in data and isinstance(data["results"], list)
-    assert len(data["results"]) == 1
-    # Verify the search app was called with correct args
-    assert len(mock_fns["search_fn"].remote_calls) == 1
-    assert mock_fns["search_fn"].remote_calls[0] == ("hello world", "web-demo", 5)
 
 
 def test_status_processing_when_unknown_job(test_client_internal: Tuple[TestClient, ServerStub, dict]) -> None:

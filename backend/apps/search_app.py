@@ -2,9 +2,12 @@
 Search Modal App
 
 Handles semantic search with CLIP text encoder.
-Medium-weight dependencies (~8-10s cold start) - lighter than full video processing.
+Optimized for fast cold starts:
+- ONNX Runtime instead of PyTorch (~2GB saved)
+- Raw tokenizers instead of transformers (~5-8s import time saved)
+- Memory snapshots for instant subsequent cold starts
 
-Uses CLIPTextModelWithProjection (~150MB) instead of full CLIPModel (~350MB).
+Uses exported CLIP text model in ONNX format.
 """
 
 import logging
@@ -28,4 +31,10 @@ app = modal.App(
 )
 
 # Register SearchService with this app
-app.cls(cpu=2.0, memory=2048, timeout=60, scaledown_window=120)(SearchService)
+app.cls(
+    cpu=2.0,
+    memory=2048,
+    timeout=60,
+    scaledown_window=120,
+    enable_memory_snapshot=True,  # Snapshot after @enter() for faster subsequent cold starts
+)(SearchService)

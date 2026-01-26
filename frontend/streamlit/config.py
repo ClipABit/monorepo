@@ -21,27 +21,29 @@ class Config:
     # Validate environment
     if ENVIRONMENT not in ["dev", "prod", "staging"]:
         raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod, staging")
-    
+
     print(f"Running in {ENVIRONMENT} environment")
 
     # Modal app name (matches backend app name)
     APP_NAME = f"clipabit-{ENVIRONMENT}"
-    
+
     # Determine url portion based on environment
     url_portion1 = "dev" if ENVIRONMENT == "dev" else ""
     url_portion2 = "-dev" if ENVIRONMENT == "dev" else ""
 
-    # Base URL for single ASGI app exposed via Modal
-    # Pattern: https://clipabit01--{env}-api-server-asgi-app-{env}.modal.run (dev/staging)
-    # URL structure: {workspace}--{app-name}-{class-name}-asgi-app-{label}.modal.run
-    BASE_API_URL = f"https://clipabit01--{ENVIRONMENT}-{url_portion1}server-asgi-app{url_portion2}.modal.run"
+    # Server API URL (handles upload, status, videos, delete, cache)
+    SERVER_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-{url_portion1}server-asgi-app{url_portion2}.modal.run"
 
-    # API Endpoints routed through the single FastAPI app
-    SEARCH_API_URL = f"{BASE_API_URL}/search"
-    UPLOAD_API_URL = f"{BASE_API_URL}/upload"
-    STATUS_API_URL = f"{BASE_API_URL}/status"
-    LIST_VIDEOS_API_URL = f"{BASE_API_URL}/videos"
-    DELETE_VIDEO_API_URL = f"{BASE_API_URL}/videos/{{hashed_identifier}}"  # with path param on call
+    # Search API URL
+    SEARCH_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-searchservice-asgi-app{url_portion2}.modal.run"
+
+    # API Endpoints
+    SERVER_UPLOAD_URL = f"{SERVER_BASE_URL}/upload"
+    SERVER_STATUS_URL = f"{SERVER_BASE_URL}/status"
+    SEARCH_STATUS_URL = f"{SEARCH_BASE_URL}/status"
+    SEARCH_SEARCH_URL = f"{SEARCH_BASE_URL}/search"
+    SERVER_LIST_VIDEOS_URL = f"{SERVER_BASE_URL}/videos"
+    SERVER_DELETE_VIDEO_URL = f"{SERVER_BASE_URL}/videos/{{hashed_identifier}}"
 
     # Namespace for Pinecone and R2 (web-demo for public demo)
     NAMESPACE = "web-demo"
@@ -62,11 +64,14 @@ class Config:
             "is_internal_env": cls.IS_INTERNAL_ENV,
 
             # API Endpoints
-            "search_api_url": cls.SEARCH_API_URL,
-            "upload_api_url": cls.UPLOAD_API_URL,
-            "status_api_url": cls.STATUS_API_URL,
-            "list_videos_api_url": cls.LIST_VIDEOS_API_URL,
-            "delete_video_api_url": cls.DELETE_VIDEO_API_URL,
+            "server_base_url": cls.SERVER_BASE_URL,
+            "search_base_url": cls.SEARCH_BASE_URL,
+            "server_upload_url": cls.SERVER_UPLOAD_URL,
+            "server_status_url": cls.SERVER_STATUS_URL,
+            "search_status_url": cls.SEARCH_STATUS_URL,
+            "search_search_url": cls.SEARCH_SEARCH_URL,
+            "server_list_videos_url": cls.SERVER_LIST_VIDEOS_URL,
+            "server_delete_video_url": cls.SERVER_DELETE_VIDEO_URL,
         }
 
     @classmethod

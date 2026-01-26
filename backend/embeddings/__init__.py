@@ -1,5 +1,5 @@
 # Make embeddings a proper Python package
 
-from .embedder import VideoEmbedder
+from .video_embedder import VideoEmbedder
 
 __all__ = ["VideoEmbedder"]
