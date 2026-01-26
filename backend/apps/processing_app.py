@@ -22,7 +22,7 @@ logger.info(f"Starting Processing App in '{env}' environment")
 
 # Create Modal app with processing-specific image
 app = modal.App(
-    name=f"{env}-processing",
+    name=env,
     image=get_processing_image(),
     secrets=[get_secrets()]
 )

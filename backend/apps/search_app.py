@@ -25,7 +25,7 @@ logger.info(f"Starting Search App in '{env}' environment")
 
 # Create Modal app with search-specific image
 app = modal.App(
-    name=f"{env}-search",
+    name=env,
     image=get_search_image(),
     secrets=[get_secrets()]
 )
