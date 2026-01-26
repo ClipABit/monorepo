@@ -31,16 +31,10 @@ class Config:
     url_portion = "dev" if ENVIRONMENT == "dev" else ""
 
     # Server API URL (handles upload, status, videos, delete, cache)
-    if ENVIRONMENT == "dev":
-        SERVER_BASE_URL = f"https://clipabit01--dev-server-devserver-asgi-app-dev.modal.run"
-    else:
-        SERVER_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-server-server-asgi-app.modal.run"
+    SERVER_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-server-{url_portion}server-asgi-app-{url_portion}.modal.run"
 
     # Search API URL (in dev its server-searchservice-asgi-app, else its search-searchservice-asgi-app)
-    if ENVIRONMENT == "dev":
-        SEARCH_BASE_URL = f"https://clipabit01--dev-server-searchservice-asgi-app-dev.modal.run"
-    else:
-        SEARCH_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-search-searchservice-asgi-app.modal.run"
+    SEARCH_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-{"server" if ENVIRONMENT == "dev" else "search"}-searchservice-asgi-app-{url_portion}.modal.run"
 
     # API Endpoints
     SERVER_UPLOAD_URL = f"{SERVER_BASE_URL}/upload"
