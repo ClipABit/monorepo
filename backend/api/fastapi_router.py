@@ -89,6 +89,8 @@ class FastAPIRouter:
         self.router.add_api_route("/videos", self.list_videos, methods=["GET"])
         self.router.add_api_route("/videos/{hashed_identifier}", self.delete_video, methods=["DELETE"])
         self.router.add_api_route("/cache/clear", self.clear_cache, methods=["POST"])
+        self.router.add_api_route("/auth/device/code", self.request_device_code, methods=["POST"])
+        self.router.add_api_route("/auth/device/poll", self.poll_device_code, methods=["POST"])
 
     async def health(self):
         """
@@ -307,3 +309,95 @@ class FastAPIRouter:
             logger.error(f"[Clear Cache] Error clearing cache: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    async def request_device_code(self):
+        """
+        Request device codes for OAuth device flow.
+        
+        No request body needed.
+        
+        Returns:
+            dict: {
+                "device_code": str,  # Long secret code
+                "user_code": str,    # User-friendly code (e.g., "ABC-420")
+                "verification_url": str,  # URL where user enters code
+                "expires_in": int,   # Expiration time in seconds (600 = 10 minutes)
+                "interval": int      # Polling interval in seconds (3)
+            }
+        """
+        try:
+            device_code = self.server_instance.auth_connector.generate_device_code()
+            user_code = self.server_instance.auth_connector.generate_user_code()
+            
+            expires_in = 600 
+            success = self.server_instance.auth_connector.create_device_code_entry(
+                device_code=device_code,
+                user_code=user_code,
+                expires_in=expires_in
+            )
+            
+            if not success:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to create device code entry"
+                )
+            
+            logger.info(f"[Device Code] Generated device code for user_code: {user_code}")
+            
+            return {
+                "device_code": device_code,
+                "user_code": user_code,
+                "verification_url": "clipabit.web.app/auth/device",
+                "expires_in": expires_in,
+                "interval": 3
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[Device Code] Error generating device code: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def poll_device_code(self, device_code: str):
+        """
+        Poll for device code authorization status.
+        
+        Request body:
+        {
+            "device_code": "a8f3j2k1..."
+        }
+        
+        Responses:
+        - Still waiting: {"status": "pending"}
+        - User authorized: {"status": "authorized", "user_id": "...", "id_token": "...", "refresh_token": "..."}
+        - Timed out: {"status": "expired", "error": "device_code_expired"}
+        - User denied: {"status": "denied", "error": "user_denied_authorization"}
+        
+        Polling behavior:
+        - Client should poll every 3 seconds (interval from device/code response)
+        - Max 200 attempts (10 minutes total)
+        - Stop immediately if user closes dialog
+        """
+        try:
+            
+            if not device_code:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing required field: 'device_code'"
+                )
+            
+            
+            status = self.server_instance.auth_connector.get_device_code_poll_status(device_code)
+            
+            if status is None:
+                return {
+                    "status": "expired",
+                    "error": "device_code_expired"
+                }
+            
+            logger.info(f"[Device Poll] Device code {device_code} | status: {status.get('status')}")
+            return status
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[Device Poll] Error polling device code: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
