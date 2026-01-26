@@ -40,7 +40,7 @@ if env != "dev":
 logger.info("Starting Combined Dev App - all services in one app for local iteration")
 
 app = modal.App(
-    name=env,
+    name=f"{env}-server",
     image=get_dev_image(),
     secrets=[get_secrets()]
 )
