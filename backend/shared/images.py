@@ -186,7 +186,8 @@ def get_search_image() -> modal.Image:
             "pinecone",
             "boto3",
             "numpy",
-            "tokenizers",  # Fast tokenizer without transformers overhead
+            "tokenizers",  
+            "fastapi[standard]",
         )
         .add_local_python_source(
             "database",
