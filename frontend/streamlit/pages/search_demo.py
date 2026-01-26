@@ -35,14 +35,16 @@ if 'repo_action' not in st.session_state:
     st.session_state.repo_action = None
 
 # Configs
-SEARCH_API_URL = Config.SEARCH_API_URL
-UPLOAD_API_URL = Config.UPLOAD_API_URL
-STATUS_API_URL = Config.STATUS_API_URL
-LIST_VIDEOS_API_URL = Config.LIST_VIDEOS_API_URL
-DELETE_VIDEO_API_URL = Config.DELETE_VIDEO_API_URL
 NAMESPACE = Config.NAMESPACE
 ENVIRONMENT = Config.ENVIRONMENT
 IS_INTERNAL_ENV = Config.IS_INTERNAL_ENV
+
+# API Endpoints
+SEARCH_SEARCH_URL = Config.SEARCH_SEARCH_URL
+SERVER_UPLOAD_URL = Config.SERVER_UPLOAD_URL
+SERVER_STATUS_URL = Config.SERVER_STATUS_URL
+SERVER_LIST_VIDEOS_URL = Config.SERVER_LIST_VIDEOS_URL
+SERVER_DELETE_VIDEO_URL = Config.SERVER_DELETE_VIDEO_URL
 
 
 def set_repo_action(action: str) -> None:
@@ -53,7 +55,7 @@ def set_repo_action(action: str) -> None:
 def search_videos(query: str):
     """Send search query to backend."""
     try:
-        resp = requests.get(SEARCH_API_URL, params={"query": query, "namespace": NAMESPACE}, timeout=30)
+        resp = requests.get(SEARCH_SEARCH_URL, params={"query": query, "namespace": NAMESPACE}, timeout=30)
         if resp.status_code == 200:
             return resp.json()
         else:
@@ -71,7 +73,7 @@ def fetch_videos_page(page_token: str | None = None, page_size: int = REPO_PAGE_
         params["page_token"] = page_token
 
     try:
-        resp = requests.get(LIST_VIDEOS_API_URL, params=params, timeout=30)
+        resp = requests.get(SERVER_LIST_VIDEOS_URL, params=params, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
             return {
@@ -142,7 +144,7 @@ def upload_files_to_backend(files_data: list[tuple[bytes, str, str]]):
     # Handles large batches: 50 files = 1800s (30min), 200 files = 6300s (105min)
     timeout = max(600, 300 + (len(files) * 30))
 
-    resp = requests.post(UPLOAD_API_URL, files=files, data=data, timeout=timeout)
+    resp = requests.post(SERVER_UPLOAD_URL, files=files, data=data, timeout=timeout)
     return resp
 
 
@@ -151,7 +153,7 @@ def poll_job_status(job_id: str, max_wait: int = 300):
     start_time = time.time()
     while time.time() - start_time < max_wait:
         try:
-            resp = requests.get(STATUS_API_URL, params={"job_id": job_id}, timeout=30)
+            resp = requests.get(SERVER_STATUS_URL, params={"job_id": job_id}, timeout=30)
             if resp.status_code == 200:
                 data = resp.json()
                 status = data.get("status")
@@ -174,7 +176,7 @@ def delete_video(hashed_identifier: str, filename: str):
 
     try:
         resp = requests.delete(
-            DELETE_VIDEO_API_URL.format(hashed_identifier=hashed_identifier),
+            SERVER_DELETE_VIDEO_URL.format(hashed_identifier=hashed_identifier),
             params={
                 "filename": filename,
                 "namespace": NAMESPACE

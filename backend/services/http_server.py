@@ -61,23 +61,23 @@ class ServerService:
         """Initialize connectors and FastAPI app."""
         self._initialize_connectors()
 
-    def create_fastapi_app(self, search_service_cls=None, processing_service_cls=None):
+    def create_fastapi_app(self, processing_service_cls=None):
         """
         Create FastAPI app with routes.
-        
+
+        Note: Search is now handled by SearchService with its own ASGI app.
+
         Args:
-            search_service_cls: Optional SearchService class for dev combined mode
             processing_service_cls: Optional ProcessingService class for dev combined mode
         """
-        from api import FastAPIRouter
+        from api import ServerFastAPIRouter
         from fastapi import FastAPI
 
         self.fastapi_app = FastAPI(title="Clipabit Server")
-        api_router = FastAPIRouter(
+        api_router = ServerFastAPIRouter(
             server_instance=self,
             is_internal_env=self.is_internal,
             environment=self.env,
-            search_service_cls=search_service_cls,
             processing_service_cls=processing_service_cls
         )
         self.fastapi_app.include_router(api_router.router)
