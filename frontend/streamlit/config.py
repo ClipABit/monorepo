@@ -36,6 +36,8 @@ class Config:
     UPLOAD_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-upload{url_portion}.modal.run"
     STATUS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-status{url_portion}.modal.run"
     LIST_VIDEOS_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-list-videos{url_portion}.modal.run"
+    LIST_FACES_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-list-faces{url_portion}.modal.run"
+    UPDATE_FACE_API_URL = f"https://clipabit01--{ENVIRONMENT}-server-update-face{url_portion}.modal.run"
 
     # Namespace for Pinecone and R2 (web-demo for public demo)
     NAMESPACE = "web-demo"
@@ -50,6 +52,8 @@ class Config:
             "upload_api_url": cls.UPLOAD_API_URL,
             "status_api_url": cls.STATUS_API_URL,
             "list_videos_api_url": cls.LIST_VIDEOS_API_URL,
+            "list_faces_api_url": cls.LIST_FACES_API_URL,
+            "update_face_api_url": cls.UPDATE_FACE_API_URL,
             "namespace": cls.NAMESPACE,
         }
 

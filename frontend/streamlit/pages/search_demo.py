@@ -15,6 +15,8 @@ STATUS_API_URL = Config.STATUS_API_URL
 LIST_VIDEOS_API_URL = Config.LIST_VIDEOS_API_URL
 NAMESPACE = Config.NAMESPACE
 ENVIRONMENT = Config.ENVIRONMENT
+LIST_FACES_API_URL = Config.LIST_FACES_API_URL
+UPDATE_FACE_API_URL = Config.UPDATE_FACE_API_URL
 
 
 def search_videos(query: str):
@@ -37,6 +39,19 @@ def fetch_all_videos():
         if resp.status_code == 200:
             data = resp.json()
             return data.get("videos", [])
+        return []
+    except requests.RequestException:
+        return []
+
+
+@st.cache_data(ttl=60, show_spinner="Fetching face images for current user...")
+def fetch_all_faces():
+    """Fetch all face metadata for the configured namespace from the backend."""
+    try:
+        resp = requests.get(LIST_FACES_API_URL, params={"namespace": NAMESPACE}, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("faces", [])
         return []
     except requests.RequestException:
         return []
@@ -203,6 +218,109 @@ else:
                 st.video(video['presigned_url'])
     else:
         st.info("No videos found in the repository.")
+
+    # Face repository (images extracted from processed videos)
+    st.markdown("---")
+    st.subheader("Face Repository")
+    faces = fetch_all_faces()
+
+    # Initialize originals mapping when namespace or faces change
+    if 'face_originals' not in st.session_state or st.session_state.get('face_originals_namespace') != NAMESPACE:
+        st.session_state['face_originals'] = { (f.get('face_id') or f.get('id')): (f.get('given_name') or "") for f in faces }
+        st.session_state['face_originals_namespace'] = NAMESPACE
+
+    # Ensure per-face input keys have initial values (only set if missing)
+    for f in faces:
+        fid = f.get('face_id') or f.get('id')
+        key = f"given_name_{fid}"
+        if key not in st.session_state:
+            st.session_state[key] = f.get('given_name') or ""
+
+    # Determine edited faces by diffing session inputs against originals
+    edited = {}
+    for f in faces:
+        fid = f.get('face_id') or f.get('id')
+        key = f"given_name_{fid}"
+        current = st.session_state.get(key, "")
+        original = st.session_state.get('face_originals', {}).get(fid, "")
+        if current != original:
+            edited[fid] = current
+
+    # Global update button for all edited names
+    if edited:
+        st.info(f"{len(edited)} unsaved change(s)")
+        if st.button("Update all names", use_container_width=True):
+            with st.spinner("Updating names..."):
+                successes = 0
+                failures = []
+                for fid, new_name in edited.items():
+                    try:
+                        resp = requests.post(UPDATE_FACE_API_URL, json={
+                            "namespace": NAMESPACE,
+                            "face_id": fid,
+                            "given_name": new_name
+                        }, timeout=10)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if data.get('status') == 'success':
+                                successes += 1
+                                st.session_state['face_originals'][fid] = new_name
+                            else:
+                                failures.append((fid, resp.text))
+                        else:
+                            failures.append((fid, f"status {resp.status_code}: {resp.text}"))
+                    except requests.RequestException as e:
+                        failures.append((fid, str(e)))
+
+                if successes:
+                    st.success(f"Updated {successes} name(s)")
+                if failures:
+                    for fid, msg in failures:
+                        st.error(f"Failed to update {fid}: {msg}")
+
+                # Refresh faces list
+                try:
+                    fetch_all_faces.clear()
+                except Exception:
+                    pass
+                st.rerun()
+
+    if faces:
+        cols = st.columns(4)
+        for idx, f in enumerate(faces):
+            with cols[idx % 4]:
+                fid = f.get('face_id') or f.get('id')
+                input_key = f"given_name_{fid}"
+
+                # Compute unsaved indicator
+                current_val = st.session_state.get(input_key, "")
+                orig_val = st.session_state.get('face_originals', {}).get(fid, "")
+                unsaved = current_val != orig_val
+
+                row_cols = st.columns([3, 1])
+                with row_cols[0]:
+                    st.text_input("Given name", value=current_val, key=input_key)
+                with row_cols[1]:
+                    if unsaved:
+                        st.markdown("<span style='color:orange;font-weight:bold'>*</span>", unsafe_allow_html=True)
+                    else:
+                        st.markdown("&nbsp;")
+
+                with st.expander("Info"):
+                    st.write(f"**Face ID:** {fid or 'unknown'}")
+                    if current_val:
+                        st.write(f"**Name:** {current_val}")
+
+                presigned = f.get('presigned_url')
+                if presigned:
+                    try:
+                        st.image(presigned, use_container_width=True)
+                    except Exception:
+                        st.info("Unable to preview this image.")
+                else:
+                    st.info("No accessible image URL for this face.")
+    else:
+        st.info("No faces found for the current user.")
 
 # Footer
 st.markdown("---")
