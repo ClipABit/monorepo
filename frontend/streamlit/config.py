@@ -45,7 +45,7 @@ class Config:
     NAMESPACE = "web-demo"
 
     # Flag to indicate if running in internal environment
-    IS_INTERNAL_ENV = ENVIRONMENT in ["dev", "staging", "prod"]
+    IS_INTERNAL_ENV = ENVIRONMENT in ["dev", "staging"]
 
     @classmethod
     def get_config(cls):
