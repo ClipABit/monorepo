@@ -21,6 +21,7 @@ class ServerService:
         from database.pinecone_connector import PineconeConnector
         from database.job_store_connector import JobStoreConnector
         from database.r2_connector import R2Connector
+        from auth.auth_connector import AuthConnector
 
         env = get_environment()
         logger.info(f"[{self.__class__.__name__}] Starting up in '{env}' environment")
@@ -47,6 +48,7 @@ class ServerService:
             secret_access_key=R2_SECRET_ACCESS_KEY,
             environment=env
         )
+        self.auth_connector = AuthConnector()
 
         # Store config for router
         self.env = env

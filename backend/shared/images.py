@@ -48,6 +48,7 @@ def get_dev_image() -> modal.Image:
         .run_function(_export_clip_text_to_onnx)
         .add_local_python_source(
             "api",
+            "auth",
             "database",
             "embeddings",
             "models",
@@ -78,6 +79,7 @@ def get_server_image() -> modal.Image:
             "database",
             "models",
             "api",
+            "auth",
             "shared",
             "services",
         )
