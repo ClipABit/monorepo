@@ -77,6 +77,7 @@ class Config:
         config = cls.get_config()
         logger.info("Current Configuration:")
         logger.info(f"  Environment: {config['environment']}")
+        logger.info(f"  File Change Enabled: {config['is_file_change_enable']}")
         logger.info(f"  App Name: {config['app_name']}")
         logger.info(f"  Namespace: {config['namespace']}")
 
