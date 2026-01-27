@@ -16,7 +16,8 @@ class Config:
     """Configuration class for environment-based settings."""
 
     # Environment (defaults to "dev")
-    ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
+    # ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
+    ENVIRONMENT = "prod"
 
     # Validate environment
     if ENVIRONMENT not in ["dev", "prod", "staging"]:
@@ -48,7 +49,8 @@ class Config:
     NAMESPACE = "web-demo"
 
     # Flag to indicate if running in internal environment
-    IS_INTERNAL_ENV = ENVIRONMENT in ["dev", "staging"]
+    # IS_INTERNAL_ENV = ENVIRONMENT in ["dev", "staging"]
+    IS_INTERNAL_ENV = True
 
     @classmethod
     def get_config(cls):
