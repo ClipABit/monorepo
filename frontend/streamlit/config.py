@@ -16,8 +16,8 @@ class Config:
     """Configuration class for environment-based settings."""
 
     # Environment (defaults to "dev")
-    # ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
-    ENVIRONMENT = "prod"
+    ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
+    IS_FILE_CHANGE_ENABLED = os.environ.get("IS_FILE_CHANGE_ENABLED", "true").lower() == "true"
 
     # Validate environment
     if ENVIRONMENT not in ["dev", "prod", "staging"]:
@@ -48,10 +48,6 @@ class Config:
     # Namespace for Pinecone and R2 (web-demo for public demo)
     NAMESPACE = "web-demo"
 
-    # Flag to indicate if running in internal environment
-    # IS_INTERNAL_ENV = ENVIRONMENT in ["dev", "staging"]
-    IS_INTERNAL_ENV = True
-
     @classmethod
     def get_config(cls):
         """Get configuration as a dictionary."""
@@ -62,7 +58,7 @@ class Config:
             "namespace": cls.NAMESPACE,
 
             # Flags
-            "is_internal_env": cls.IS_INTERNAL_ENV,
+            "is_file_change_enable": cls.IS_FILE_CHANGE_ENABLED,
 
             # API Endpoints
             "server_base_url": cls.SERVER_BASE_URL,

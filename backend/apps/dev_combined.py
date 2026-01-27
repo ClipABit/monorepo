@@ -19,7 +19,7 @@ Endpoints:
 import logging
 import modal
 
-from shared.config import get_environment, get_secrets, is_internal_env
+from shared.config import get_environment, get_secrets
 from shared.images import get_dev_image
 from services.search_service import SearchService
 from services.processing_service import ProcessingService
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 # Environment setup
 env = get_environment()
-IS_INTERNAL_ENV = is_internal_env()
+
 
 if env != "dev":
     raise ValueError(

@@ -37,7 +37,7 @@ if 'repo_action' not in st.session_state:
 # Configs
 NAMESPACE = Config.NAMESPACE
 ENVIRONMENT = Config.ENVIRONMENT
-IS_INTERNAL_ENV = Config.IS_INTERNAL_ENV
+IS_FILE_CHANGE_ENABLED = Config.IS_FILE_CHANGE_ENABLED
 
 # API Endpoints
 SEARCH_SEARCH_URL = Config.SEARCH_SEARCH_URL
@@ -170,7 +170,7 @@ def poll_job_status(job_id: str, max_wait: int = 300):
 def delete_video(hashed_identifier: str, filename: str):
     """Delete video via API call."""
 
-    if not IS_INTERNAL_ENV:
+    if not IS_FILE_CHANGE_ENABLED:
         st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
         return
 
@@ -345,7 +345,7 @@ st.subheader("Semantic Video Search - Demo")
 up_col1, up_col2, up_col3 = st.columns([1, 1, 6])
 
 # upload button in internal envs else info text
-if IS_INTERNAL_ENV:
+if IS_FILE_CHANGE_ENABLED:
     with up_col1:
         if st.button("Upload", disabled=(False), use_container_width=True):
             upload_dialog()
@@ -417,7 +417,7 @@ if st.session_state.search_results:
                     score = result.get("score", 0)
 
                     # Video info and delete button row
-                    if IS_INTERNAL_ENV:
+                    if IS_FILE_CHANGE_ENABLED:
                         info_col, delete_col = st.columns([3, 1]) # NOTE: reenable with delete
 
                         with info_col:
@@ -542,7 +542,7 @@ else:
         for idx, video in enumerate(videos):
             with cols[idx%3]:
                 # Video info and delete button row
-                if IS_INTERNAL_ENV:
+                if IS_FILE_CHANGE_ENABLED:
                     info_col, delete_col = st.columns([3, 1])
                     with info_col:
                         with st.expander("Info"):
