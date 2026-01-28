@@ -32,7 +32,7 @@ class ServerService:
         R2_ACCOUNT_ID = get_env_var("R2_ACCOUNT_ID")
         R2_ACCESS_KEY_ID = get_env_var("R2_ACCESS_KEY_ID")
         R2_SECRET_ACCESS_KEY = get_env_var("R2_SECRET_ACCESS_KEY")
-        IS_FILE_CHANGE_ENABLED = get_env_var("IS_FILE_CHANGE_ENABLED", "true").lower() == "true"
+        IS_FILE_CHANGE_ENABLED = get_env_var("IS_FILE_CHANGE_ENABLED").lower() == "true"
 
         pinecone_index = get_pinecone_index()
         logger.info(f"[{self.__class__.__name__}] Using Pinecone index: {pinecone_index}")
