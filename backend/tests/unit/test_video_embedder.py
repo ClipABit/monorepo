@@ -139,7 +139,8 @@ class TestVideoEmbedderInitialization:
         mock_transformers, _, _ = mock_transformers_tensor_output
 
         from embeddings.video_embedder import VideoEmbedder
-        embedder = VideoEmbedder()
+        # Instance unused - we only care about the side effect of loading the model
+        _ = VideoEmbedder()
 
         mock_transformers.CLIPModel.from_pretrained.assert_called_once()
         mock_transformers.CLIPProcessor.from_pretrained.assert_called_once()
