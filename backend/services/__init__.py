@@ -1,3 +1,3 @@
-from .upload import UploadHandler
+from .upload_handler import UploadHandler
 
 __all__ = ["UploadHandler"]

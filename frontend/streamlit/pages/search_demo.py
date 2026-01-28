@@ -35,14 +35,16 @@ if 'repo_action' not in st.session_state:
     st.session_state.repo_action = None
 
 # Configs
-SEARCH_API_URL = Config.SEARCH_API_URL
-UPLOAD_API_URL = Config.UPLOAD_API_URL
-STATUS_API_URL = Config.STATUS_API_URL
-LIST_VIDEOS_API_URL = Config.LIST_VIDEOS_API_URL
-DELETE_VIDEO_API_URL = Config.DELETE_VIDEO_API_URL
 NAMESPACE = Config.NAMESPACE
 ENVIRONMENT = Config.ENVIRONMENT
-IS_INTERNAL_ENV = Config.IS_INTERNAL_ENV
+IS_FILE_CHANGE_ENABLED = Config.IS_FILE_CHANGE_ENABLED
+
+# API Endpoints
+SEARCH_SEARCH_URL = Config.SEARCH_SEARCH_URL
+SERVER_UPLOAD_URL = Config.SERVER_UPLOAD_URL
+SERVER_STATUS_URL = Config.SERVER_STATUS_URL
+SERVER_LIST_VIDEOS_URL = Config.SERVER_LIST_VIDEOS_URL
+SERVER_DELETE_VIDEO_URL = Config.SERVER_DELETE_VIDEO_URL
 
 
 def set_repo_action(action: str) -> None:
@@ -53,7 +55,7 @@ def set_repo_action(action: str) -> None:
 def search_videos(query: str):
     """Send search query to backend."""
     try:
-        resp = requests.get(SEARCH_API_URL, params={"query": query, "namespace": NAMESPACE}, timeout=30)
+        resp = requests.get(SEARCH_SEARCH_URL, params={"query": query, "namespace": NAMESPACE}, timeout=30)
         if resp.status_code == 200:
             return resp.json()
         else:
@@ -71,7 +73,7 @@ def fetch_videos_page(page_token: str | None = None, page_size: int = REPO_PAGE_
         params["page_token"] = page_token
 
     try:
-        resp = requests.get(LIST_VIDEOS_API_URL, params=params, timeout=30)
+        resp = requests.get(SERVER_LIST_VIDEOS_URL, params=params, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
             return {
@@ -142,7 +144,7 @@ def upload_files_to_backend(files_data: list[tuple[bytes, str, str]]):
     # Handles large batches: 50 files = 1800s (30min), 200 files = 6300s (105min)
     timeout = max(600, 300 + (len(files) * 30))
 
-    resp = requests.post(UPLOAD_API_URL, files=files, data=data, timeout=timeout)
+    resp = requests.post(SERVER_UPLOAD_URL, files=files, data=data, timeout=timeout)
     return resp
 
 
@@ -151,7 +153,7 @@ def poll_job_status(job_id: str, max_wait: int = 300):
     start_time = time.time()
     while time.time() - start_time < max_wait:
         try:
-            resp = requests.get(STATUS_API_URL, params={"job_id": job_id}, timeout=30)
+            resp = requests.get(SERVER_STATUS_URL, params={"job_id": job_id}, timeout=30)
             if resp.status_code == 200:
                 data = resp.json()
                 status = data.get("status")
@@ -168,13 +170,13 @@ def poll_job_status(job_id: str, max_wait: int = 300):
 def delete_video(hashed_identifier: str, filename: str):
     """Delete video via API call."""
 
-    if not IS_INTERNAL_ENV:
+    if not IS_FILE_CHANGE_ENABLED:
         st.toast(f"Deletion not allowed in {ENVIRONMENT} environment", icon="🚫")
         return
 
     try:
         resp = requests.delete(
-            DELETE_VIDEO_API_URL.format(hashed_identifier=hashed_identifier),
+            SERVER_DELETE_VIDEO_URL.format(hashed_identifier=hashed_identifier),
             params={
                 "filename": filename,
                 "namespace": NAMESPACE
@@ -343,7 +345,7 @@ st.subheader("Semantic Video Search - Demo")
 up_col1, up_col2, up_col3 = st.columns([1, 1, 6])
 
 # upload button in internal envs else info text
-if IS_INTERNAL_ENV:
+if IS_FILE_CHANGE_ENABLED:
     with up_col1:
         if st.button("Upload", disabled=(False), use_container_width=True):
             upload_dialog()
@@ -415,7 +417,7 @@ if st.session_state.search_results:
                     score = result.get("score", 0)
 
                     # Video info and delete button row
-                    if IS_INTERNAL_ENV:
+                    if IS_FILE_CHANGE_ENABLED:
                         info_col, delete_col = st.columns([3, 1]) # NOTE: reenable with delete
 
                         with info_col:
@@ -488,10 +490,13 @@ else:
     prev_disabled = st.session_state.repo_loading or current_page_idx <= 0
     if st.session_state.repo_loading:
         next_disabled = True
-    elif total_pages > 0:
-        next_disabled = (current_page_idx + 1) >= total_pages
     else:
-        next_disabled = True
+        # Enable next button if:
+        # 1. The next page is already cached in repo_pages, OR
+        # 2. There's a repo_next_token indicating more pages can be fetched
+        has_cached_next_page = (current_page_idx + 1) < total_loaded_pages
+        has_more_pages_to_fetch = st.session_state.repo_next_token is not None
+        next_disabled = not (has_cached_next_page or has_more_pages_to_fetch)
 
     nav_info_col, nav_prev_col, nav_next_col = st.columns([6, 0.3, 0.3])
 
@@ -537,7 +542,7 @@ else:
         for idx, video in enumerate(videos):
             with cols[idx%3]:
                 # Video info and delete button row
-                if IS_INTERNAL_ENV:
+                if IS_FILE_CHANGE_ENABLED:
                     info_col, delete_col = st.columns([3, 1])
                     with info_col:
                         with st.expander("Info"):
