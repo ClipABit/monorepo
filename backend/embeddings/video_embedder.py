@@ -55,7 +55,8 @@ class VideoEmbedder:
         inputs = processor(images=sampled_frames, return_tensors="pt", size=224).to(self._device)    
         
         with torch.no_grad():
-            frame_features = model.get_image_features(**inputs)
+            output = model.get_image_features(**inputs)
+            frame_features = output.pooler_output if hasattr(output, 'pooler_output') else output
             frame_features = frame_features / frame_features.norm(p=2, dim=-1, keepdim=True)
             
             video_embedding = frame_features.mean(dim=0)
