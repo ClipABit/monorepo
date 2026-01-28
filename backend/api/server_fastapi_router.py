@@ -20,7 +20,7 @@ class ServerFastAPIRouter:
     def __init__(
         self,
         server_instance,
-        is_internal_env: bool,
+        is_file_change_enabled: bool,
         environment: str = "dev",
         processing_service_cls=None
     ):
@@ -30,12 +30,12 @@ class ServerFastAPIRouter:
 
         Args:
             server_instance: The Modal server instance for accessing connectors and spawning local methods
-            is_internal_env: Whether this is an internal (dev/staging) environment
+            is_file_change_enabled: Whether this file change is enabled in this environment
             environment: Environment name (dev, staging, prod) for cross-app lookups
             processing_service_cls: Optional ProcessingService class for dev combined mode (direct access)
         """
         self.server_instance = server_instance
-        self.is_internal_env = is_internal_env
+        self.is_file_change_enabled = is_file_change_enabled
         self.environment = environment
         self.processing_service_cls = processing_service_cls
         self.router = APIRouter()
@@ -211,7 +211,7 @@ class ServerFastAPIRouter:
                 - 403 Forbidden if deletion is not allowed.
         """
         logger.info(f"[Delete Video] Request to delete video: {filename} ({hashed_identifier}) | namespace='{namespace}'")
-        if not self.is_internal_env:
+        if not self.is_file_change_enabled:
             raise HTTPException(status_code=403, detail="Video deletion is not allowed in the current environment.")
 
         job_id = str(uuid.uuid4())
@@ -247,7 +247,7 @@ class ServerFastAPIRouter:
             HTTPException: If cache clearing is not allowed (403 Forbidden)
         """
         logger.info(f"[Clear Cache] Request to clear cache for namespace: {namespace}")
-        if not self.is_internal_env:
+        if not self.is_file_change_enabled:
             raise HTTPException(status_code=403, detail="Cache clearing is not allowed in the current environment.")
         
         try:

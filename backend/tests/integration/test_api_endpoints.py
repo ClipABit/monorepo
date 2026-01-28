@@ -185,11 +185,11 @@ def mock_modal_lookup():
 @pytest.fixture()
 def test_client_internal(mock_modal_lookup) -> Tuple[TestClient, ServerStub, dict]:
     """
-    FastAPI TestClient with is_internal_env=True, so delete is allowed.
+    FastAPI TestClient with is_file_change_enabled=True, so delete is allowed.
     """
     server = ServerStub()
     app = FastAPI()
-    router = ServerFastAPIRouter(server, is_internal_env=True, environment="dev")
+    router = ServerFastAPIRouter(server, is_file_change_enabled=True, environment="dev")
     app.include_router(router.router)
     return TestClient(app), server, mock_modal_lookup
 
@@ -197,11 +197,11 @@ def test_client_internal(mock_modal_lookup) -> Tuple[TestClient, ServerStub, dic
 @pytest.fixture()
 def test_client_external(mock_modal_lookup) -> Tuple[TestClient, ServerStub, dict]:
     """
-    FastAPI TestClient with is_internal_env=False, so delete is forbidden.
+    FastAPI TestClient with is_file_change_enabled=False, so delete is forbidden.
     """
     server = ServerStub()
     app = FastAPI()
-    router = ServerFastAPIRouter(server, is_internal_env=False, environment="prod")
+    router = ServerFastAPIRouter(server, is_file_change_enabled=False, environment="prod")
     app.include_router(router.router)
     return TestClient(app), server, mock_modal_lookup
 

@@ -83,17 +83,6 @@ def get_secrets() -> modal.Secret:
     return modal.Secret.from_name(env)
 
 
-def is_internal_env() -> bool:
-    """
-    Check if running in an internal (non-production) environment.
-    
-    Returns:
-        bool: True if dev or staging, False if prod
-    """
-    env = get_environment()
-    return env in ["dev", "staging"]
-
-
 def get_pinecone_index() -> str:
     """
     Get the Pinecone index name for the current environment.

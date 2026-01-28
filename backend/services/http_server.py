@@ -32,6 +32,7 @@ class ServerService:
         R2_ACCOUNT_ID = get_env_var("R2_ACCOUNT_ID")
         R2_ACCESS_KEY_ID = get_env_var("R2_ACCESS_KEY_ID")
         R2_SECRET_ACCESS_KEY = get_env_var("R2_SECRET_ACCESS_KEY")
+        IS_FILE_CHANGE_ENABLED = get_env_var("IS_FILE_CHANGE_ENABLED").lower() == "true"
 
         pinecone_index = get_pinecone_index()
         logger.info(f"[{self.__class__.__name__}] Using Pinecone index: {pinecone_index}")
@@ -52,7 +53,7 @@ class ServerService:
 
         # Store config for router
         self.env = env
-        self.is_internal = env in ["dev", "staging"]
+        self.is_file_change_enabled = IS_FILE_CHANGE_ENABLED
 
         logger.info(f"[{self.__class__.__name__}] Initialized and ready!")
 
@@ -76,7 +77,7 @@ class ServerService:
         self.fastapi_app = FastAPI(title="Clipabit Server")
         api_router = ServerFastAPIRouter(
             server_instance=self,
-            is_internal_env=self.is_internal,
+            is_file_change_enabled=self.is_file_change_enabled,
             environment=self.env,
             processing_service_cls=processing_service_cls
         )
