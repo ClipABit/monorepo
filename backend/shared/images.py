@@ -221,6 +221,7 @@ def get_processing_image() -> modal.Image:
         modal.Image.debian_slim(python_version="3.12")
         .apt_install("ffmpeg", "libsm6", "libxext6")
         .pip_install(
+            "fastapi[standard]",
             "torch",
             "torchvision",
             "transformers",
