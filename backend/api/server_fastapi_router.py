@@ -4,7 +4,7 @@ import logging
 import uuid
 
 import modal
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 
 logger = logging.getLogger(__name__)
 
@@ -311,28 +311,28 @@ class ServerFastAPIRouter:
             logger.error(f"[Device Code] Error generating device code: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def poll_device_code(self, device_code: str):
+    async def poll_device_code(self, device_code: str = Body(..., embed=True)):
         """
         Poll for device code authorization status.
-        
+
         Request body:
         {
             "device_code": "a8f3j2k1..."
         }
-        
+
         Responses:
         - Still waiting: {"status": "pending"}
         - User authorized: {"status": "authorized", "user_id": "...", "id_token": "...", "refresh_token": "..."}
         - Timed out: {"status": "expired", "error": "device_code_expired"}
         - User denied: {"status": "denied", "error": "user_denied_authorization"}
-        
+
         Polling behavior:
         - Client should poll every 3 seconds (interval from device/code response)
         - Max 200 attempts (10 minutes total)
         - Stop immediately if user closes dialog
         """
         try:
-            
+
             if not device_code:
                 raise HTTPException(
                     status_code=400,
@@ -357,7 +357,12 @@ class ServerFastAPIRouter:
             logger.error(f"[Device Poll] Error polling device code: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def authorize_device(self, user_code: str, firebase_id_token: str, firebase_refresh_token: str = ""):
+    async def authorize_device(
+        self,
+        user_code: str = Body(...),
+        firebase_id_token: str = Body(...),
+        firebase_refresh_token: str = Body("")
+    ):
         """
         Authorize a device after user logs in on website.
 
