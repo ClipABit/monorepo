@@ -11,7 +11,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from typing import Dict, Any, Optional
-from unittest.mock import patch
 
 from api.server_fastapi_router import ServerFastAPIRouter
 
