@@ -261,7 +261,13 @@ class AuthConnector:
         except auth.InvalidIdTokenError as e:
             logger.error(f"Invalid Firebase token: {e}")
             return None
-        except Exception as e:
-            logger.error(f"Error verifying Firebase token: {e}")
+        except auth.ExpiredIdTokenError as e:
+            logger.error(f"Expired Firebase token: {e}")
+            return None
+        except auth.RevokedIdTokenError as e:
+            logger.error(f"Revoked Firebase token: {e}")
+            return None
+        except auth.CertificateFetchError as e:
+            logger.error(f"Firebase certificate fetch error: {e}")
             return None
     
