@@ -246,7 +246,7 @@ class AuthConnector:
             logger.error(f"Error deleting device code: {e}")
             return False
         
-    def get_firebase_token(self, uid) -> Optional[str]:
+    def get_firebase_token(self, uid: str) -> Optional[str]:
         """Create a custom Firebase token for the given uid."""
         try:
             # Initialize Firebase Admin SDK only once
