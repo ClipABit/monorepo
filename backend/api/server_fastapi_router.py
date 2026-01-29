@@ -93,6 +93,7 @@ class ServerFastAPIRouter:
         self.router.add_api_route("/cache/clear", self.clear_cache, methods=["POST"])
         self.router.add_api_route("/auth/device/code", self.request_device_code, methods=["POST"])
         self.router.add_api_route("/auth/device/poll", self.poll_device_code, methods=["POST"])
+        self.router.add_api_route("/auth/device/authorize", self.authorize_device, methods=["POST"])
 
     async def health(self):
         """
@@ -349,9 +350,79 @@ class ServerFastAPIRouter:
             
             logger.info(f"[Device Poll] Device code {device_code} | status: {status.get('status')}")
             return status
-            
+
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"[Device Poll] Error polling device code: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def authorize_device(self, user_code: str, firebase_id_token: str, firebase_refresh_token: str = ""):
+        """
+        Authorize a device after user logs in on website.
+
+        Request body:
+        {
+            "user_code": "ABC-420",
+            "firebase_id_token": "eyJhbGc...",
+            "firebase_refresh_token": "AOEOulbB..." (optional for now)
+        }
+
+        Response:
+        - Success: {"success": true}
+        - Errors: 400 (missing fields), 401 (invalid token), 404 (code not found), 500 (server error)
+        """
+        try:
+            # Validate required fields
+            if not user_code:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing required field: 'user_code'"
+                )
+            if not firebase_id_token:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing required field: 'firebase_id_token'"
+                )
+
+            # Verify Firebase token
+            user_info = self.server_instance.auth_connector.verify_firebase_token(firebase_id_token)
+            if not user_info:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid Firebase token"
+                )
+
+            user_id = user_info["user_id"]
+            logger.info(f"[Device Authorize] Verified token for user: {user_id}")
+
+            # Lookup device_code from user_code
+            device_code = self.server_instance.auth_connector.get_device_code_by_user_code(user_code)
+            if not device_code:
+                raise HTTPException(
+                    status_code=404,
+                    detail="User code not found or expired"
+                )
+
+            # Mark device as authorized with tokens
+            success = self.server_instance.auth_connector.set_device_code_authorized(
+                device_code,
+                user_id,
+                firebase_id_token,
+                firebase_refresh_token
+            )
+
+            if not success:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to authorize device"
+                )
+
+            logger.info(f"[Device Authorize] Device authorized for user_code: {user_code}, user: {user_id}")
+            return {"success": True}
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[Device Authorize] Error authorizing device: {e}")
             raise HTTPException(status_code=500, detail=str(e))
