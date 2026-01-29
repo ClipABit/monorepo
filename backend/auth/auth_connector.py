@@ -66,7 +66,6 @@ class AuthConnector:
 
     def generate_user_code(self) -> str:
         """Generate a user-friendly code in format ABC-420."""
-
         letters = ''.join(secrets.choice(string.ascii_uppercase) for _ in range(3))
         digits = ''.join(secrets.choice(string.digits) for _ in range(3))
         return f"{letters}-{digits}"
@@ -197,6 +196,8 @@ class AuthConnector:
         - expired: {"status": "expired", "error": "device_code_expired"}
         - denied: {"status": "denied", "error": "user_denied_authorization"}
         - not_found: None (treat as expired)
+        
+        Tokens are deleted after retrieval (one-time use).
         """
         entry = self.get_device_code_entry(device_code)
 
@@ -209,12 +210,14 @@ class AuthConnector:
         status = entry.get("status", "pending")
 
         if status == "authorized":
-            return {
+            result = {
                 "status": "authorized",
                 "user_id": entry.get("user_id"),
                 "id_token": entry.get("id_token"),
                 "refresh_token": entry.get("refresh_token")
             }
+            self._delete_session(device_code, entry)
+            return result
         elif status == "denied":
             return {
                 "status": "denied",
@@ -244,10 +247,7 @@ class AuthConnector:
             return False
 
     def verify_firebase_token(self, id_token: str) -> Optional[Dict[str, Any]]:
-        """Verify Firebase ID token from website/plugin.
-
-        Note: Firebase Admin SDK is initialized at server startup in http_server.py.
-        """
+        """Verify Firebase ID token from website/plugin."""
         try:
             decoded_token = auth.verify_id_token(id_token)
             return {
