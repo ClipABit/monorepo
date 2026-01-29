@@ -247,18 +247,11 @@ class AuthConnector:
             return False
         
     def verify_firebase_token(self, id_token: str) -> Optional[Dict[str, Any]]:
-        """Verify Firebase ID token from website/plugin."""
+        """Verify Firebase ID token from website/plugin.
+        
+        Note: Firebase Admin SDK is initialized at server startup in http_server.py.
+        """
         try:
-            # Initialize Firebase Admin SDK only once
-            if not firebase_admin._apps:
-                firebase_admin_json = json.loads(os.environ["FIREBASE_ADMIN_KEY"])
-                if not firebase_admin_json:
-                    logger.warning("Firebase credentials not found in secrets.")
-                    return None
-                cred = credentials.Certificate(firebase_admin_json)
-                firebase_admin.initialize_app(cred)
-
-            # Verify the ID token
             decoded_token = auth.verify_id_token(id_token)
             return {
                 "user_id": decoded_token['uid'],
