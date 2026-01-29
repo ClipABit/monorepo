@@ -32,9 +32,9 @@ class ServerService:
             import firebase_admin
             if not firebase_admin._apps:
                 import json
-                firebase_admin_json = json.loads(get_env_var("FIREBASE_ADMIN_KEY"))
+                firebase_credentials = json.loads(get_env_var("FIREBASE_ADMIN_KEY"))
                 from firebase_admin import credentials
-                cred = credentials.Certificate(firebase_admin_json)
+                cred = credentials.Certificate(firebase_credentials)
                 firebase_admin.initialize_app(cred)
                 logger.info(f"[{self.__class__.__name__}] Firebase Admin SDK initialized")
         except Exception as e:
