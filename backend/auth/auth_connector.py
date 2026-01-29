@@ -2,10 +2,7 @@
 Auth service for device flow authentication.
 """
 
-import json
-import os
-import firebase_admin
-from firebase_admin import credentials, auth
+from firebase_admin import auth
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
