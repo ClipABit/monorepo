@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class AuthConnector:
     """
     Modal Dict wrapper for device flow authentication.
-    
+
     Stores device codes with expiration (10 minutes) for OAuth device flow.
     """
 
@@ -36,12 +36,12 @@ class AuthConnector:
 
     def _is_expired(self, entry: Dict[str, Any]) -> bool:
         """Check if a device code entry is expired."""
-        expires_at= entry.get("expires_at")
+        expires_at = entry.get("expires_at")
         if expires_at is None:
             return False
         expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
         return datetime.now(timezone.utc) > expires_at
-    
+
     def _delete_session(self, device_code: str, entry: Optional[Dict[str, Any]]) -> None:
         """
         Delete both dicts safely if the entry is expired.
@@ -97,7 +97,7 @@ class AuthConnector:
     def get_device_code_entry(self, device_code: str) -> Optional[Dict[str, Any]]:
         """Retrieve device code entry, returns None if not found or expired."""
         try:
-            
+
             entry = self.device_store.get(device_code)
             if entry is None:
                 return None
@@ -112,7 +112,7 @@ class AuthConnector:
     def get_device_code_by_user_code(self, user_code: str) -> Optional[str]:
         """
         Lookup device_code by user_code.
-        
+
         Returns the device_code if found and not expired, None otherwise.
         """
         try:
@@ -125,7 +125,7 @@ class AuthConnector:
                 if user_code in self.user_store:
                     del self.user_store[user_code]
                 return None
-            
+
             return device_code
         except Exception as e:
             logger.error(f"Error looking up device_code by user_code: {e}")
@@ -137,7 +137,7 @@ class AuthConnector:
             entry = self.get_device_code_entry(device_code)
             if entry is None:
                 return False
-            
+
             entry["status"] = status
             self.device_store[device_code] = entry
             logger.info(f"Updated device code {device_code[:8]}... status to: {status}")
@@ -158,7 +158,7 @@ class AuthConnector:
             entry = self.get_device_code_entry(device_code)
             if entry is None:
                 return False
-            
+
             entry["status"] = "authorized"
             entry["user_id"] = user_id
             entry["id_token"] = id_token
@@ -177,7 +177,7 @@ class AuthConnector:
             entry = self.get_device_code_entry(device_code)
             if entry is None:
                 return False
-            
+
             entry["status"] = "denied"
             entry["denied_at"] = datetime.now(timezone.utc).isoformat()
             self.device_store[device_code] = entry
@@ -190,7 +190,7 @@ class AuthConnector:
     def get_device_code_poll_status(self, device_code: str) -> Optional[Dict[str, Any]]:
         """
         Get device code status for polling endpoint.
-        
+
         Returns status dict with appropriate fields based on state:
         - pending: {"status": "pending"}
         - authorized: {"status": "authorized", "user_id": ..., "id_token": ..., "refresh_token": ...}
@@ -199,15 +199,15 @@ class AuthConnector:
         - not_found: None (treat as expired)
         """
         entry = self.get_device_code_entry(device_code)
-        
+
         if entry is None:
             return {
                 "status": "expired",
                 "error": "device_code_expired"
             }
-        
+
         status = entry.get("status", "pending")
-        
+
         if status == "authorized":
             return {
                 "status": "authorized",
@@ -242,10 +242,10 @@ class AuthConnector:
         except Exception as e:
             logger.error(f"Error deleting device code: {e}")
             return False
-        
+
     def verify_firebase_token(self, id_token: str) -> Optional[Dict[str, Any]]:
         """Verify Firebase ID token from website/plugin.
-        
+
         Note: Firebase Admin SDK is initialized at server startup in http_server.py.
         """
         try:
@@ -267,4 +267,3 @@ class AuthConnector:
         except auth.CertificateFetchError as e:
             logger.error(f"Firebase certificate fetch error: {e}")
             return None
-    
