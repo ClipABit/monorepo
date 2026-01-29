@@ -27,6 +27,21 @@ class ServerService:
         logger.info(f"[{self.__class__.__name__}] Starting up in '{env}' environment")
         self.start_time = datetime.now(timezone.utc)
 
+        # Initialize Firebase Admin SDK (required for token verification)
+        try:
+            import firebase_admin
+            import json
+            firebase_credentials = json.loads(get_env_var("FIREBASE_ADMIN_KEY"))
+            from firebase_admin import credentials
+            cred = credentials.Certificate(firebase_credentials)
+            firebase_admin.initialize_app(cred)
+            logger.info(f"[{self.__class__.__name__}] Firebase Admin SDK initialized")
+        except ValueError:
+            # Already initialized, which is fine
+            pass
+        except Exception as e:
+            logger.warning(f"[{self.__class__.__name__}] Firebase initialization failed: {e}")
+
         # Get environment variables
         PINECONE_API_KEY = get_env_var("PINECONE_API_KEY")
         R2_ACCOUNT_ID = get_env_var("R2_ACCOUNT_ID")

@@ -2,6 +2,7 @@
 Auth service for device flow authentication.
 """
 
+from firebase_admin import auth
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 class AuthConnector:
     """
     Modal Dict wrapper for device flow authentication.
-    
+
     Stores device codes with expiration (10 minutes) for OAuth device flow.
     """
 
@@ -35,12 +36,12 @@ class AuthConnector:
 
     def _is_expired(self, entry: Dict[str, Any]) -> bool:
         """Check if a device code entry is expired."""
-        expires_at= entry.get("expires_at")
+        expires_at = entry.get("expires_at")
         if expires_at is None:
             return False
         expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
         return datetime.now(timezone.utc) > expires_at
-    
+
     def _delete_session(self, device_code: str, entry: Optional[Dict[str, Any]]) -> None:
         """
         Delete both dicts safely if the entry is expired.
@@ -65,7 +66,6 @@ class AuthConnector:
 
     def generate_user_code(self) -> str:
         """Generate a user-friendly code in format ABC-420."""
-
         letters = ''.join(secrets.choice(string.ascii_uppercase) for _ in range(3))
         digits = ''.join(secrets.choice(string.digits) for _ in range(3))
         return f"{letters}-{digits}"
@@ -96,7 +96,7 @@ class AuthConnector:
     def get_device_code_entry(self, device_code: str) -> Optional[Dict[str, Any]]:
         """Retrieve device code entry, returns None if not found or expired."""
         try:
-            
+
             entry = self.device_store.get(device_code)
             if entry is None:
                 return None
@@ -111,7 +111,7 @@ class AuthConnector:
     def get_device_code_by_user_code(self, user_code: str) -> Optional[str]:
         """
         Lookup device_code by user_code.
-        
+
         Returns the device_code if found and not expired, None otherwise.
         """
         try:
@@ -124,7 +124,7 @@ class AuthConnector:
                 if user_code in self.user_store:
                     del self.user_store[user_code]
                 return None
-            
+
             return device_code
         except Exception as e:
             logger.error(f"Error looking up device_code by user_code: {e}")
@@ -136,7 +136,7 @@ class AuthConnector:
             entry = self.get_device_code_entry(device_code)
             if entry is None:
                 return False
-            
+
             entry["status"] = status
             self.device_store[device_code] = entry
             logger.info(f"Updated device code {device_code[:8]}... status to: {status}")
@@ -157,7 +157,7 @@ class AuthConnector:
             entry = self.get_device_code_entry(device_code)
             if entry is None:
                 return False
-            
+
             entry["status"] = "authorized"
             entry["user_id"] = user_id
             entry["id_token"] = id_token
@@ -176,7 +176,7 @@ class AuthConnector:
             entry = self.get_device_code_entry(device_code)
             if entry is None:
                 return False
-            
+
             entry["status"] = "denied"
             entry["denied_at"] = datetime.now(timezone.utc).isoformat()
             self.device_store[device_code] = entry
@@ -189,31 +189,35 @@ class AuthConnector:
     def get_device_code_poll_status(self, device_code: str) -> Optional[Dict[str, Any]]:
         """
         Get device code status for polling endpoint.
-        
+
         Returns status dict with appropriate fields based on state:
         - pending: {"status": "pending"}
         - authorized: {"status": "authorized", "user_id": ..., "id_token": ..., "refresh_token": ...}
         - expired: {"status": "expired", "error": "device_code_expired"}
         - denied: {"status": "denied", "error": "user_denied_authorization"}
         - not_found: None (treat as expired)
+        
+        Tokens are deleted after retrieval (one-time use).
         """
         entry = self.get_device_code_entry(device_code)
-        
+
         if entry is None:
             return {
                 "status": "expired",
                 "error": "device_code_expired"
             }
-        
+
         status = entry.get("status", "pending")
-        
+
         if status == "authorized":
-            return {
+            result = {
                 "status": "authorized",
                 "user_id": entry.get("user_id"),
                 "id_token": entry.get("id_token"),
                 "refresh_token": entry.get("refresh_token")
             }
+            self._delete_session(device_code, entry)
+            return result
         elif status == "denied":
             return {
                 "status": "denied",
@@ -241,3 +245,25 @@ class AuthConnector:
         except Exception as e:
             logger.error(f"Error deleting device code: {e}")
             return False
+
+    def verify_firebase_token(self, id_token: str) -> Optional[Dict[str, Any]]:
+        """Verify Firebase ID token from website/plugin."""
+        try:
+            decoded_token = auth.verify_id_token(id_token)
+            return {
+                "user_id": decoded_token['uid'],
+                "email": decoded_token.get('email'),
+                "email_verified": decoded_token.get('email_verified', False)
+            }
+        except auth.InvalidIdTokenError as e:
+            logger.error(f"Invalid Firebase token: {e}")
+            return None
+        except auth.ExpiredIdTokenError as e:
+            logger.error(f"Expired Firebase token: {e}")
+            return None
+        except auth.RevokedIdTokenError as e:
+            logger.error(f"Revoked Firebase token: {e}")
+            return None
+        except auth.CertificateFetchError as e:
+            logger.error(f"Firebase certificate fetch error: {e}")
+            return None
