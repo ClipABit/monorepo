@@ -246,21 +246,29 @@ class AuthConnector:
             logger.error(f"Error deleting device code: {e}")
             return False
         
-    def get_firebase_token(self, uid: str) -> Optional[str]:
-        """Create a custom Firebase token for the given uid."""
+    def verify_firebase_token(self, id_token: str) -> Optional[Dict[str, Any]]:
+        """Verify Firebase ID token from website/plugin."""
         try:
             # Initialize Firebase Admin SDK only once
             if not firebase_admin._apps:
                 firebase_admin_json = json.loads(os.environ["FIREBASE_ADMIN_KEY"])
                 if not firebase_admin_json:
-                    logger.warning("Firebase token not found in secrets.")
+                    logger.warning("Firebase credentials not found in secrets.")
                     return None
                 cred = credentials.Certificate(firebase_admin_json)
                 firebase_admin.initialize_app(cred)
 
-            auth_token = auth.create_custom_token(uid)
-            return auth_token.decode('utf-8') if isinstance(auth_token, bytes) else auth_token
+            # Verify the ID token
+            decoded_token = auth.verify_id_token(id_token)
+            return {
+                "user_id": decoded_token['uid'],
+                "email": decoded_token.get('email'),
+                "email_verified": decoded_token.get('email_verified', False)
+            }
+        except auth.InvalidIdTokenError as e:
+            logger.error(f"Invalid Firebase token: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Error creating Firebase token: {e}")
+            logger.error(f"Error verifying Firebase token: {e}")
             return None
     
