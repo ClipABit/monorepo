@@ -2,6 +2,10 @@
 Auth service for device flow authentication.
 """
 
+import json
+import os
+import firebase_admin
+from firebase_admin import credentials, auth
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -241,3 +245,22 @@ class AuthConnector:
         except Exception as e:
             logger.error(f"Error deleting device code: {e}")
             return False
+        
+    def get_firebase_token(self, uid) -> Optional[str]:
+        """Create a custom Firebase token for the given uid."""
+        try:
+            # Initialize Firebase Admin SDK only once
+            if not firebase_admin._apps:
+                firebase_admin_json = json.loads(os.environ["FIREBASE_ADMIN_KEY"])
+                if not firebase_admin_json:
+                    logger.warning("Firebase token not found in secrets.")
+                    return None
+                cred = credentials.Certificate(firebase_admin_json)
+                firebase_admin.initialize_app(cred)
+
+            auth_token = auth.create_custom_token(uid)
+            return auth_token.decode('utf-8') if isinstance(auth_token, bytes) else auth_token
+        except Exception as e:
+            logger.error(f"Error creating Firebase token: {e}")
+            return None
+    
