@@ -5,8 +5,17 @@ import uuid
 
 import modal
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+class AuthorizeDeviceRequest(BaseModel):
+    """Request body for device code authorization."""
+    user_code: str
+    user_id: str
+    id_token: str
+    refresh_token: str
 
 
 class ServerFastAPIRouter:
@@ -93,6 +102,7 @@ class ServerFastAPIRouter:
         self.router.add_api_route("/cache/clear", self.clear_cache, methods=["POST"])
         self.router.add_api_route("/auth/device/code", self.request_device_code, methods=["POST"])
         self.router.add_api_route("/auth/device/poll", self.poll_device_code, methods=["POST"])
+        self.router.add_api_route("/auth/device/authorize", self.authorize_device_code, methods=["POST"])
 
     async def health(self):
         """
@@ -354,4 +364,39 @@ class ServerFastAPIRouter:
             raise
         except Exception as e:
             logger.error(f"[Device Poll] Error polling device code: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def authorize_device_code(self, request: AuthorizeDeviceRequest):
+        try:
+            # Look up device_code by user_code
+            device_code = self.server_instance.auth_connector.get_device_code_by_user_code(request.user_code)
+            
+            if device_code is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="User code not found or expired"
+                )
+            
+            # Mark device code as authorized with user tokens
+            success = self.server_instance.auth_connector.set_device_code_authorized(
+                device_code=device_code,
+                user_id=request.user_id,
+                id_token=request.id_token,
+                refresh_token=request.refresh_token
+            )
+            
+            if not success:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to authorize device code"
+                )
+            
+            logger.info(f"[Device Authorize] User code {request.user_code} authorized for user {request.user_id}")
+            
+            return {"status": "success"}
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[Device Authorize] Error authorizing device code: {e}")
             raise HTTPException(status_code=500, detail=str(e))
