@@ -74,6 +74,7 @@ def get_server_image() -> modal.Image:
             "boto3",
             "pinecone",
             "numpy",
+            "firebase-admin",
         )
         .add_local_python_source(
             "database",
