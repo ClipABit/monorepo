@@ -82,8 +82,8 @@ class FaceDetector:
                 enforce_detection=self.enforce_detection,
                 align=self.align,
             )
-        except ValueError:
-            logger.warning(f"FaceDetector: No face detected in image {img}\nreturning empty face list.")
+        except ValueError as e:
+            logger.warning(f"FaceDetector: No face detected in image: {e}\nreturning empty face list.")
             return []
 
         for r in rep:
@@ -103,4 +103,5 @@ class FaceDetector:
                 continue
             faces.append(face)
 
+        logger.info(f"FaceDetector: Detected {len(faces)} face(s) in image.")
         return faces

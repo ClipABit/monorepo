@@ -50,6 +50,8 @@ class Server:
 
         # Import local module inside class
         import os
+        os.environ["TF_USE_LEGACY_KERAS"] = "1"             # use keras 2 which is compatible with deepface
+        os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"    # prevent TF from allocating all GPU memory
         import json
         from datetime import datetime, timezone
         import firebase_admin
@@ -62,7 +64,7 @@ class Server:
         from database.job_store_connector import JobStoreConnector
         from search.searcher import Searcher
         from database.r2_connector import R2Connector
-        from face_recognition import FaceDetector, FaceRepository, FaceMetadataRepository
+        from face_recognition import FaceDetector, FaceRepository, FaceMetadataRepository, FaceAppearanceRepository
 
 
         logger.info(f"Container starting up! Environment = {env}")
@@ -128,9 +130,10 @@ class Server:
         )
 
         self.face_metadata_repository = FaceMetadataRepository(db)
+        self.face_appearance_repository = FaceAppearanceRepository(db)
 
-        self.face_detector = FaceDetector()
-        self.face_repository = FaceRepository(self.face_recognition_pinecone_connector, self.r2_connector, threshold=0.35)
+        self.face_detector = FaceDetector(detector_backend="retinaface")
+        self.face_repository = FaceRepository(self.face_recognition_pinecone_connector, self.r2_connector, threshold=0.5)
 
         logger.info("Container modules initialized and ready!")
 
@@ -138,6 +141,8 @@ class Server:
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = ""):
+        from face_recognition import RecentFacesCache
+
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}'")
         
         hashed_identifier = None
@@ -145,6 +150,9 @@ class Server:
         created_face_embedding_ids = []
         created_face_image_ids = []
         created_face_metadata_ids = []
+        stored_face_appearance_ids = []
+
+        recent_face_cache = RecentFacesCache(max_size=100, confidente_threshold=0.9)
 
         try:
             # Upload original video to R2 bucket
@@ -236,17 +244,20 @@ class Server:
                     if frames is not None and len(frames) > 0:
                         n = min(8, len(frames))
                         if len(frames) <= n:
-                            sampled = list(frames)
+                            sampled = [frame.copy() for frame in frames]
                         else:
                             import numpy as _np
                             idx = _np.linspace(0, len(frames) - 1, n).astype(int)
-                            sampled = [frames[i] for i in idx]
+                            sampled = [frames[i].copy for i in idx]
 
                     # Aggregate face mappings for the chunk (face_id -> img_access_id)
                     face_map = {}
                     for f in sampled:
                         try:
-                            mapping, vec_ids, img_ids, face_ids = pipeline.process_frame(f, chunk_id=chunk['chunk_id'])
+                            mapping, vec_ids, img_ids, face_ids = pipeline.process_frame(
+                                f, 
+                                chunk_id=chunk['chunk_id'],
+                                recent_faces_cache=recent_face_cache)
                             # mapping may contain multiple faces; merge into face_map
                             for k, v in mapping.items():
                                 face_map.setdefault(k, v)
@@ -270,6 +281,16 @@ class Server:
                     "memory_mb": chunk['memory_mb'],
                     "faces": face_map,
                 })
+
+                # store the face appearance data for this chunk
+                for face_id in face_map.keys():
+                    success = self.face_appearance_repository.set_face_appearance(
+                        user_id=namespace,
+                        face_id=face_id,
+                        video_chunk_id=chunk['chunk_id']
+                    )
+                    if success:
+                        stored_face_appearance_ids.append([face_id, chunk['chunk_id']])
 
             result = {
                 "job_id": job_id,
@@ -332,6 +353,18 @@ class Server:
                     if not success:
                         logger.error(f"[Job {job_id}] Rollback failed for face metadata deletion: {face_id}")
                     
+            # 6. Delete face appearance records from Firestore
+            if stored_face_appearance_ids:
+                logger.info(f"[Job {job_id}] Rolling back: Deleting {len(stored_face_appearance_ids)} face appearance records from Firestore")
+                for face_id, chunk_id in stored_face_appearance_ids:
+                    success = self.face_appearance_repository.delete_face_appearance(
+                        user_id=namespace,
+                        face_id=face_id,
+                        video_chunk_id=chunk_id
+                    )
+                    if not success:
+                        logger.error(f"[Job {job_id}] Rollback failed for face appearance deletion: face_id={face_id}, chunk_id={chunk_id}")
+
             logger.info(f"[Job {job_id}] Rollback complete.")
             # ----------------------
 

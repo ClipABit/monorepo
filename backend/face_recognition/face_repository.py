@@ -20,7 +20,7 @@ class FaceRepository:
             self, 
             pinecone_connector: PineconeConnector,
             r2_connector: R2Connector,
-            threshold = 0.35,
+            threshold = 0.5,
             image_serializer: Optional[Callable[[np.ndarray], bytes]] = None,
             r2_face_image_namespace: str = "face_images"
         ):
@@ -59,6 +59,7 @@ class FaceRepository:
             return None
 
         match = best_match[0]
+        logger.info(f"FaceRepository: Pinecone query returned match with score {match.get('score', 0)} in namespace {namespace}")
         if match.get('score', 0) < self.threshold:
             return None
         else:
@@ -68,6 +69,7 @@ class FaceRepository:
             if not face_id or not img_access_id:
                 logger.error(f"FaceRepository: Found matching face in pinecone but missing metadata face_id or img_access_id. Metadata: {metadata}")
                 raise Exception("Corrupted metadata in pinecone for matched face.")
+            logger.info(f"FaceRepository: Found matching face_id {face_id} with score {match.get('score')} in namespace {namespace}")
             return DetectedFaceData(face_id=str(face_id), img_access_id=str(img_access_id))
         
     def generate_face_id(self) -> str:

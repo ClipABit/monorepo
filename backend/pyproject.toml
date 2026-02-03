@@ -20,6 +20,7 @@ dependencies = [
     "deepface>=0.0.96",
     "tf-keras>=2.20.1",
     "firebase-admin>=7.1.0",
+    "scikit-learn>=1.8.0",
 ]
 
 [project.scripts]
