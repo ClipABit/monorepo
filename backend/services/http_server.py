@@ -88,8 +88,19 @@ class ServerService:
         """
         from api import ServerFastAPIRouter
         from fastapi import FastAPI
+        from fastapi.middleware.cors import CORSMiddleware
 
         self.fastapi_app = FastAPI(title="Clipabit Server")
+
+        # Add CORS middleware for testing
+        self.fastapi_app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
         api_router = ServerFastAPIRouter(
             server_instance=self,
             is_file_change_enabled=self.is_file_change_enabled,
