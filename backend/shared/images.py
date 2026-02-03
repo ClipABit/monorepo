@@ -43,6 +43,7 @@ def get_dev_image() -> modal.Image:
             "onnxruntime",
             "onnxscript",
             "tokenizers",  # For text embedder (faster than transformers import)
+            "firebase-admin",
         )
         .run_function(_download_clip_full_model_for_dev)
         .run_function(_export_clip_text_to_onnx)
