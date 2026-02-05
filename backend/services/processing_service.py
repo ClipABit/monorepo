@@ -81,7 +81,9 @@ class ProcessingService:
         upserted_chunk_ids = []
 
         try:
-            # Stage 1: Upload original video to R2 bucket
+            # === Stage 1: R2 Upload (0-10%) ===
+            self.job_store.update_job_progress(job_id, stage="r2_upload", progress_percent=5.0)
+
             success, hashed_identifier = self.r2_connector.upload_video(
                 video_data=video_bytes,
                 filename=filename,
@@ -92,12 +94,21 @@ class ProcessingService:
                 hashed_identifier = None
                 raise Exception(f"Failed to upload video to R2 storage: {upload_error_details}")
 
-            # Stage 2: Process video through preprocessing pipeline
+            self.job_store.update_job_progress(job_id, stage="r2_upload", progress_percent=10.0)
+
+            # === Stage 2: Chunking & Frame Extraction (10-20%) ===
+            self.job_store.update_job_progress(job_id, stage="chunking", progress_percent=15.0)
+
             processed_chunks = self.preprocessor.process_video_from_bytes(
                 video_bytes=video_bytes,
                 video_id=job_id,
                 filename=filename,
                 hashed_identifier=hashed_identifier
+            )
+
+            total_chunks = len(processed_chunks)
+            self.job_store.update_job_progress(
+                job_id, stage="chunking", progress_percent=20.0, total_chunks=total_chunks
             )
 
             # Calculate summary statistics
@@ -114,17 +125,30 @@ class ProcessingService:
                 f"{total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}"
             )
 
-            # Stage 3-4: Embed frames and store in Pinecone
-            logger.info(f"[{self.__class__.__name__}][Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
+            # === Stage 3-4: Embedding (20-80%) and Upserting (80-100%) ===
+            logger.info(f"[{self.__class__.__name__}][Job {job_id}] Embedding and upserting {total_chunks} chunks")
 
             chunk_details = []
-            for chunk in processed_chunks:
+            for idx, chunk in enumerate(processed_chunks):
+                # Generate CLIP embedding (Stage 3: 20-80%)
                 embedding = self.video_embedder._generate_clip_embedding(
                     chunk["frames"],
                     num_frames=8
                 )
 
                 logger.info(f"[{self.__class__.__name__}][Job {job_id}] Generated CLIP embedding for chunk {chunk['chunk_id']}")
+
+                # Update progress after embedding
+                chunks_completed = idx + 1
+                # Embedding progress: 20% to 50% of total progress
+                embedding_progress = 20.0 + (chunks_completed / total_chunks) * 30.0
+                self.job_store.update_job_progress(
+                    job_id,
+                    stage="embedding",
+                    progress_percent=embedding_progress,
+                    chunks_processed=chunks_completed,
+                    total_chunks=total_chunks
+                )
 
                 # Transform metadata for Pinecone compatibility
                 if 'timestamp_range' in chunk['metadata']:
@@ -141,6 +165,7 @@ class ProcessingService:
                 for k in keys_to_delete:
                     del chunk['metadata'][k]
 
+                # Upsert to Pinecone (Stage 4: 50-100%)
                 success = self.pinecone_connector.upsert_chunk(
                     chunk_id=chunk['chunk_id'],
                     chunk_embedding=embedding.numpy(),
@@ -152,6 +177,17 @@ class ProcessingService:
                     upserted_chunk_ids.append(chunk['chunk_id'])
                 else:
                     raise Exception(f"Failed to upsert chunk {chunk['chunk_id']} to Pinecone")
+
+                # Update progress after upsert
+                # Upsert progress: 50% to 100% of total progress
+                upsert_progress = 50.0 + (chunks_completed / total_chunks) * 50.0
+                self.job_store.update_job_progress(
+                    job_id,
+                    stage="pinecone_upsert",
+                    progress_percent=upsert_progress,
+                    chunks_processed=chunks_completed,
+                    total_chunks=total_chunks
+                )
 
                 chunk_details.append({
                     "chunk_id": chunk['chunk_id'],
@@ -169,6 +205,8 @@ class ProcessingService:
                 "total_memory_mb": total_memory,
                 "avg_complexity": avg_complexity,
                 "chunk_details": chunk_details,
+                "progress_percent": 100.0,
+                "current_stage": "completed",
             }
 
             logger.info(f"[{self.__class__.__name__}][Job {job_id}] Finished processing {filename}")

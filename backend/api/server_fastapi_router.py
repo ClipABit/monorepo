@@ -87,6 +87,7 @@ class ServerFastAPIRouter:
         """Registers all the FastAPI routes."""
         self.router.add_api_route("/health", self.health, methods=["GET"])
         self.router.add_api_route("/status", self.status, methods=["GET"])
+        self.router.add_api_route("/batch-status", self.batch_status, methods=["GET"])
         self.router.add_api_route("/upload", self.upload, methods=["POST"])
         self.router.add_api_route("/videos", self.list_videos, methods=["GET"])
         self.router.add_api_route("/videos/{hashed_identifier}", self.delete_video, methods=["DELETE"])
@@ -113,6 +114,8 @@ class ServerFastAPIRouter:
             dict: Contains:
                 - job_id (str): The job identifier
                 - status (str): 'processing', 'completed', or 'failed'
+                - progress_percent (float): Processing progress 0-100%
+                - current_stage (str): Current processing stage
                 - message (str, optional): If still processing or not found
                 - result (dict, optional): Full job result if completed
 
@@ -123,9 +126,74 @@ class ServerFastAPIRouter:
             return {
                 "job_id": job_id,
                 "status": "processing",
+                "progress_percent": 0.0,
+                "current_stage": "queued",
                 "message": "Job is still processing or not found"
             }
         return job_data
+
+    async def batch_status(self, batch_job_id: str):
+        """
+        Get detailed status of all child jobs in a batch.
+
+        Returns comprehensive progress information for each video in the batch,
+        enabling per-video progress bars in the frontend.
+
+        Args:
+            batch_job_id (str): The batch job identifier
+
+        Returns:
+            dict: Contains:
+                - batch_job_id (str): The batch identifier
+                - status (str): 'processing', 'completed', 'partial', or 'failed'
+                - total_videos (int): Total number of videos in batch
+                - completed_count (int): Number of completed videos
+                - failed_count (int): Number of failed videos
+                - processing_count (int): Number of videos still processing
+                - overall_progress_percent (float): Overall batch progress 0-100%
+                - child_jobs (list): Array of per-video status objects
+
+        Raises:
+            HTTPException: 404 if batch job not found
+        """
+        batch_job = self.server_instance.job_store.get_job(batch_job_id)
+        if not batch_job or batch_job.get("job_type") != "batch":
+            raise HTTPException(status_code=404, detail="Batch job not found")
+
+        child_jobs_data = self.server_instance.job_store.get_batch_child_jobs(batch_job_id)
+
+        child_jobs_response = []
+        for child in child_jobs_data:
+            child_jobs_response.append({
+                "job_id": child.get("job_id"),
+                "filename": child.get("filename"),
+                "status": child.get("status"),
+                "progress_percent": child.get("progress_percent", 0.0),
+                "current_stage": child.get("current_stage", "queued"),
+                "chunks_processed": child.get("chunks_processed", 0),
+                "total_chunks": child.get("total_chunks"),
+                "size_bytes": child.get("size_bytes", 0),
+                "error": child.get("error")
+            })
+
+        total = batch_job.get("total_videos", 0)
+        overall_progress = 0.0
+        if total > 0:
+            completed = batch_job.get("completed_count", 0)
+            failed = batch_job.get("failed_count", 0)
+            overall_progress = (completed + failed) / total * 100.0
+
+        return {
+            "batch_job_id": batch_job_id,
+            "status": batch_job.get("status"),
+            "namespace": batch_job.get("namespace"),
+            "total_videos": total,
+            "completed_count": batch_job.get("completed_count"),
+            "failed_count": batch_job.get("failed_count"),
+            "processing_count": batch_job.get("processing_count"),
+            "overall_progress_percent": overall_progress,
+            "child_jobs": child_jobs_response
+        }
 
     async def upload(self, files: list[UploadFile] = File(default=[]), namespace: str = Form("")):
         """

@@ -162,6 +162,7 @@ class UploadHandler:
                     logger.warning(f"[Batch {batch_job_id}] Skipped {file.filename}: {error_msg}")
 
             if not validated:
+                logger.error(f"[Batch {batch_job_id}] All {len(files)} files failed validation")
                 raise HTTPException(status_code=400, detail="All files failed validation")
 
             # Create batch job FIRST (before spawning children)
@@ -266,8 +267,14 @@ class UploadHandler:
         Raises:
             HTTPException: 400 if no files provided or batch exceeds limit
         """
+        # Debug logging for upload diagnostics
+        logger.info(f"[Upload] Received {len(files)} files, namespace='{namespace}'")
+        for i, f in enumerate(files):
+            logger.info(f"[Upload] File {i}: filename={f.filename!r}, content_type={f.content_type}, size={f.size}")
+
         # Validation
         if not files:
+            logger.error("[Upload] No files provided in request")
             raise HTTPException(status_code=400, detail="No files provided")
 
         if len(files) > self.MAX_BATCH_SIZE:

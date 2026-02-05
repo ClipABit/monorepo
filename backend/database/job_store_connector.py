@@ -32,6 +32,13 @@ class JobStoreConnector:
             if "parent_batch_id" not in initial_data:
                 initial_data["parent_batch_id"] = None
 
+            # Add progress tracking fields for video jobs
+            if initial_data.get("job_type") == "video":
+                initial_data.setdefault("current_stage", "queued")
+                initial_data.setdefault("progress_percent", 0.0)
+                initial_data.setdefault("chunks_processed", 0)
+                initial_data.setdefault("total_chunks", None)
+
             self.job_store[job_id] = initial_data
             logger.info(f"Created job {job_id} with status: {initial_data.get('status', 'unknown')}")
             return True
@@ -104,6 +111,56 @@ class JobStoreConnector:
             "error": error
         }
         return self.update_job(job_id, error_data)
+
+    def update_job_progress(
+        self,
+        job_id: str,
+        stage: str,
+        progress_percent: float,
+        chunks_processed: int = 0,
+        total_chunks: Optional[int] = None
+    ) -> bool:
+        """
+        Update intermediate progress for a video job.
+
+        Thread-safe for concurrent updates during parallel chunk processing.
+
+        Args:
+            job_id: Video job identifier
+            stage: Current processing stage (r2_upload, chunking, frame_extraction, embedding, pinecone_upsert)
+            progress_percent: Progress percentage (0-100)
+            chunks_processed: Number of chunks processed so far
+            total_chunks: Total chunks (set after chunking stage completes)
+
+        Returns:
+            bool: Success status
+        """
+        try:
+            if job_id not in self.job_store:
+                logger.warning(f"Cannot update progress - job {job_id} not found")
+                return False
+
+            job_data = self.job_store[job_id]
+            job_data.update({
+                "current_stage": stage,
+                "progress_percent": min(100.0, max(0.0, progress_percent)),
+                "chunks_processed": chunks_processed,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            })
+
+            # Only update total_chunks if provided and not already set
+            if total_chunks is not None:
+                job_data["total_chunks"] = total_chunks
+
+            self.job_store[job_id] = job_data
+            logger.info(
+                f"Progress updated: {job_id} | stage={stage} | "
+                f"progress={progress_percent:.1f}% | chunks={chunks_processed}/{total_chunks or '?'}"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error updating progress for {job_id}: {e}")
+            return False
 
     def create_batch_job(
         self,
