@@ -17,6 +17,7 @@ Endpoints:
 """
 
 import logging
+import os
 import modal
 
 from shared.config import get_environment, get_secrets
@@ -37,10 +38,25 @@ if env != "dev":
         f"Current environment: {env}. Use separate apps for staging/prod."
     )
 
-logger.info("Starting Combined Dev App - all services in one app for local iteration")
+# Get dev name prefix (required in dev mode to avoid naming conflicts)
+# Only validate locally - Modal containers re-import but don't need DEV_NAME
+# since the app name is already determined by the local import
+dev_name = os.environ.get("DEV_NAME")
+if not dev_name:
+    if modal.is_local():
+        raise ValueError(
+            "DEV_NAME environment variable is required for dev mode. "
+            "Run with: uv run dev <name>"
+        )
+    else:
+        # Inside Modal container - use placeholder (app name already set)
+        dev_name = "container"
+
+app_name = f"{dev_name}-{env}-server"
+logger.info(f"Starting Combined Dev App '{app_name}' - all services in one app for local iteration")
 
 app = modal.App(
-    name=f"{env}-server",
+    name=app_name,
     image=get_dev_image(),
     secrets=[get_secrets()]
 )
