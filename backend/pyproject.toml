@@ -16,7 +16,8 @@ dependencies = [
     "transformers",
     "scenedetect",
     "boto3",
-    "torchvision"
+    "torchvision",
+    "firebase-admin>=7.1.0",
 ]
 
 [project.scripts]
@@ -34,7 +35,6 @@ packages = ["cli.py"]
 
 [dependency-groups]
 dev = [
-    "opencv-python",
     "pytest",
     "pytest-asyncio>=1.3.0",
     "pytest-cov",
