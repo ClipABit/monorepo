@@ -92,7 +92,7 @@ class ServerService:
 
         self.fastapi_app = FastAPI(title="Clipabit Server")
 
-        # Add CORS middleware for testing
+        # Add CORS middleware
         self.fastapi_app.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],
