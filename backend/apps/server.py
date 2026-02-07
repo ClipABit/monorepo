@@ -24,7 +24,7 @@ app = modal.App(
 )
 
 
-@app.cls(cpu=2.0, memory=2048, timeout=120)
+@app.cls(cpu=2.0, memory=2048, timeout=120, scaledown_window=300, min_containers=1)
 class Server(ServerService):
     """Server with ASGI app for production deployment."""
     

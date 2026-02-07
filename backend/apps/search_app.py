@@ -28,4 +28,4 @@ app = modal.App(
 )
 
 # Register SearchService with this app
-app.cls(cpu=2.0, memory=2048, timeout=60, scaledown_window=120)(SearchService)
+app.cls(cpu=2.0, memory=2048, timeout=60, scaledown_window=120, min_containers=1)(SearchService)
