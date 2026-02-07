@@ -1,17 +1,20 @@
 """CLI for serving Modal apps locally."""
 
+import os
 import signal
 import subprocess
 import sys
+import threading
+from pathlib import Path
 
 # Dev combined app - all services in one for local iteration
 DEV_COMBINED_APP = "apps/dev_combined.py"
 
 # Individual apps for staging/prod deployment
 APPS = {
-    "server": ("services/http_server.py", "\033[36m"),      # Cyan
-    "search": ("services/search_service.py", "\033[33m"),  # Yellow
-    "processing": ("services/processing_service.py", "\033[35m"),  # Magenta
+    "server": ("apps/server.py", "\033[36m"),      # Cyan
+    "search": ("apps/search_app.py", "\033[33m"),  # Yellow
+    "processing": ("apps/processing_app.py", "\033[35m"),  # Magenta
 }
 RESET = "\033[0m"
 
@@ -41,14 +44,22 @@ def serve_all():
     print("Note: For staging/prod, deploy individual apps separately.\n")
     print("-" * 60 + "\n")
     
+    # Ensure venv bin is in PATH for Modal subprocess calls
+    venv_bin = Path(__file__).parent / ".venv" / "bin"
+    env = os.environ.copy()
+    if venv_bin.exists():
+        current_path = env.get("PATH", "")
+        env["PATH"] = f"{venv_bin}:{current_path}" if current_path else str(venv_bin)
+    
     # Run with color-coded output prefixing
     color = "\033[32m"  # Green for combined dev app
     process = subprocess.Popen(
-        ["modal", "serve", DEV_COMBINED_APP],
+        ["uv", "run", "modal", "serve", DEV_COMBINED_APP],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=env,
     )
     
     # Handle graceful shutdown
@@ -68,12 +79,20 @@ def _serve_single_app(name: str):
     """Serve a single app with color-coded output."""
     path, color = APPS[name]
     
+    # Ensure venv bin is in PATH for Modal subprocess calls
+    venv_bin = Path(__file__).parent / ".venv" / "bin"
+    env = os.environ.copy()
+    if venv_bin.exists():
+        current_path = env.get("PATH", "")
+        env["PATH"] = f"{venv_bin}:{current_path}" if current_path else str(venv_bin)
+    
     process = subprocess.Popen(
-        ["modal", "serve", path],
+        ["uv", "run", "modal", "serve", path],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=env,
     )
     
     # Handle graceful shutdown
@@ -102,3 +121,61 @@ def serve_search():
 def serve_processing():
     """Serve the processing app."""
     _serve_single_app("processing")
+
+
+def serve_staging():
+    """
+    Serve all staging apps concurrently (server + search + processing).
+    
+    Runs all three apps in separate processes with ENVIRONMENT=staging.
+    This matches the production architecture but runs locally.
+    """
+    print("Starting staging apps (all services separately)...\n")
+    print(f"  \033[36m●{RESET} server\n")
+    print(f"  \033[33m●{RESET} search\n")
+    print(f"  \033[35m●{RESET} processing\n")
+    print("Note: Cross-app communication works between these deployed apps.\n")
+    print("-" * 60 + "\n")
+    
+    # Ensure venv bin is in PATH for Modal subprocess calls
+    venv_bin = Path(__file__).parent / ".venv" / "bin"
+    env = os.environ.copy()
+    env["ENVIRONMENT"] = "staging"
+    if venv_bin.exists():
+        current_path = env.get("PATH", "")
+        env["PATH"] = f"{venv_bin}:{current_path}" if current_path else str(venv_bin)
+    
+    # Start all three processes
+    processes = []
+    for name in ["server", "search", "processing"]:
+        path, color = APPS[name]
+        process = subprocess.Popen(
+            ["uv", "run", "modal", "serve", path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=env,
+        )
+        processes.append((process, name, color))
+    
+    # Handle graceful shutdown
+    def signal_handler(sig, frame):
+        for process, _, _ in processes:
+            process.terminate()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Stream output from all processes with color prefixing
+    threads = []
+    for process, name, color in processes:
+        thread = threading.Thread(target=_prefix_output, args=(process, name, color))
+        thread.daemon = True
+        thread.start()
+        threads.append(thread)
+    
+    # Wait for all processes
+    for process, _, _ in processes:
+        process.wait()

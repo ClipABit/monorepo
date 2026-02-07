@@ -22,6 +22,7 @@ dependencies = [
 
 [project.scripts]
 dev = "cli:serve_all"
+staging = "cli:serve_staging"
 server = "cli:serve_server"
 search = "cli:serve_search"
 processing = "cli:serve_processing"

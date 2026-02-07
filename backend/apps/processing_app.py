@@ -24,7 +24,7 @@ logger.info(f"Starting Processing App in '{env}' environment")
 app = modal.App(
     name=f"{env}-processing",
     image=get_processing_image(),
-    secrets=[get_secrets()]
+    secrets=get_secrets()
 )
 
 # Register ProcessingService with this app

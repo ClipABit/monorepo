@@ -42,7 +42,7 @@ logger.info("Starting Combined Dev App - all services in one app for local itera
 app = modal.App(
     name=f"{env}-server",
     image=get_dev_image(),
-    secrets=[get_secrets()]
+    secrets=get_secrets()
 )
 
 # SearchService exposes its own ASGI app for direct HTTP access (no server hop)

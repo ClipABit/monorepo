@@ -31,7 +31,7 @@ class ServerService:
         try:
             import firebase_admin
             import json
-            firebase_credentials = json.loads(get_env_var("FIREBASE_ADMIN_KEY"))
+            firebase_credentials = json.loads(get_env_var("FIREBASE_SERVICE_ACCOUNT_JSON"))
             from firebase_admin import credentials
             cred = credentials.Certificate(firebase_credentials)
             firebase_admin.initialize_app(cred)
@@ -40,7 +40,7 @@ class ServerService:
             # Already initialized, which is fine
             pass
         except Exception as e:
-            logger.warning(f"[{self.__class__.__name__}] Firebase initialization failed: {e}")
+            logger.error(f"[{self.__class__.__name__}] Firebase initialization failed: {e}")
 
         # Get environment variables
         PINECONE_API_KEY = get_env_var("PINECONE_API_KEY")
