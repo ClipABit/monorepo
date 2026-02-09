@@ -250,6 +250,44 @@ def upload_dialog():
                                 # Single video
                                 job_id = data.get("job_id")
                                 st.success(f"Video uploaded! Job ID: {job_id}")
+                                
+                                # Show progress for single video
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+                                
+                                max_polls = 300  # Max 10 minutes
+                                poll_count = 0
+                                
+                                while poll_count < max_polls:
+                                    try:
+                                        resp = requests.get(SERVER_STATUS_URL, params={"job_id": job_id}, timeout=30)
+                                        if resp.status_code == 200:
+                                            status_data = resp.json()
+                                            status = status_data.get("status")
+                                            progress = status_data.get("progress_percent", 0)
+                                            
+                                            progress_bar.progress(progress / 100.0)
+                                            status_text.text(f"Status: {status} | Progress: {progress}%")
+                                            
+                                            if status in ["completed", "failed"]:
+                                                if status == "completed":
+                                                    st.success("Video processed successfully!")
+                                                else:
+                                                    st.error(f"Processing failed: {status_data.get('error', 'Unknown error')}")
+                                                break
+                                        else:
+                                            st.error(f"Status check failed with status {resp.status_code}")
+                                            break
+                                    except requests.RequestException as e:
+                                        st.error(f"Error checking status: {e}")
+                                        break
+                                    
+                                    time.sleep(2)
+                                    poll_count += 1
+                                
+                                if poll_count >= max_polls:
+                                    st.warning("Status check timed out. The video may still be processing.")
+                                
                                 reset_repository_state()
                                 time.sleep(2)
                                 st.rerun()
@@ -262,56 +300,67 @@ def upload_dialog():
                                 progress_bar = st.progress(0)
                                 status_text = st.empty()
 
-                                while True:
-                                    status_data = poll_job_status(batch_job_id, max_wait=5)
+                                max_polls = 300  # Max 10 minutes
+                                poll_count = 0
 
-                                    if "error" in status_data:
-                                        st.error(f"Error checking status: {status_data['error']}")
-                                        break
+                                while poll_count < max_polls:
+                                    try:
+                                        resp = requests.get(SERVER_STATUS_URL, params={"job_id": batch_job_id}, timeout=30)
+                                        if resp.status_code == 200:
+                                            status_data = resp.json()
+                                            status = status_data.get("status")
+                                            progress = status_data.get("progress_percent", 0)
+                                            completed = status_data.get("completed_count", 0)
+                                            failed = status_data.get("failed_count", 0)
+                                            processing = status_data.get("processing_count", 0)
 
-                                    status = status_data.get("status")
-                                    progress = status_data.get("progress_percent", 0)
-                                    completed = status_data.get("completed_count", 0)
-                                    failed = status_data.get("failed_count", 0)
-                                    processing = status_data.get("processing_count", 0)
-
-                                    progress_bar.progress(progress / 100.0)
-                                    status_text.text(
-                                        f"Status: {status} | "
-                                        f"Completed: {completed} | "
-                                        f"Failed: {failed} | "
-                                        f"Processing: {processing}"
-                                    )
-
-                                    if status in ["completed", "partial", "failed"]:
-                                        if status == "completed":
-                                            st.success(f"All {completed} videos processed successfully!")
-                                            metrics = status_data.get("metrics", {})
-                                            st.write(f"Total chunks: {metrics.get('total_chunks', 0)}")
-                                            st.write(f"Total frames: {metrics.get('total_frames', 0)}")
-                                        elif status == "partial":
-                                            st.warning(
-                                                f"Batch completed with {completed} successes and {failed} failures"
+                                            progress_bar.progress(progress / 100.0)
+                                            status_text.text(
+                                                f"Status: {status} | "
+                                                f"Completed: {completed} | "
+                                                f"Failed: {failed} | "
+                                                f"Processing: {processing} | "
+                                                f"Progress: {progress}%"
                                             )
-                                            failed_jobs = status_data.get("failed_jobs", [])
-                                            if failed_jobs:
-                                                with st.expander("Failed Videos"):
-                                                    for job in failed_jobs:
-                                                        st.write(f"- {job.get('filename')}: {job.get('error')}")
+
+                                            if status in ["completed", "partial", "failed"]:
+                                                if status == "completed":
+                                                    st.success(f"All {completed} videos processed successfully!")
+                                                    metrics = status_data.get("metrics", {})
+                                                    st.write(f"Total chunks: {metrics.get('total_chunks', 0)}")
+                                                    st.write(f"Total frames: {metrics.get('total_frames', 0)}")
+                                                elif status == "partial":
+                                                    st.warning(
+                                                        f"Batch completed with {completed} successes and {failed} failures"
+                                                    )
+                                                    failed_jobs = status_data.get("failed_jobs", [])
+                                                    if failed_jobs:
+                                                        with st.expander("Failed Videos"):
+                                                            for job in failed_jobs:
+                                                                st.write(f"- {job.get('filename')}: {job.get('error')}")
+                                                else:
+                                                    st.error(f"All {failed} videos failed to process")
+                                                    failed_jobs = status_data.get("failed_jobs", [])
+                                                    if failed_jobs:
+                                                        with st.expander("Failed Videos"):
+                                                            for job in failed_jobs:
+                                                                st.write(f"- {job.get('filename')}: {job.get('error')}")
+
+                                                reset_repository_state()
+                                                time.sleep(2)
+                                                st.rerun()
+                                                break
                                         else:
-                                            st.error(f"All {failed} videos failed to process")
-                                            failed_jobs = status_data.get("failed_jobs", [])
-                                            if failed_jobs:
-                                                with st.expander("Failed Videos"):
-                                                    for job in failed_jobs:
-                                                        st.write(f"- {job.get('filename')}: {job.get('error')}")
-
-                                        reset_repository_state()
-                                        time.sleep(2)
-                                        st.rerun()
-                                        break
-
+                                            st.error(f"Status check failed with status {resp.status_code}")
+                                            break
+                                    except requests.RequestException as e:
+                                        st.error(f"Error checking status: {e}")
+                                        break           
                                     time.sleep(2)
+                                    poll_count += 1
+                                
+                                if poll_count >= max_polls:
+                                    st.warning("Status check timed out. The batch may still be processing.")
                         else:
                             st.error(f"Upload failed with status {resp.status_code}. Message: {resp.text}")
                     except requests.RequestException as e:
