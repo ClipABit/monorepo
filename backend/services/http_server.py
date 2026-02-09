@@ -30,17 +30,18 @@ class ServerService:
         # Initialize Firebase Admin SDK (required for token verification)
         try:
             import firebase_admin
-            import json
-            firebase_credentials = json.loads(get_env_var("FIREBASE_SERVICE_ACCOUNT_JSON"))
-            from firebase_admin import credentials
-            cred = credentials.Certificate(firebase_credentials)
-            firebase_admin.initialize_app(cred)
-            logger.info(f"[{self.__class__.__name__}] Firebase Admin SDK initialized")
-        except ValueError:
-            # Already initialized, which is fine
-            pass
+            if not firebase_admin._apps:
+                import json
+                firebase_credentials = json.loads(get_env_var("FIREBASE_SERVICE_ACCOUNT_JSON"))
+                from firebase_admin import credentials
+                cred = credentials.Certificate(firebase_credentials)
+                firebase_admin.initialize_app(cred)
+                logger.info(f"[{self.__class__.__name__}] Firebase Admin SDK initialized")
+            else:
+                logger.info(f"[{self.__class__.__name__}] Firebase Admin SDK already initialized")
         except Exception as e:
             logger.error(f"[{self.__class__.__name__}] Firebase initialization failed: {e}")
+            raise
 
         # Get environment variables
         PINECONE_API_KEY = get_env_var("PINECONE_API_KEY")

@@ -249,7 +249,9 @@ class AuthConnector:
     def verify_firebase_token(self, id_token: str) -> Optional[Dict[str, Any]]:
         """Verify Firebase ID token from website/plugin."""
         try:
+            logger.info(f"Verifying Firebase token (length={len(id_token)}, prefix={id_token[:20]}...)")
             decoded_token = auth.verify_id_token(id_token)
+            logger.info(f"Firebase token verified for uid: {decoded_token['uid']}")
             return {
                 "user_id": decoded_token['uid'],
                 "email": decoded_token.get('email'),
@@ -257,13 +259,16 @@ class AuthConnector:
             }
         except auth.InvalidIdTokenError as e:
             logger.error(f"Invalid Firebase token: {e}")
-            return None
+            raise ValueError(f"Invalid token: {e}")
         except auth.ExpiredIdTokenError as e:
             logger.error(f"Expired Firebase token: {e}")
-            return None
+            raise ValueError(f"Expired token: {e}")
         except auth.RevokedIdTokenError as e:
             logger.error(f"Revoked Firebase token: {e}")
-            return None
+            raise ValueError(f"Revoked token: {e}")
         except auth.CertificateFetchError as e:
             logger.error(f"Firebase certificate fetch error: {e}")
-            return None
+            raise ValueError(f"Certificate fetch error: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected Firebase token error: {e}")
+            raise ValueError(f"Token verification failed: {e}")

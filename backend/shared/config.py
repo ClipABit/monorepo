@@ -72,18 +72,15 @@ def get_modal_environment() -> str:
     """Get the modal environment name."""
     return 'main'
 
-def get_secrets() -> list[modal.Secret]:
+def get_secrets() -> modal.Secret:
     """
     Get Modal secrets for the current environment.
     
     Returns:
-        list[modal.Secret]: List of secret objects containing environment variables
+        modal.Secret: Secret object containing environment variables
     """
     env = get_environment()
-    return [
-        modal.Secret.from_name(env),
-        modal.Secret.from_name("FIREBASE_SERVICE_ACCOUNT_JSON"),
-    ]
+    return modal.Secret.from_name(env)
 
 
 def get_pinecone_index() -> str:

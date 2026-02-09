@@ -391,11 +391,12 @@ class ServerFastAPIRouter:
                 )
 
             # Verify Firebase token
-            user_info = self.server_instance.auth_connector.verify_firebase_token(firebase_id_token)
-            if not user_info:
+            try:
+                user_info = self.server_instance.auth_connector.verify_firebase_token(firebase_id_token)
+            except ValueError as e:
                 raise HTTPException(
                     status_code=401,
-                    detail="Invalid Firebase token"
+                    detail=str(e)
                 )
 
             user_id = user_info["user_id"]

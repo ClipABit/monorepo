@@ -20,7 +20,7 @@ env = get_environment()
 app = modal.App(
     name=f"{env}-server",
     image=get_server_image(),
-    secrets=get_secrets()
+    secrets=[get_secrets()]
 )
 
 
