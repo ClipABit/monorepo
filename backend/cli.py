@@ -1,5 +1,6 @@
 """CLI for serving Modal apps locally."""
 
+import os
 import signal
 import subprocess
 import sys
@@ -35,9 +36,26 @@ def serve_all():
     For local development, we use dev_combined.py which includes
     Server, Search, and Processing in a single Modal app.
     This allows hot-reload on all services without cross-app lookup issues.
+
+    Usage: uv run dev <name>
+
+    The name parameter is required and will prefix the Modal app name
+    to avoid conflicts when multiple developers run dev instances.
     """
-    print("Starting combined dev app (all services in one)...\n")
-    print(f"  \033[32m●{RESET} dev-combined (server + search + processing)\n")
+    if len(sys.argv) < 2:
+        print("Error: Name parameter is required for dev mode.")
+        print("Usage: uv run dev <name>")
+        print("\nExample: uv run dev john")
+        print("This creates a Modal app named 'john-dev-server'")
+        sys.exit(1)
+
+    dev_name = sys.argv[1]
+
+    # Set environment variable for the Modal app to read
+    os.environ["DEV_NAME"] = dev_name
+
+    print(f"Starting combined dev app for '{dev_name}'...\n")
+    print(f"  \033[32m●{RESET} {dev_name}-dev-server (server + search + processing)\n")
     print("Note: For staging/prod, deploy individual apps separately.\n")
     print("-" * 60 + "\n")
     
@@ -49,6 +67,7 @@ def serve_all():
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env={**os.environ, "DEV_NAME": dev_name},
     )
     
     # Handle graceful shutdown
@@ -60,7 +79,7 @@ def serve_all():
     signal.signal(signal.SIGTERM, signal_handler)
     
     # Stream output with color prefix
-    _prefix_output(process, "dev", color)
+    _prefix_output(process, dev_name, color)
     process.wait()
 
 

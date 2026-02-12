@@ -23,7 +23,15 @@ class Config:
     if ENVIRONMENT not in ["dev", "prod", "staging"]:
         raise ValueError(f"Invalid ENVIRONMENT value: {ENVIRONMENT}. Must be one of: dev, prod, staging")
 
-    print(f"Running in {ENVIRONMENT} environment")
+    # Dev name prefix (required in dev mode to avoid naming conflicts)
+    DEV_NAME = os.environ.get("DEV_NAME", "")
+    if ENVIRONMENT == "dev" and not DEV_NAME:
+        raise ValueError(
+            "DEV_NAME environment variable is required for dev mode. "
+            "Run with: uv run dev <name>"
+        )
+
+    print(f"Running in {ENVIRONMENT} environment" + (f" (dev instance: {DEV_NAME})" if DEV_NAME else ""))
 
     # Modal app name (matches backend app name)
     APP_NAME = f"clipabit-{ENVIRONMENT}"
@@ -32,12 +40,14 @@ class Config:
     url_portion = "dev" if ENVIRONMENT == "dev" else ""
     url_portion2 = "-dev" if ENVIRONMENT == "dev" else ""
 
+    # App name prefix for dev mode (e.g., "john-dev" instead of "dev")
+    app_prefix = f"{DEV_NAME}-{ENVIRONMENT}" if ENVIRONMENT == "dev" else ENVIRONMENT   
 
     # Server API URL (handles upload, status, videos, delete, cache)
-    SERVER_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-server-{url_portion}server-asgi-app{url_portion2}.modal.run"
+    SERVER_BASE_URL = f"https://clipabit01--{app_prefix}-server-{url_portion}server-asgi-app{url_portion2}.modal.run"
 
     # Search API URL (in dev its server-searchservice-asgi-app, else its search-searchservice-asgi-app)
-    SEARCH_BASE_URL = f"https://clipabit01--{ENVIRONMENT}-{"server" if ENVIRONMENT == "dev" else "search"}-searchservice-asgi-app{url_portion2}.modal.run"
+    SEARCH_BASE_URL = f"https://clipabit01--{app_prefix}-{"server" if ENVIRONMENT == "dev" else "search"}-searchservice-asgi-app{url_portion2}.modal.run"
 
     # API Endpoints
     SERVER_UPLOAD_URL = f"{SERVER_BASE_URL}/upload"
