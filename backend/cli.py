@@ -32,7 +32,7 @@ def _prefix_output(process, name, color):
 def serve_all():
     """
     Serve the combined dev app (all services in one).
-    
+
     For local development, we use dev_combined.py which includes
     Server, Search, and Processing in a single Modal app.
     This allows hot-reload on all services without cross-app lookup issues.
@@ -58,7 +58,7 @@ def serve_all():
     print(f"  \033[32m●{RESET} {dev_name}-dev-server (server + search + processing)\n")
     print("Note: For staging/prod, deploy individual apps separately.\n")
     print("-" * 60 + "\n")
-    
+
     # Run with color-coded output prefixing
     color = "\033[32m"  # Green for combined dev app
     process = subprocess.Popen(
@@ -69,15 +69,15 @@ def serve_all():
         bufsize=1,
         env={**os.environ, "DEV_NAME": dev_name},
     )
-    
+
     # Handle graceful shutdown
     def signal_handler(sig, frame):
         process.terminate()
         sys.exit(0)
-    
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     # Stream output with color prefix
     _prefix_output(process, dev_name, color)
     process.wait()

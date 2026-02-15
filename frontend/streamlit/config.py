@@ -41,7 +41,7 @@ class Config:
     url_portion2 = "-dev" if ENVIRONMENT == "dev" else ""
 
     # App name prefix for dev mode (e.g., "john-dev" instead of "dev")
-    app_prefix = f"{DEV_NAME}-{ENVIRONMENT}" if ENVIRONMENT == "dev" else ENVIRONMENT   
+    app_prefix = f"{DEV_NAME}-{ENVIRONMENT}" if ENVIRONMENT == "dev" else ENVIRONMENT  
 
     # Server API URL (handles upload, status, videos, delete, cache)
     SERVER_BASE_URL = f"https://clipabit01--{app_prefix}-server-{url_portion}server-asgi-app{url_portion2}.modal.run"
