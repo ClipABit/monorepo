@@ -81,7 +81,8 @@ class ProcessingService:
         upserted_chunk_ids = []
 
         try:
-            # Stage 1: Upload original video to R2 bucket
+            # Stage 1: Upload original video to R2 bucket (0-15%)
+            self.job_store.update_job(job_id, {"progress_percent": 5})
             success, hashed_identifier = self.r2_connector.upload_video(
                 video_data=video_bytes,
                 filename=filename,
@@ -91,14 +92,17 @@ class ProcessingService:
                 upload_error_details = hashed_identifier
                 hashed_identifier = None
                 raise Exception(f"Failed to upload video to R2 storage: {upload_error_details}")
+            self.job_store.update_job(job_id, {"progress_percent": 15})
 
-            # Stage 2: Process video through preprocessing pipeline
+            # Stage 2: Process video through preprocessing pipeline (15-40%)
+            self.job_store.update_job(job_id, {"progress_percent": 20})
             processed_chunks = self.preprocessor.process_video_from_bytes(
                 video_bytes=video_bytes,
                 video_id=job_id,
                 filename=filename,
                 hashed_identifier=hashed_identifier
             )
+            self.job_store.update_job(job_id, {"progress_percent": 40})
 
             # Calculate summary statistics
             total_frames = sum(chunk['metadata']['frame_count'] for chunk in processed_chunks)
@@ -114,11 +118,12 @@ class ProcessingService:
                 f"{total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}"
             )
 
-            # Stage 3-4: Embed frames and store in Pinecone
+            # Stage 3-4: Embed frames and store in Pinecone (40-100%)
             logger.info(f"[{self.__class__.__name__}][Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
 
             chunk_details = []
-            for chunk in processed_chunks:
+            total_chunks = len(processed_chunks)
+            for idx, chunk in enumerate(processed_chunks):
                 embedding = self.video_embedder._generate_clip_embedding(
                     chunk["frames"],
                     num_frames=8
@@ -158,6 +163,11 @@ class ProcessingService:
                     "metadata": chunk['metadata'],
                     "memory_mb": chunk['memory_mb'],
                 })
+                
+                # Update progress: 40% base + 60% distributed across chunks
+                if total_chunks > 0:
+                    chunk_progress = 40 + int((idx + 1) / total_chunks * 60)
+                    self.job_store.update_job(job_id, {"progress_percent": chunk_progress})
 
             result = {
                 "job_id": job_id,
@@ -173,7 +183,8 @@ class ProcessingService:
 
             logger.info(f"[{self.__class__.__name__}][Job {job_id}] Finished processing {filename}")
 
-            # Stage 5: Store result
+            # Stage 5: Store result (100%)
+            result["progress_percent"] = 100
             self.job_store.set_job_completed(job_id, result)
 
             # Update parent batch if exists

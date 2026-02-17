@@ -113,6 +113,7 @@ class ServerFastAPIRouter:
             dict: Contains:
                 - job_id (str): The job identifier
                 - status (str): 'processing', 'completed', or 'failed'
+                - progress_percent (int): Percentage completion (0-100)
                 - message (str, optional): If still processing or not found
                 - result (dict, optional): Full job result if completed
 
@@ -123,8 +124,20 @@ class ServerFastAPIRouter:
             return {
                 "job_id": job_id,
                 "status": "processing",
+                "progress_percent": 0,
                 "message": "Job is still processing or not found"
             }
+        
+        # Ensure progress_percent is always included
+        if "progress_percent" not in job_data:
+            # If job is completed, it's 100%, otherwise estimate based on status
+            if job_data.get("status") == "completed":
+                job_data["progress_percent"] = 100
+            elif job_data.get("status") == "failed":
+                job_data["progress_percent"] = 0
+            else:
+                job_data["progress_percent"] = 0
+        
         return job_data
 
     async def upload(self, files: list[UploadFile] = File(default=[]), namespace: str = Form("")):
