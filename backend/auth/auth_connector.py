@@ -1,14 +1,13 @@
 """
-Auth service for device flow authentication.
+Auth connector for JWT authentication via Auth0.
 """
 
-from firebase_admin import auth
 import logging
 from typing import Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
-import secrets
-import string
-import modal
+import time
+import jwt
+import requests
+from fastapi import Request, HTTPException
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,254 +15,79 @@ logger = logging.getLogger(__name__)
 
 class AuthConnector:
     """
-    Modal Dict wrapper for device flow authentication.
+    Auth0 JWT verification connector.
 
-    Stores device codes with expiration (10 minutes) for OAuth device flow.
+    Fetches and caches JWKS from Auth0, verifies access tokens,
+    and returns user IDs. Exposes a FastAPI dependency via verify_token().
     """
 
-    DEFAULT_DEVICE_DICT = "clipabit-auth-device-codes"
-    DEFAULT_USER_DICT = "clipabit-auth-user-codes"
+    JWKS_CACHE_TTL = 3600  # 1 hour
 
-    TOKEN_EXPIRY_TIME = 600
+    def __init__(self, domain: str, audience: str):
+        self.domain = domain
+        self.audience = audience
+        self._jwks_cache: Optional[Dict[str, Any]] = None
+        self._jwks_cache_time: float = 0
 
-    def __init__(self, device_dict_name: str = DEFAULT_DEVICE_DICT, user_dict_name: str = DEFAULT_USER_DICT):
-        self.device_dict_name = device_dict_name
-        self.user_dict_name = user_dict_name
+    def _get_jwks(self) -> Dict[str, Any]:
+        """Fetch and cache Auth0 JWKS (JSON Web Key Set)."""
+        now = time.time()
+        if self._jwks_cache and (now - self._jwks_cache_time) < self.JWKS_CACHE_TTL:
+            return self._jwks_cache
+        url = f"https://{self.domain}/.well-known/jwks.json"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        self._jwks_cache = resp.json()
+        self._jwks_cache_time = now
+        return self._jwks_cache
 
-        self.device_store = modal.Dict.from_name(device_dict_name, create_if_missing=True)
-        self.user_store = modal.Dict.from_name(user_dict_name, create_if_missing=True)
-        logger.info(f"Initialized AuthConnector with device dict: {device_dict_name} and user dict: {user_dict_name}")
+    def _get_signing_key(self, token: str):
+        """Find the matching public key from JWKS for the given token."""
+        jwks = self._get_jwks()
+        unverified_header = jwt.get_unverified_header(token)
+        kid = unverified_header.get("kid")
+        for key in jwks.get("keys", []):
+            if key["kid"] == kid:
+                return jwt.algorithms.RSAAlgorithm.from_jwk(key)
+        raise HTTPException(status_code=401, detail="Unable to find signing key")
 
-    def _is_expired(self, entry: Dict[str, Any]) -> bool:
-        """Check if a device code entry is expired."""
-        expires_at = entry.get("expires_at")
-        if expires_at is None:
-            return False
-        expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-        return datetime.now(timezone.utc) > expires_at
-
-    def _delete_session(self, device_code: str, entry: Optional[Dict[str, Any]]) -> None:
+    def verify_token(self, token: str) -> str:
         """
-        Delete both dicts safely if the entry is expired.
-            device_code -> entry
-            user_code -> device_code
-        """
-        if entry is None:
-            entry = self.device_store.get(device_code)
-        if entry:
-            user_code = entry.get("user_code")
-            if user_code:
-                if user_code in self.user_store:
-                    del self.user_store[user_code]
-                    logger.info(f"Deleted expired user code entry for user_code: {user_code}")
-        if device_code in self.device_store:
-            del self.device_store[device_code]
-            logger.info(f"Deleted expired device code entry for device_code: {device_code[:8]}...")
+        Verify an Auth0 JWT and return the user ID (sub claim).
 
-    def generate_device_code(self) -> str:
-        """Generate a secure random device code."""
-        return secrets.token_urlsafe(48)
-
-    def generate_user_code(self) -> str:
-        """Generate a user-friendly code in format ABC-420."""
-        letters = ''.join(secrets.choice(string.ascii_uppercase) for _ in range(3))
-        digits = ''.join(secrets.choice(string.digits) for _ in range(3))
-        return f"{letters}-{digits}"
-
-    def create_device_code_entry(
-        self,
-        device_code: str,
-        user_code: str,
-        expires_in: int = TOKEN_EXPIRY_TIME
-    ) -> bool:
-        """Create a new device code entry with expiration."""
-        try:
-            expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
-            entry = {
-                "user_code": user_code,
-                "status": "pending",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "expires_at": expires_at.isoformat()
-            }
-            self.device_store[device_code] = entry
-            self.user_store[user_code] = device_code
-            logger.info(f"Created device code entry for user_code: {user_code}")
-            return True
-        except Exception as e:
-            logger.error(f"Error creating device code entry: {e}")
-            return False
-
-    def get_device_code_entry(self, device_code: str) -> Optional[Dict[str, Any]]:
-        """Retrieve device code entry, returns None if not found or expired."""
-        try:
-
-            entry = self.device_store.get(device_code)
-            if entry is None:
-                return None
-            if self._is_expired(entry):
-                self._delete_session(device_code, entry)
-                return None
-            return entry
-        except Exception as e:
-            logger.error(f"Error retrieving device code entry: {e}")
-            return None
-
-    def get_device_code_by_user_code(self, user_code: str) -> Optional[str]:
-        """
-        Lookup device_code by user_code.
-
-        Returns the device_code if found and not expired, None otherwise.
+        Raises HTTPException 401 on any failure.
         """
         try:
-            device_code = self.user_store.get(user_code)
-            if not device_code:
-                return None
+            signing_key = self._get_signing_key(token)
+            payload = jwt.decode(
+                token,
+                signing_key,
+                algorithms=["RS256"],
+                audience=self.audience,
+                issuer=f"https://{self.domain}/",
+            )
+            user_id = payload.get("sub")
+            if not user_id:
+                raise HTTPException(status_code=401, detail="Token missing sub claim")
+            return user_id
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(status_code=401, detail="Token has expired")
+        except jwt.InvalidAudienceError:
+            raise HTTPException(status_code=401, detail="Invalid audience")
+        except jwt.InvalidIssuerError:
+            raise HTTPException(status_code=401, detail="Invalid issuer")
+        except jwt.PyJWTError as e:
+            logger.error(f"JWT verification failed: {e}")
+            raise HTTPException(status_code=401, detail="Invalid token")
 
-            entry =  self.get_device_code_entry(device_code)
-            if entry is None:
-                if user_code in self.user_store:
-                    del self.user_store[user_code]
-                return None
-
-            return device_code
-        except Exception as e:
-            logger.error(f"Error looking up device_code by user_code: {e}")
-            return None
-
-    def update_device_code_status(self, device_code: str, status: str) -> bool:
-        """Update the status of a device code (e.g., 'pending' -> 'authorized')."""
-        try:
-            entry = self.get_device_code_entry(device_code)
-            if entry is None:
-                return False
-
-            entry["status"] = status
-            self.device_store[device_code] = entry
-            logger.info(f"Updated device code {device_code[:8]}... status to: {status}")
-            return True
-        except Exception as e:
-            logger.error(f"Error updating device code status: {e}")
-            return False
-
-    def set_device_code_authorized(
-        self,
-        device_code: str,
-        user_id: str,
-        id_token: str,
-        refresh_token: str
-    ) -> bool:
-        """Mark device code as authorized and store user tokens."""
-        try:
-            entry = self.get_device_code_entry(device_code)
-            if entry is None:
-                return False
-
-            entry["status"] = "authorized"
-            entry["user_id"] = user_id
-            entry["id_token"] = id_token
-            entry["refresh_token"] = refresh_token
-            entry["authorized_at"] = datetime.now(timezone.utc).isoformat()
-            self.device_store[device_code] = entry
-            logger.info(f"Device code {device_code[:8]}... authorized for user {user_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error setting device code as authorized: {e}")
-            return False
-
-    def set_device_code_denied(self, device_code: str) -> bool:
-        """Mark device code as denied by user."""
-        try:
-            entry = self.get_device_code_entry(device_code)
-            if entry is None:
-                return False
-
-            entry["status"] = "denied"
-            entry["denied_at"] = datetime.now(timezone.utc).isoformat()
-            self.device_store[device_code] = entry
-            logger.info(f"Device code {device_code[:8]}... denied by user")
-            return True
-        except Exception as e:
-            logger.error(f"Error setting device code as denied: {e}")
-            return False
-
-    def get_device_code_poll_status(self, device_code: str) -> Optional[Dict[str, Any]]:
+    async def __call__(self, request: Request) -> str:
         """
-        Get device code status for polling endpoint.
+        FastAPI dependency interface.
 
-        Returns status dict with appropriate fields based on state:
-        - pending: {"status": "pending"}
-        - authorized: {"status": "authorized", "user_id": ..., "id_token": ..., "refresh_token": ...}
-        - expired: {"status": "expired", "error": "device_code_expired"}
-        - denied: {"status": "denied", "error": "user_denied_authorization"}
-        - not_found: None (treat as expired)
-        
-        Tokens are deleted after retrieval (one-time use).
+        Usage: Depends(auth_connector) where auth_connector is an AuthConnector instance.
         """
-        entry = self.get_device_code_entry(device_code)
-
-        if entry is None:
-            return {
-                "status": "expired",
-                "error": "device_code_expired"
-            }
-
-        status = entry.get("status", "pending")
-
-        if status == "authorized":
-            result = {
-                "status": "authorized",
-                "user_id": entry.get("user_id"),
-                "id_token": entry.get("id_token"),
-                "refresh_token": entry.get("refresh_token")
-            }
-            self._delete_session(device_code, entry)
-            return result
-        elif status == "denied":
-            return {
-                "status": "denied",
-                "error": "user_denied_authorization"
-            }
-        elif status == "pending":
-            return {
-                "status": "pending"
-            }
-        else:
-            return {
-                "status": "expired",
-                "error": "device_code_expired"
-            }
-
-    def delete_device_code(self, device_code: str) -> bool:
-        """Remove device code entry."""
-        try:
-            entry = self.get_device_code_entry(device_code)
-            if entry is None:
-                return False
-            self._delete_session(device_code, entry)
-            logger.info(f"Deleted device code entry for device_code: {device_code[:8]}...")
-            return True
-        except Exception as e:
-            logger.error(f"Error deleting device code: {e}")
-            return False
-
-    def verify_firebase_token(self, id_token: str) -> Optional[Dict[str, Any]]:
-        """Verify Firebase ID token from website/plugin."""
-        try:
-            decoded_token = auth.verify_id_token(id_token)
-            return {
-                "user_id": decoded_token['uid'],
-                "email": decoded_token.get('email'),
-                "email_verified": decoded_token.get('email_verified', False)
-            }
-        except auth.InvalidIdTokenError as e:
-            logger.error(f"Invalid Firebase token: {e}")
-            return None
-        except auth.ExpiredIdTokenError as e:
-            logger.error(f"Expired Firebase token: {e}")
-            return None
-        except auth.RevokedIdTokenError as e:
-            logger.error(f"Revoked Firebase token: {e}")
-            return None
-        except auth.CertificateFetchError as e:
-            logger.error(f"Firebase certificate fetch error: {e}")
-            return None
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+        token = auth_header.split(" ", 1)[1]
+        return self.verify_token(token)

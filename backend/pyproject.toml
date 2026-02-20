@@ -17,7 +17,7 @@ dependencies = [
     "scenedetect",
     "boto3",
     "torchvision",
-    "firebase-admin>=7.1.0",
+
 ]
 
 [project.scripts]
