@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 
@@ -66,6 +67,13 @@ class FakeTextEmbedder:
         # Return a fake 512-d normalized embedding
         embedding = np.random.randn(512).astype(np.float32)
         return embedding / np.linalg.norm(embedding)
+
+
+class FakeAuthConnector:
+    """Fake auth connector that always succeeds."""
+
+    async def __call__(self, request: Request) -> str:
+        return "test-user-id"
 
 
 @pytest.fixture
@@ -147,6 +155,8 @@ def search_service_instance(mocker):
                 # hash-ghi not present - will return None
             }
         )
+
+        service.auth_connector = FakeAuthConnector()
 
         yield service
 

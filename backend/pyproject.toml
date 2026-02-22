@@ -18,6 +18,8 @@ dependencies = [
     "boto3",
     "torchvision",
     "firebase-admin",
+    "pyjwt[crypto]",
+    "requests",
 ]
 
 [project.scripts]

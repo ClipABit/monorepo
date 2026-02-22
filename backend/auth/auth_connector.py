@@ -56,7 +56,7 @@ class AuthConnector:
         """
         Verify an Auth0 JWT and return the user ID (sub claim).
 
-        Raises HTTPException 401 on any failure.
+        Raises HTTPException 401 on auth failure, 503 if the auth provider is unreachable.
         """
         try:
             signing_key = self._get_signing_key(token)
@@ -71,6 +71,11 @@ class AuthConnector:
             if not user_id:
                 raise HTTPException(status_code=401, detail="Token missing sub claim")
             return user_id
+        except HTTPException:
+            raise
+        except requests.RequestException as e:
+            logger.error(f"Failed to fetch JWKS: {e}")
+            raise HTTPException(status_code=503, detail="Auth provider unavailable")
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="Token has expired")
         except jwt.InvalidAudienceError:

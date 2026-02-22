@@ -25,10 +25,24 @@ class SearchService:
         """Load CLIP text encoder and initialize connectors."""
         from database.pinecone_connector import PineconeConnector
         from database.r2_connector import R2Connector
+        from database.firebase.user_store_connector import UserStoreConnector
         from search.text_embedder import TextEmbedder
+        from auth.auth_connector import AuthConnector
 
         env = get_environment()
         logger.info(f"[{self.__class__.__name__}] Starting up in '{env}' environment")
+
+        # Initialize Firebase Admin SDK (required for Firestore)
+        import firebase_admin
+        import json
+        from firebase_admin import credentials, firestore
+        try:
+            firebase_credentials = json.loads(get_env_var("FIREBASE_ADMIN_KEY"))
+            cred = credentials.Certificate(firebase_credentials)
+            firebase_admin.initialize_app(cred)
+        except ValueError:
+            pass  # Already initialized
+        firestore_client = firestore.client()
 
         # Get environment variables
         PINECONE_API_KEY = get_env_var("PINECONE_API_KEY")
@@ -56,6 +70,13 @@ class SearchService:
             environment=env
         )
 
+        self.user_store = UserStoreConnector(firestore_client=firestore_client)
+        self.auth_connector = AuthConnector(
+            domain=get_env_var("AUTH0_DOMAIN"),
+            audience=get_env_var("AUTH0_AUDIENCE"),
+            user_store=self.user_store,
+        )
+
         # Create FastAPI app for direct HTTP access
         self.fastapi_app = self._create_fastapi_app()
 
@@ -79,7 +100,7 @@ class SearchService:
         )
 
         # Add search routes
-        router = SearchFastAPIRouter(search_service_instance=self)
+        router = SearchFastAPIRouter(search_service_instance=self, auth_connector=self.auth_connector)
         app.include_router(router.router)
 
         return app

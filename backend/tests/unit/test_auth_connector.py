@@ -6,7 +6,7 @@ Tests JWT verification, JWKS caching, and FastAPI dependency interface.
 
 import time
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from fastapi import HTTPException
 
 from auth.auth_connector import AuthConnector
@@ -137,6 +137,23 @@ class TestGetSigningKey:
         assert exc_info.value.status_code == 401
         assert "signing key" in exc_info.value.detail.lower()
 
+    def test_raises_401_for_empty_jwks_keys(self, connector, mocker):
+        """Verify 401 when JWKS returns no keys."""
+        mock_resp = mocker.MagicMock()
+        mock_resp.json.return_value = {"keys": []}
+        mock_resp.raise_for_status.return_value = None
+        mocker.patch("auth.auth_connector.requests.get", return_value=mock_resp)
+
+        mocker.patch(
+            "auth.auth_connector.jwt.get_unverified_header",
+            return_value={"kid": FAKE_KID, "alg": "RS256"},
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            connector._get_signing_key("fake-token")
+
+        assert exc_info.value.status_code == 401
+
 
 class TestVerifyToken:
     """Test token verification logic."""
@@ -218,6 +235,31 @@ class TestVerifyToken:
 
         assert exc_info.value.status_code == 401
         assert "sub" in exc_info.value.detail.lower()
+
+    def test_raises_401_for_empty_sub_claim(self, connector, mock_requests, mock_jwt):
+        """Verify token with empty string sub claim raises 401."""
+        mock_decode, _, _ = mock_jwt
+        mock_decode.return_value = {"sub": "", "aud": "https://api.test.com"}
+
+        with pytest.raises(HTTPException) as exc_info:
+            connector.verify_token("empty-sub-token")
+
+        assert exc_info.value.status_code == 401
+        assert "sub" in exc_info.value.detail.lower()
+
+    def test_raises_503_for_jwks_network_error(self, connector, mock_jwt, mocker):
+        """Verify JWKS network errors raise 503 instead of propagating."""
+        import requests as req
+        mocker.patch(
+            "auth.auth_connector.requests.get",
+            side_effect=req.ConnectionError("Network error"),
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            connector.verify_token("some-token")
+
+        assert exc_info.value.status_code == 503
+        assert "unavailable" in exc_info.value.detail.lower()
 
 
 class TestCallDependency:

@@ -4,7 +4,7 @@ import logging
 import uuid
 
 import modal
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +85,14 @@ class ServerFastAPIRouter:
 
     def _register_routes(self):
         """Registers all the FastAPI routes."""
+        auth = [Depends(self.server_instance.auth_connector)]
+
         self.router.add_api_route("/health", self.health, methods=["GET"])
-        self.router.add_api_route("/status", self.status, methods=["GET"])
-        self.router.add_api_route("/upload", self.upload, methods=["POST"])
-        self.router.add_api_route("/videos", self.list_videos, methods=["GET"])
-        self.router.add_api_route("/videos/{hashed_identifier}", self.delete_video, methods=["DELETE"])
-        self.router.add_api_route("/cache/clear", self.clear_cache, methods=["POST"])
+        self.router.add_api_route("/status", self.status, methods=["GET"], dependencies=auth)
+        self.router.add_api_route("/upload", self.upload, methods=["POST"], dependencies=auth)
+        self.router.add_api_route("/videos", self.list_videos, methods=["GET"], dependencies=auth)
+        self.router.add_api_route("/videos/{hashed_identifier}", self.delete_video, methods=["DELETE"], dependencies=auth)
+        self.router.add_api_route("/cache/clear", self.clear_cache, methods=["POST"], dependencies=auth)
 
     async def health(self):
         """
