@@ -6,7 +6,7 @@ Tests JWT verification, JWKS caching, and FastAPI dependency interface.
 
 import time
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from fastapi import HTTPException
 
 from auth.auth_connector import AuthConnector

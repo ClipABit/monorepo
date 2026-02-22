@@ -194,11 +194,15 @@ def get_search_image() -> modal.Image:
             "pinecone",
             "boto3",
             "numpy",
-            "tokenizers",  
+            "tokenizers",
             "fastapi[standard]",
+            "pyjwt[crypto]",
+            "requests",
+            "firebase-admin",
         )
         .add_local_python_source(
             "api",
+            "auth",
             "database",
             "search",
             "shared",
