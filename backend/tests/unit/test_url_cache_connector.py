@@ -1,10 +1,10 @@
-from database.url_cache_connector import UrlCacheConnector, VIDEO_PAGE_TTL_SECONDS
+from database.cache.url_cache_connector import UrlCacheConnector, VIDEO_PAGE_TTL_SECONDS
 
 
 class TestUrlCacheConnector:
     def test_get_page_uses_cache_until_expiry(self, mock_modal_dict, mocker):
         connector = UrlCacheConnector(environment="test")
-        time_mock = mocker.patch("database.url_cache_connector.time")
+        time_mock = mocker.patch("database.cache.url_cache_connector.time")
         time_mock.time.return_value = 1_000.0
 
         videos_payload = [
@@ -37,7 +37,7 @@ class TestUrlCacheConnector:
 
     def test_namespace_metadata_cache(self, mock_modal_dict, mocker):
         connector = UrlCacheConnector(environment="test")
-        time_mock = mocker.patch("database.url_cache_connector.time")
+        time_mock = mocker.patch("database.cache.url_cache_connector.time")
         time_mock.time.return_value = 2_000.0
 
         connector.set_namespace_metadata("ns", {"total_videos": 5})
@@ -51,7 +51,7 @@ class TestUrlCacheConnector:
 
     def test_clear_namespace_removes_entries(self, mock_modal_dict, mocker):
         connector = UrlCacheConnector(environment="test")
-        mocker.patch("database.url_cache_connector.time").time.return_value = 3_000.0
+        mocker.patch("database.cache.url_cache_connector.time").time.return_value = 3_000.0
 
         connector.set_page("ns", None, 10, [{"file_name": "vid.mp4"}], None)
         connector.set_namespace_metadata("ns", {"total_videos": 1})

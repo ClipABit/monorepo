@@ -234,6 +234,36 @@ class TestCallDependency:
         assert user_id == "auth0|user123"
 
     @pytest.mark.asyncio
+    async def test_calls_user_store_get_or_create(self, mock_requests, mock_jwt):
+        """Verify __call__ triggers JIT user creation when user_store is set."""
+        mock_user_store = MagicMock()
+        connector = AuthConnector(
+            domain="test.auth0.com",
+            audience="https://api.test.com",
+            user_store=mock_user_store,
+        )
+
+        request = MagicMock()
+        request.headers.get.return_value = "Bearer valid-token"
+
+        user_id = await connector(request)
+
+        assert user_id == "auth0|user123"
+        mock_user_store.get_or_create_user.assert_called_once_with("auth0|user123")
+
+    @pytest.mark.asyncio
+    async def test_skips_user_store_when_not_set(self, connector, mock_requests, mock_jwt):
+        """Verify __call__ works without user_store (no JIT creation)."""
+        assert connector.user_store is None
+
+        request = MagicMock()
+        request.headers.get.return_value = "Bearer valid-token"
+
+        user_id = await connector(request)
+
+        assert user_id == "auth0|user123"
+
+    @pytest.mark.asyncio
     async def test_raises_401_for_missing_auth_header(self, connector):
         """Verify 401 when no Authorization header present."""
         request = MagicMock()

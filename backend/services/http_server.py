@@ -19,13 +19,26 @@ class ServerService:
         """Initialize connectors (non-decorated, can be called from subclasses)."""
         from datetime import datetime, timezone
         from database.pinecone_connector import PineconeConnector
-        from database.job_store_connector import JobStoreConnector
+        from database.cache.job_store_connector import JobStoreConnector
         from database.r2_connector import R2Connector
+        from database.firebase.user_store_connector import UserStoreConnector
         from auth.auth_connector import AuthConnector
 
         env = get_environment()
         logger.info(f"[{self.__class__.__name__}] Starting up in '{env}' environment")
         self.start_time = datetime.now(timezone.utc)
+
+        # Initialize Firebase Admin SDK (required for Firestore)
+        import firebase_admin
+        import json
+        from firebase_admin import credentials, firestore
+        try:
+            firebase_credentials = json.loads(get_env_var("FIREBASE_ADMIN_KEY"))
+            cred = credentials.Certificate(firebase_credentials)
+            firebase_admin.initialize_app(cred)
+        except ValueError:
+            pass  # Already initialized
+        firestore_client = firestore.client()
 
         # Get environment variables
         PINECONE_API_KEY = get_env_var("PINECONE_API_KEY")
@@ -49,9 +62,11 @@ class ServerService:
             secret_access_key=R2_SECRET_ACCESS_KEY,
             environment=env
         )
+        self.user_store = UserStoreConnector(firestore_client=firestore_client)
         self.auth_connector = AuthConnector(
             domain=get_env_var("AUTH0_DOMAIN"),
             audience=get_env_var("AUTH0_AUDIENCE"),
+            user_store=self.user_store,
         )
 
         # Store config for router

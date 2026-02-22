@@ -43,7 +43,7 @@ def get_dev_image() -> modal.Image:
             "onnxruntime",
             "onnxscript",
             "tokenizers",
-
+            "firebase-admin",
             "pyjwt[crypto]",
             "requests"
         )
@@ -77,7 +77,7 @@ def get_server_image() -> modal.Image:
             "boto3",
             "pinecone",
             "numpy",
-
+            "firebase-admin",
             "pyjwt[crypto]",
             "requests"
         )

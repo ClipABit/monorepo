@@ -23,9 +23,10 @@ class AuthConnector:
 
     JWKS_CACHE_TTL = 3600  # 1 hour
 
-    def __init__(self, domain: str, audience: str):
+    def __init__(self, domain: str, audience: str, user_store=None):
         self.domain = domain
         self.audience = audience
+        self.user_store = user_store
         self._jwks_cache: Optional[Dict[str, Any]] = None
         self._jwks_cache_time: float = 0
 
@@ -90,4 +91,7 @@ class AuthConnector:
         if not auth_header or not auth_header.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
         token = auth_header.split(" ", 1)[1]
-        return self.verify_token(token)
+        user_id = self.verify_token(token)
+        if self.user_store:
+            self.user_store.get_or_create_user(user_id)
+        return user_id
