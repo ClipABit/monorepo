@@ -1,4 +1,4 @@
-from database.job_store_connector import JobStoreConnector
+from database.cache.job_store_connector import JobStoreConnector
 
 
 class TestJobCreation:
