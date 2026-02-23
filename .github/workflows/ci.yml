@@ -48,7 +48,6 @@ jobs:
       matrix:
         target:
           - { name: backend, path: backend }
-          - { name: frontend, path: frontend/streamlit }
     steps:
       - name: checkout
         uses: actions/checkout@v5
