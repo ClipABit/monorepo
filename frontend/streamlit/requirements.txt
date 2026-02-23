@@ -1,0 +1,5 @@
+requests
+streamlit>=1.28.0
+python-multipart
+watchdog
+
