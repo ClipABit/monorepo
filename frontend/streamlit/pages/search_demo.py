@@ -3,6 +3,7 @@ import time
 import requests
 import streamlit as st
 from config import Config
+from typing import Literal
 
 # Initialize session state
 if 'search_results' not in st.session_state:
@@ -19,10 +20,21 @@ LIST_FACES_API_URL = Config.LIST_FACES_API_URL
 UPDATE_FACE_API_URL = Config.UPDATE_FACE_API_URL
 
 
-def search_videos(query: str):
+def search_videos(query: str, filter_faces: list[str] | None = None, filter_mode: Literal["all", "any"] = "all"):
     """Send search query to backend."""
     try:
-        resp = requests.get(SEARCH_API_URL, params={"query": query, "namespace": NAMESPACE}, timeout=30)
+        # Build params as list of tuples to ensure repeated include_faces params.
+        params = [("query", query), ("namespace", NAMESPACE)]
+
+        if filter_faces:
+            # append each face as its own query param so FastAPI parses them as list[str]
+            for fid in filter_faces:
+                params.append(("include_faces", fid))
+            params.append(("include_faces_mode", filter_mode))
+        
+        st.write(f"Sending search request with params: {params}")
+
+        resp = requests.get(SEARCH_API_URL, params=params, timeout=30)
         if resp.status_code == 200:
             return resp.json()
         else:
@@ -109,7 +121,7 @@ def upload_dialog():
                         st.error(f"Upload failed: {e}")
         
         with col2:
-            if st.button("Cancel", use_container_width=True):
+            if st.button("Cancel", width='stretch'):
                 st.rerun()
 
 
@@ -146,11 +158,27 @@ with col1:
         label_visibility="collapsed"
     )
 
+    # Face filtering controls
+    faces = fetch_all_faces()
+    face_options = []
+    face_id_map = {}
+    for f in faces:
+        fid = f.get('face_id') or f.get('id')
+        name = f.get('given_name') or ""
+        label = f"{name} ({fid})" if name else f"{fid}"
+        face_options.append(label)
+        face_id_map[label] = fid
+
+    include_faces_selected = st.multiselect("Filter: include only videos containing these faces (optional)", options=face_options)
+    include_faces = [face_id_map[l] for l in include_faces_selected]
+
+    include_faces_mode = st.radio("Match mode", options=["all", "any"], index=0, horizontal=True, help="'all' requires videos to contain all selected faces; 'any' returns videos that contain any selected face")
+
 with col2:
     if st.button("Search", type="primary", use_container_width=True):
         if search_query:
             with st.spinner("Searching..."):
-                results = search_videos(search_query)
+                results = search_videos(query=search_query, filter_faces=include_faces, filter_mode=include_faces_mode)
                 st.session_state.search_results = results
         else:
             st.warning("Please enter a search query")
@@ -175,7 +203,7 @@ st.markdown("""
 
 # Display results or repository
 if st.session_state.search_results:
-    st.subheader(f"Search Results for: '{search_query}'")
+    st.subheader(f"Search Results for: '{search_query}', including faces: {', '.join(include_faces_selected) if include_faces_selected else 'None'} (mode: {include_faces_mode})")
     
     results_data = st.session_state.search_results
     
@@ -200,6 +228,10 @@ if st.session_state.search_results:
                         st.video(presigned_url, start_time=int(start_time))
         else:
             st.info("No matching videos found.")
+
+    # Debug: show raw response (helpful during development)
+    if st.checkbox("Show raw search response (debug)"):
+        st.json(st.session_state.get('search_raw_response', {}))
 
 else:
     st.subheader("Video Repository")
@@ -249,7 +281,7 @@ else:
     # Global update button for all edited names
     if edited:
         st.info(f"{len(edited)} unsaved change(s)")
-        if st.button("Update all names", use_container_width=True):
+        if st.button("Update all names", width='stretch'):
             with st.spinner("Updating names..."):
                 successes = 0
                 failures = []
@@ -314,7 +346,7 @@ else:
                 presigned = f.get('presigned_url')
                 if presigned:
                     try:
-                        st.image(presigned, use_container_width=True)
+                        st.image(presigned, width='stretch')
                     except Exception:
                         st.info("Unable to preview this image.")
                 else:

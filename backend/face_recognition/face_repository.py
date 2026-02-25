@@ -14,13 +14,14 @@ logger = logging.getLogger(__name__)
 class DetectedFaceData:
     face_id: str
     img_access_id: str
+    similarity_score: float
 
 class FaceRepository:
     def __init__(
             self, 
             pinecone_connector: PineconeConnector,
             r2_connector: R2Connector,
-            threshold = 0.5,
+            threshold: float = 0.32,
             image_serializer: Optional[Callable[[np.ndarray], bytes]] = None,
             r2_face_image_namespace: str = "face_images"
         ):
@@ -55,12 +56,17 @@ class FaceRepository:
             top_k=1
         )
 
+        if best_match is None:
+            logger.error(f"FaceRepository: Pinecone query failed for namespace {namespace}")
+            raise Exception("Pinecone query failed")
+
         if not best_match or len(best_match) == 0:
             return None
 
         match = best_match[0]
         logger.info(f"FaceRepository: Pinecone query returned match with score {match.get('score', 0)} in namespace {namespace}")
         if match.get('score', 0) < self.threshold:
+            logger.info(f"FaceRepository: Best match has similarity score {match.get('score', 0)} below threshold {self.threshold}, treating as no match.")
             return None
         else:
             metadata = match.get("metadata", {})
@@ -70,7 +76,7 @@ class FaceRepository:
                 logger.error(f"FaceRepository: Found matching face in pinecone but missing metadata face_id or img_access_id. Metadata: {metadata}")
                 raise Exception("Corrupted metadata in pinecone for matched face.")
             logger.info(f"FaceRepository: Found matching face_id {face_id} with score {match.get('score')} in namespace {namespace}")
-            return DetectedFaceData(face_id=str(face_id), img_access_id=str(img_access_id))
+            return DetectedFaceData(face_id=str(face_id), img_access_id=str(img_access_id), similarity_score=match.get('score'))
         
     def generate_face_id(self) -> str:
         return str(uuid.uuid4())

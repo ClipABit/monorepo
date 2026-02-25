@@ -1,7 +1,8 @@
 import os
 import logging
-from fastapi import UploadFile, HTTPException, Form, Body
+from fastapi import UploadFile, HTTPException, Form, Body, Query
 import modal
+from typing import Literal
 
 # Configure logging
 logging.basicConfig(
@@ -132,8 +133,8 @@ class Server:
         self.face_metadata_repository = FaceMetadataRepository(db)
         self.face_appearance_repository = FaceAppearanceRepository(db)
 
-        self.face_detector = FaceDetector(detector_backend="retinaface")
-        self.face_repository = FaceRepository(self.face_recognition_pinecone_connector, self.r2_connector, threshold=0.5)
+        self.face_detector = FaceDetector()
+        self.face_repository = FaceRepository(self.face_recognition_pinecone_connector, self.r2_connector, threshold=0.32)
 
         logger.info("Container modules initialized and ready!")
 
@@ -443,7 +444,7 @@ class Server:
 
     
     @modal.fastapi_endpoint(method="GET")
-    async def search(self, query: str, namespace: str = ""):
+    async def search(self, query: str, namespace: str = "", include_faces: list[str] | None = Query(default=None), include_faces_mode: Literal["all", "any"] = "all"):
         """
         Search endpoint - accepts a text query and returns semantic search results.
 
@@ -463,14 +464,77 @@ class Server:
                 raise HTTPException(status_code=400, detail="Missing 'query' parameter")
 
             top_k = 10
-            logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
+            logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k} | include_faces={include_faces}")
 
-            # Execute semantic search
+            # Execute semantic search (chunk-level results)
             results = self.searcher.search(
                 query=query,
                 top_k=top_k,
                 namespace=namespace
             )
+
+            # If client requested filtering by faces, filter chunk results to only
+            # include chunks from videos that contain the requested face(s).
+            # include_faces_mode: 'all' (default) means returned videos must contain all given faces.
+            # 'any' means returned videos containing any of the given faces are allowed.
+            if include_faces:
+                mode = include_faces_mode.lower() if include_faces_mode else "all"
+                if mode not in ("all", "any"):
+                    raise HTTPException(status_code=400, detail="include_faces_mode must be 'all' or 'any'")
+
+                logger.info(f"[Search][FaceFilter] Received include_faces raw: {include_faces}")
+
+                # Build sets of chunk IDs (video_chunk_id) for each face
+                face_chunk_sets: list[set] = []
+                for face_id in include_faces:
+                    appearances = self.face_appearance_repository.get_chunks_for_face(namespace, face_id)
+                    logger.info(f"[Search][FaceFilter] face_id={face_id} appearances_count={len(appearances) if appearances else 0}")
+                    chunk_ids = set()
+                    if appearances:
+                        for doc in appearances.values():
+                            cid = doc.get("video_chunk_id")
+                            # Normalize chunk id to string for robust comparison with Pinecone result ids
+                            if cid is not None:
+                                chunk_ids.add(str(cid))
+                    face_chunk_sets.append(chunk_ids)
+
+                # Compute eligible chunk ids based on mode
+                if mode == "all":
+                    if not face_chunk_sets:
+                        eligible_chunks = set()
+                    else:
+                        eligible_chunks = set.intersection(*face_chunk_sets)
+                else:
+                    eligible_chunks = set().union(*face_chunk_sets) if face_chunk_sets else set()
+
+                # If no eligible chunks, return empty results
+                logger.info(f"[Search][FaceFilter] mode={mode} eligible_chunks_count={len(eligible_chunks)}")
+                logger.info(f"[Search][FaceFilter] eligible_chunks: {eligible_chunks}")
+                if not eligible_chunks:
+                    results = []
+                else:
+                    # Filter chunk-level results to only those whose id (or metadata chunk id) is in eligible_chunks
+                    # TODO: for now, face recognition accuracy is low. So for each chunk eligible, keep the result if its video is in eligible chunk's video
+                    # TODO: is it better to send list of filter face (str) in query or body in fast api?
+                    filtered = []
+                    for r in results:
+                        if not isinstance(r, dict):
+                            continue
+                        # Searcher returns 'id' as chunk id; compare as string
+                        metadata = r.get("metadata", {}) if isinstance(r, dict) else {}
+
+                        match_id = None
+                        if metadata.get("chunk_id") is not None:
+                            match_id = str(metadata.get("chunk_id"))
+
+                        logger.info(f"[Search][FaceFilter] Checking result chunk_id={match_id} against eligible_chunks")
+
+                        if match_id and (match_id in eligible_chunks):
+                            filtered.append(r)
+
+                    logger.info(f"[Search][FaceFilter] results_before={len(results)} results_after={len(filtered)}")
+                    results = filtered
+            
 
             t_done = time.perf_counter()
 

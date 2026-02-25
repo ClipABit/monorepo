@@ -87,4 +87,4 @@ class PineconeConnector:
             return response['matches']
         except Exception as e:
             logger.error(f"Error querying chunks from index {self.index_name} with namespace {namespace}: {e}")
-            return []
+            return None
