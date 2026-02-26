@@ -134,4 +134,3 @@ class UrlCacheConnector:
         if removed:
             logger.info("UrlCacheConnector cleared %s entries for namespace %s", removed, namespace)
         return removed
-

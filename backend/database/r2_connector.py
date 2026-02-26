@@ -7,7 +7,7 @@ from botocore.exceptions import ClientError
 from typing import Optional, Tuple, List
 import base64
 
-from database.url_cache_connector import UrlCacheConnector
+from database.cache.url_cache_connector import UrlCacheConnector
 
 logger = logging.getLogger(__name__)
 

@@ -7,6 +7,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from fastapi import Request
+
 from api.server_fastapi_router import ServerFastAPIRouter
 
 
@@ -133,6 +135,13 @@ class FakeR2Connector:
         return self.videos[:page_size], None, total_videos, total_pages
 
 
+class FakeAuthConnector:
+    """Fake auth connector that always succeeds."""
+
+    async def __call__(self, request: Request) -> str:
+        return "test-user-id"
+
+
 class ServerStub:
     """
     Minimal server stub providing the attributes ServerFastAPIRouter uses.
@@ -141,6 +150,7 @@ class ServerStub:
     def __init__(self) -> None:
         self.job_store = FakeJobStore()
         self.delete_video_background = FakeSpawner()
+        self.auth_connector = FakeAuthConnector()
         self.r2_connector = FakeR2Connector(
             videos=[
                 {
