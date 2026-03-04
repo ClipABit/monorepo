@@ -15,8 +15,28 @@ from .face import Face
 import logging
 import cv2
 
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+
+# Define paths and options
+model_path = '/Users/yifanzhang/workspace/ClipABit/monorepo/backend/face_recognition/face_landmarker.task'
+
+base_options = python.BaseOptions(model_asset_path=model_path)
+options = vision.FaceLandmarkerOptions(
+    base_options=base_options,
+    running_mode=vision.RunningMode.IMAGE, # Use IMAGE mode for np.ndarray
+    output_facial_transformation_matrixes=True, # Required for frontal score
+    num_faces=1
+)
+
+# Create the landmarker instance
+landmarker_instance = vision.FaceLandmarker.create_from_options(options)
+
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class FaceDetector:
     """Class used to detect faces and compute embeddings
@@ -139,6 +159,39 @@ class FaceDetector:
         logger.info(f"FaceDetector: Detected {len(faces)} face(s) in image.")
         return faces
 
+    def _frontal_score(self, image_array: np.ndarray):
+        """
+        Inputs: 
+        - image_array: NumPy array (BGR)
+        - landmarker_instance: An initialized MediaPipe FaceLandmarker
+        Returns:
+        - float: Frontal deviation score (0 is perfectly frontal)
+        """
+        # 1. Convert BGR to RGB (MediaPipe requirement)
+        rgb_frame = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
+        
+        # 2. Convert NumPy array to MediaPipe Image object
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+        
+        # 3. Perform detection (using IMAGE mode for single np arrays)
+        result = landmarker_instance.detect(mp_image)
+
+        if not result.facial_transformation_matrixes:
+            return None # No face detected
+
+        # 4. Extract 4x4 matrix and decompose
+        matrix = result.facial_transformation_matrixes[0]
+        
+        # Extract rotation components
+        pitch = np.arcsin(-matrix[1][2])
+        yaw = np.arctan2(matrix[0][2], matrix[2][2])
+        roll = np.arctan2(matrix[1][0], matrix[1][1])
+
+        # Convert to absolute degrees and sum
+        total_score = abs(np.degrees(pitch)) + abs(np.degrees(yaw)) + abs(np.degrees(roll))
+        
+        return total_score
+
     def _is_good_quality(self, face: Face, orig_h: int | None, orig_w: int | None) -> bool:
         """Return True if the face passes basic quality checks.
 
@@ -161,6 +214,12 @@ class FaceDetector:
         # size checks
         if w < self.min_face_size or h < self.min_face_size:
             logger.warning(f"FaceDetector: Face size too small (w={w}, h={h}), rejecting face.")
+            return False
+        
+        # frontal check
+        score = self._frontal_score(face.face_image)
+        if score is None or score > 25: # threshold is somewhat arbitrary, based on manual testing
+            logger.warning(f"FaceDetector: Face does not appear frontal enough with score {score}, rejecting face.")
             return False
 
         # area ratio check (if original dims are known)
