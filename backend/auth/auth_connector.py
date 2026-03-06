@@ -18,7 +18,7 @@ class AuthConnector:
     Auth0 JWT verification connector.
 
     Fetches and caches JWKS from Auth0, verifies access tokens,
-    and returns user IDs. Exposes a FastAPI dependency via verify_token().
+    and returns user IDs. Exposes a FastAPI dependency via __call__() (used as Depends(auth_connector)).
     """
 
     JWKS_CACHE_TTL = 3600  # 1 hour
