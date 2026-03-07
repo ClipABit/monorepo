@@ -25,43 +25,6 @@ video = "scene_0001__00h00m00s000__00h03m59s672.mp4"
 # video = "scene_0002__00h00m18s320__00h00m37s759.mp4"
 # namespace = "video-test-namespace-2"
 
-def video_to_frames(video_path: str) -> List[np.ndarray]:
-    """
-    Reads a video file and returns its frames as a list of numpy.ndarray objects.
-
-    Args:
-        video_path: The path to the video file (e.g., 'input_video.mp4').
-
-    Returns:
-        A list of video frames, each as a numpy.ndarray (image).
-    """
-    frames_list = []
-    # Open the video file
-    cap = cv2.VideoCapture(video_path)
-
-    # Check if the video was opened successfully
-    if not cap.isOpened():
-        print(f"Error: Could not open video {video_path}")
-        return frames_list
-
-    while True:
-        # Read a frame from the video
-        ret, frame = cap.read()
-
-        # If ret is False, it means the video has ended
-        if not ret:
-            break
-
-        # Append the frame (which is a numpy array) to the list
-        frames_list.append(frame)
-
-    # Release the video capture object to free up resources
-    cap.release()
-
-    return frames_list
-
-
-
 preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
 
 face_detector = FaceDetector(
@@ -81,7 +44,6 @@ threshold = 0.32
 counter = 0
 face_counter = 0
 
-faces_count = {}
 all_face_embeddings = []
 face_record = []
 
@@ -156,14 +118,13 @@ with open(video, "rb") as video:
                 image = Image.fromarray(face.face_image)
                 # image.save(f"detected_faces/frame{counter}_face{face_counter}.png")
                 all_face_embeddings.append(normalized_embedding)
-                face_record.append([f"frame{counter}", f"face{face_counter}", image])
+                face_record.append([chunk["chunk_id"], image])
 
             counter = counter + 1
 
 
 print(f"Job Finished processing {video}")
 
-print(faces_count) 
 
 print(len(all_face_embeddings), type(all_face_embeddings[0]) if len(all_face_embeddings) > 0 else "N/A")
 
@@ -175,9 +136,9 @@ db = DBSCAN(eps=0.35, min_samples=3, metric='cosine').fit(X)
 labels = db.labels_
 print(labels)
 # print(face_record)
-for i, (frame_id, face_id, image) in enumerate(face_record):
+for i, (chunk_id, image) in enumerate(face_record):
     cluster_id = labels[i]
-    image.save(f"detected_faces/cluster{cluster_id}_{frame_id}_{face_id}.png")
+    image.save(f"detected_faces/cluster{cluster_id}_{chunk_id}_{i}.png")
 
 core_indices = db.core_sample_indices_
 print(core_indices)
@@ -188,7 +149,7 @@ import numpy as np
 def get_cluster_representatives_from_dbscan(
     embeddings,
     dbscan_model,
-    images=None,
+    face_record=None,
     top_k=3
 ):
     labels = dbscan_model.labels_
@@ -225,7 +186,7 @@ def get_cluster_representatives_from_dbscan(
             reps_idx = cluster_indices[top_local]
 
         rep_list = [
-            (embeddings[idx], images[idx] if images is not None else None, int(idx))
+            (embeddings[idx], face_record[idx][0], int(idx))
             for idx in reps_idx
         ]
 
@@ -233,11 +194,11 @@ def get_cluster_representatives_from_dbscan(
 
     return representatives
 
-images = [img for (_frame_id, _face_id, img) in face_record]
-representatives = get_cluster_representatives_from_dbscan(X, db, images=images, top_k=3)
+representatives = get_cluster_representatives_from_dbscan(X, db, face_record=face_record, top_k=3)
 # print(f"Cluster representatives (up to 3 per cluster): {representatives}")
 
 # save the image of each representative
 for cluster_label, reps in representatives.items():
-    for i, (embedding, img, original_idx) in enumerate(reps):
-        img.save(f"cluster_representatives/cluster{cluster_label}_rep{i}_idx{original_idx}.png")
+    for i, (embedding, chunk_id, original_idx) in enumerate(reps):
+        img = face_record[original_idx][1]
+        img.save(f"cluster_representatives/cluster{cluster_label}_rep{i}_chunk{chunk_id}.png")
