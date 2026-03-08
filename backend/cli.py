@@ -67,7 +67,9 @@ def serve_all():
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
-        env={**os.environ, "DEV_NAME": dev_name},
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "DEV_NAME": dev_name, "PYTHONIOENCODING": "utf-8"},
     )
 
     # Handle graceful shutdown
@@ -93,6 +95,8 @@ def _serve_single_app(name: str):
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        encoding="utf-8",
+        errors="replace",
     )
     
     # Handle graceful shutdown
