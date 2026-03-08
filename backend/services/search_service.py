@@ -36,9 +36,9 @@ class SearchService:
         import firebase_admin
         import json
         from firebase_admin import credentials, firestore
+        firebase_credentials = json.loads(get_env_var("FIREBASE_ADMIN_KEY"))
+        cred = credentials.Certificate(firebase_credentials)
         try:
-            firebase_credentials = json.loads(get_env_var("FIREBASE_ADMIN_KEY"))
-            cred = credentials.Certificate(firebase_credentials)
             firebase_admin.initialize_app(cred)
         except ValueError:
             pass  # Already initialized
