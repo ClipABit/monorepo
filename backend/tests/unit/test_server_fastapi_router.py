@@ -124,11 +124,6 @@ class TestProtectedEndpointsRejectUnauthenticated:
         resp = client.post("/upload", data={"namespace": ""})
         assert resp.status_code == 401
 
-    def test_list_videos_rejects_no_auth(self, real_auth_client):
-        client, _ = real_auth_client
-        resp = client.get("/videos")
-        assert resp.status_code == 401
-
     def test_delete_video_rejects_no_auth(self, real_auth_client):
         client, _ = real_auth_client
         resp = client.delete("/videos/abc123", params={"filename": "test.mp4"})

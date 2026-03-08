@@ -90,7 +90,7 @@ class ServerFastAPIRouter:
         self.router.add_api_route("/health", self.health, methods=["GET"])
         self.router.add_api_route("/status", self.status, methods=["GET"], dependencies=auth)
         self.router.add_api_route("/upload", self.upload, methods=["POST"], dependencies=auth)
-        self.router.add_api_route("/videos", self.list_videos, methods=["GET"], dependencies=auth)
+        self.router.add_api_route("/videos", self.list_videos, methods=["GET"])
         self.router.add_api_route("/videos/{hashed_identifier}", self.delete_video, methods=["DELETE"], dependencies=auth)
         self.router.add_api_route("/cache/clear", self.clear_cache, methods=["POST"], dependencies=auth)
 
