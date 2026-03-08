@@ -3,6 +3,7 @@ import math
 import logging
 import time
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 from typing import Optional, Tuple, List
 import base64
@@ -47,7 +48,12 @@ class R2Connector:
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
             endpoint_url=self.endpoint_url,
-            region_name='auto'  # R2 uses 'auto' for region
+            region_name='auto',  # R2 uses 'auto' for region
+            config=BotoConfig(
+                connect_timeout=5,
+                read_timeout=10,
+                retries={"max_attempts": 2, "mode": "standard"},
+            ),
         )
         
         logger.info(f"Initialized R2Connector for bucket: {self.bucket_name}")
