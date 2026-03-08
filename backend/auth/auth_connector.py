@@ -2,6 +2,7 @@
 Auth connector for JWT authentication via Auth0.
 """
 
+import asyncio
 import logging
 from typing import Optional, Dict, Any
 import time
@@ -48,7 +49,7 @@ class AuthConnector:
         unverified_header = jwt.get_unverified_header(token)
         kid = unverified_header.get("kid")
         for key in jwks.get("keys", []):
-            if key["kid"] == kid:
+            if key.get("kid") == kid:
                 return jwt.algorithms.RSAAlgorithm.from_jwk(key)
         raise HTTPException(status_code=401, detail="Unable to find signing key")
 
@@ -96,7 +97,8 @@ class AuthConnector:
         if not auth_header or not auth_header.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
         token = auth_header.split(" ", 1)[1]
-        user_id = self.verify_token(token)
+        loop = asyncio.get_event_loop()
+        user_id = await loop.run_in_executor(None, self.verify_token, token)
         if self.user_store:
-            self.user_store.get_or_create_user(user_id)
+            await loop.run_in_executor(None, self.user_store.get_or_create_user, user_id)
         return user_id
