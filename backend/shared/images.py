@@ -44,6 +44,8 @@ def get_dev_image() -> modal.Image:
             "onnxscript",
             "tokenizers",
             "firebase-admin",
+            "pyjwt[crypto]",
+            "requests"
         )
         .run_function(_download_clip_full_model_for_dev)
         .run_function(_export_clip_text_to_onnx)
@@ -76,6 +78,8 @@ def get_server_image() -> modal.Image:
             "pinecone",
             "numpy",
             "firebase-admin",
+            "pyjwt[crypto]",
+            "requests"
         )
         .add_local_python_source(
             "database",
@@ -190,11 +194,15 @@ def get_search_image() -> modal.Image:
             "pinecone",
             "boto3",
             "numpy",
-            "tokenizers",  
+            "tokenizers",
             "fastapi[standard]",
+            "pyjwt[crypto]",
+            "requests",
+            "firebase-admin",
         )
         .add_local_python_source(
             "api",
+            "auth",
             "database",
             "search",
             "shared",

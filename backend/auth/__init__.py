@@ -1,5 +1,5 @@
 """
-Auth module for device flow authentication.
+Auth module for JWT authentication via Auth0.
 """
 
 from auth.auth_connector import AuthConnector

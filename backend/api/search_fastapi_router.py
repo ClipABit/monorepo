@@ -10,7 +10,7 @@ __all__ = ["SearchFastAPIRouter"]
 import logging
 import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -23,21 +23,25 @@ class SearchFastAPIRouter:
     Exposed directly by SearchService for lower latency (no server hop).
     """
 
-    def __init__(self, search_service_instance):
+    def __init__(self, search_service_instance, auth_connector=None):
         """
         Initialize the search router.
 
         Args:
             search_service_instance: The SearchService instance with embedder and connectors
+            auth_connector: Optional AuthConnector for JWT verification
         """
         self.search_service = search_service_instance
+        self.auth_connector = auth_connector
         self.router = APIRouter()
         self._register_routes()
 
     def _register_routes(self):
         """Register all search routes."""
+        auth = [Depends(self.auth_connector)] if self.auth_connector else []
+
         self.router.add_api_route("/health", self.health, methods=["GET"])
-        self.router.add_api_route("/search", self.search, methods=["GET"])
+        self.router.add_api_route("/search", self.search, methods=["GET"], dependencies=auth)
 
     async def health(self):
         """Health check endpoint."""
