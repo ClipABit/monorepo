@@ -144,7 +144,6 @@ class SearchService:
             if self.r2_connector:
                 presigned_url = self.r2_connector.generate_presigned_url(
                     identifier=metadata['file_hashed_identifier'],
-                    validate_exists=True,
                 )
 
             if not presigned_url:
