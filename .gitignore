@@ -10,3 +10,5 @@ __pycache__
 .streamlit/secrets.toml
 
 .DS_Store
+
+firebase_serviceAccountKey.json

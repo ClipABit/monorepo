@@ -157,11 +157,19 @@ class R2Connector:
         """
         ext = os.path.splitext(filename)[1].lower()
         mime_types = {
+            # Video types
             '.mp4': 'video/mp4',
             '.mov': 'video/quicktime',
             '.avi': 'video/x-msvideo',
             '.mkv': 'video/x-matroska',
-            '.webm': 'video/webm'
+            '.webm': 'video/webm',
+
+            # Image types
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.webp': 'image/webp',
+            '.bmp': 'image/bmp'
         }
         return mime_types.get(ext, 'application/octet-stream')
     
@@ -210,6 +218,56 @@ class R2Connector:
             
         except Exception as e:
             logger.error(f"Error uploading video to R2: {e}")
+            return False, str(e)
+
+    def upload_image(
+        self,
+        image_data: bytes,
+        filename: str,
+        namespace: str = "__default__"
+    ) -> Tuple[bool, str]:
+        """
+        Upload an image to R2 storage and return a hashed identifier.
+
+        This mirrors `upload_video` but is provided as a clearer API for image uploads.
+
+        Args:
+            image_data: The image file as bytes
+            filename: Name of the image file
+            namespace: Namespace to organize images (default: "__default__")
+
+        Returns:
+            Tuple[bool, str]: (Success flag, hashed identifier or error message)
+        """
+        try:
+            filename = self._sanitize_filename(filename)
+            
+            # Append timestamp to filename to ensure uniqueness
+            import time
+            filename = f"{int(time.time())}_{filename}"
+
+            # Create encoded identifier
+            identifier = self._encode_path(self.bucket_name, namespace, filename)
+
+            # Determine file MIME type (supports image extensions added above)
+            content_type = self._determine_content_type(filename)
+
+            # Construct the object key (namespace/filename)
+            object_key = f"{namespace}/{filename}"
+
+            # Upload the image
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=object_key,
+                Body=image_data,
+                ContentType=content_type
+            )
+            
+            logger.info(f"Uploaded {filename} to R2 with identifier: {identifier}")
+            return True, identifier
+            
+        except Exception as e:
+            logger.error(f"Error uploading image to R2: {e}")
             return False, str(e)
     
     def fetch_video(self, identifier: str) -> Optional[bytes]:
@@ -332,6 +390,37 @@ class R2Connector:
             
         except Exception as e:
             logger.error(f"Error deleting video from R2: {e}")
+            return False
+        
+    def delete_image(self, identifier: str) -> bool:
+        """
+        Delete an image from R2 storage using its identifier.
+
+        This mirrors `delete_video` but is provided as a clearer API for image deletions.
+
+        Args:
+            identifier: The base64-encoded identifier of the image
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """        
+        try:
+            # Get object key from identifier
+            object_key = self._get_object_key_from_identifier(identifier)
+            if not object_key:
+                logger.warning(f"Cannot delete image: invalid identifier {identifier}")
+                return False
+            
+            # Delete the object
+            self.s3_client.delete_object(
+                Bucket=self.bucket_name,
+                Key=object_key
+            )
+            
+            logger.info(f"Deleted image with identifier: {identifier}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error deleting image from R2: {e}")
             return False
 
     CURSOR_PREFIX = "cursor:"

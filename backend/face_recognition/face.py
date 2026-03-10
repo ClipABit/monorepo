@@ -12,7 +12,15 @@ class Face:
             image_np = cv2.imread(orig_image)
             image_np = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
         elif (isinstance(orig_image, np.ndarray)):
-            image_np = orig_image
+            # NumPy arrays coming from OpenCV are in BGR channel order.
+            # Convert to RGB to keep a consistent color ordering for downstream
+            # consumers (PIL.Image.fromarray, storage, visualization).
+            try:
+                image_np = cv2.cvtColor(orig_image, cv2.COLOR_BGR2RGB)
+            except Exception:
+                # If conversion fails for any reason, fall back to the original array
+                # to avoid breaking callers that may already pass RGB arrays.
+                image_np = orig_image
         else:
             raise ValueError("orig_image must be either a file path (str) or a numpy ndarray.")
 
