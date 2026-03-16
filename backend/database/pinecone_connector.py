@@ -145,3 +145,4 @@ class PineconeConnector:
 #         except Exception as e:
 #             logger.error(f"Error batch deleting chunks from index {self.index_name} with namespace {namespace}: {e}")
 #             return False
+#       return None

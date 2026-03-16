@@ -16,22 +16,9 @@ import logging
 import cv2
 
 import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
 
 # Define paths and options
-model_path = '/Users/yifanzhang/workspace/ClipABit/monorepo/backend/face_recognition/face_landmarker.task'
-
-base_options = python.BaseOptions(model_asset_path=model_path)
-options = vision.FaceLandmarkerOptions(
-    base_options=base_options,
-    running_mode=vision.RunningMode.IMAGE, # Use IMAGE mode for np.ndarray
-    output_facial_transformation_matrixes=True, # Required for frontal score
-    num_faces=1
-)
-
-# Create the landmarker instance
-landmarker_instance = vision.FaceLandmarker.create_from_options(options)
+# model_path = '/Users/yifanzhang/workspace/ClipABit/monorepo/backend/face_recognition/face_landmarker.task'
 
 
 logging.basicConfig(level=logging.INFO)
@@ -64,6 +51,7 @@ class FaceDetector:
 
     def __init__(
         self, 
+        landmarker_instance,
         detector_backend="mtcnn", 
         embedding_model_name="ArcFace", 
         enforce_detection=True, 
@@ -81,11 +69,12 @@ class FaceDetector:
         self.min_face_size = min_face_size
         self.min_area_ratio = min_area_ratio
         self.max_aspect_ratio = max_aspect_ratio
+        self.landmarker_instance = landmarker_instance
 
         logging.debug(
             f"FaceDetector: Initialized FaceDetector with detector_backend={detector_backend}, "
             f"embedding_model_name={embedding_model_name}, enforce_detection={enforce_detection}, "
-            f"align={align}"
+            f"align={align}, "
         )
 
     def detect_and_embed(self, img) -> list[Face]:
@@ -174,7 +163,7 @@ class FaceDetector:
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
         
         # 3. Perform detection (using IMAGE mode for single np arrays)
-        result = landmarker_instance.detect(mp_image)
+        result = self.landmarker_instance.detect(mp_image)
 
         if not result.facial_transformation_matrixes:
             return None # No face detected

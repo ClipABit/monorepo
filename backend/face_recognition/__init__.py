@@ -5,6 +5,7 @@ from .frame_face_pipeline import FrameFacePipeline
 from .face_metadata_repository import FaceMetadataRepository
 from .face_appearance_repository import FaceAppearanceRepository
 from .recent_faces_cache import RecentFacesCache
+from .video_face_pipeline import VideoFacePipeline
 
 __all__ = [
     "Face",
@@ -14,4 +15,5 @@ __all__ = [
     "FaceMetadataRepository",
     "FaceAppearanceRepository",
     "RecentFacesCache",
+    "VideoFacePipeline",
 ]
