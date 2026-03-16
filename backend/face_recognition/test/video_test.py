@@ -24,8 +24,24 @@ from sklearn.metrics.pairwise import cosine_similarity
 video = "scene_0001__00h00m00s000__00h03m59s672.mp4"
 # video = "scene_0002__00h00m18s320__00h00m37s759.mp4"
 # namespace = "video-test-namespace-2"
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 
 preprocessor = Preprocessor(min_chunk_duration=1.0, max_chunk_duration=10.0, scene_threshold=13.0)
+
+# initialize mediapipe face landmarker for frontal score calculation
+base_options = python.BaseOptions(model_asset_path="/Users/yifanzhang/workspace/ClipABit/monorepo/backend/face_recognition/face_landmarker.task")
+options = vision.FaceLandmarkerOptions(
+    base_options=base_options,
+    running_mode=vision.RunningMode.IMAGE, # Use IMAGE mode for np.ndarray
+    output_facial_transformation_matrixes=True, # Required for frontal score
+    num_faces=1
+)
+
+# Create the landmarker instance
+landmarker_instance = vision.FaceLandmarker.create_from_options(options)
+
 
 face_detector = FaceDetector(
     detector_backend="mtcnn",
@@ -33,13 +49,14 @@ face_detector = FaceDetector(
     # detector_backend="retinaface",
     embedding_model_name="ArcFace",
     # embedding_model_name="Facenet512",
+    landmarker_instance=landmarker_instance
 )
 
 # os.makedirs("frames", exist_ok=True)
 os.makedirs("detected_faces", exist_ok=True)
 os.makedirs("cluster_representatives", exist_ok=True)
 
-threshold = 0.32
+# threshold = 0.32
 
 counter = 0
 face_counter = 0
