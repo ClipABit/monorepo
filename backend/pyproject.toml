@@ -21,6 +21,7 @@ dependencies = [
     "tf-keras>=2.20.1",
     "firebase-admin>=7.1.0",
     "scikit-learn>=1.8.0",
+    "mediapipe>=0.10.32",
 ]
 
 [project.scripts]

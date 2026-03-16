@@ -30,6 +30,8 @@ image = (
 # Environment: "dev" (default) or "prod" (set via ENVIRONMENT variable)
 env = os.environ.get("ENVIRONMENT", "dev")
 
+vol = modal.Volume.from_name("models")
+
 # Create Modal app
 app = modal.App(
     name=env,
@@ -38,7 +40,7 @@ app = modal.App(
 )
 
 
-@app.cls(cpu=4.0, timeout=600)
+@app.cls(cpu=4.0, timeout=600, volumes={"/models": vol})
 class Server:
 
     @modal.enter()
@@ -67,6 +69,8 @@ class Server:
         from database.r2_connector import R2Connector
         from face_recognition import FaceDetector, FaceRepository, FaceMetadataRepository, FaceAppearanceRepository
 
+        from mediapipe.tasks import python
+        from mediapipe.tasks.python import vision
 
         logger.info(f"Container starting up! Environment = {env}")
         self.start_time = datetime.now(timezone.utc)
@@ -133,8 +137,22 @@ class Server:
         self.face_metadata_repository = FaceMetadataRepository(db)
         self.face_appearance_repository = FaceAppearanceRepository(db)
 
-        self.face_detector = FaceDetector()
-        self.face_repository = FaceRepository(self.face_recognition_pinecone_connector, self.r2_connector, threshold=0.32)
+        # initialize mediapipe face landmarker for frontal score calculation
+        base_options = python.BaseOptions(model_asset_path="/models/face_landmarker.task")
+        options = vision.FaceLandmarkerOptions(
+            base_options=base_options,
+            running_mode=vision.RunningMode.IMAGE, # Use IMAGE mode for np.ndarray
+            output_facial_transformation_matrixes=True, # Required for frontal score
+            num_faces=1
+        )
+
+        # Create the landmarker instance
+        landmarker_instance = vision.FaceLandmarker.create_from_options(options)
+
+        self.face_detector = FaceDetector(
+            landmarker_instance=landmarker_instance
+        )
+        self.face_repository = FaceRepository(self.face_recognition_pinecone_connector, self.r2_connector, threshold=0.5)
 
         logger.info("Container modules initialized and ready!")
 
@@ -142,18 +160,16 @@ class Server:
 
     @modal.method()
     async def process_video(self, video_bytes: bytes, filename: str, job_id: str, namespace: str = ""):
-        from face_recognition import RecentFacesCache
 
         logger.info(f"[Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) | namespace='{namespace}'")
-        
+        video_id = job_id
+
         hashed_identifier = None
         upserted_chunk_ids = []
         created_face_embedding_ids = []
         created_face_image_ids = []
         created_face_metadata_ids = []
         stored_face_appearance_ids = []
-
-        recent_face_cache = RecentFacesCache(max_size=100, confidente_threshold=0.9)
 
         try:
             # Upload original video to R2 bucket
@@ -173,7 +189,7 @@ class Server:
             # Process video through preprocessing pipeline
             processed_chunks = self.preprocessor.process_video_from_bytes(
                 video_bytes=video_bytes,
-                video_id=job_id,
+                video_id=video_id,
                 filename=filename,
                 hashed_identifier=hashed_identifier
             )
@@ -228,70 +244,51 @@ class Server:
                 else:
                     raise Exception(f"Failed to upsert chunk {chunk['chunk_id']} to Pinecone")
 
-                # Face recognition for this chunk
-                try:
-                    from face_recognition.frame_face_pipeline import FrameFacePipeline
-
-                    pipeline = FrameFacePipeline(
-                        namespace=namespace,
-                        face_detector=self.face_detector,
-                        face_repository=self.face_repository,
-                        face_metadata_repository=self.face_metadata_repository,
-                    )
-
-                    # sample up to 8 frames evenly from the chunk for face processing
-                    frames = chunk.get('frames')
-                    sampled = []
-                    if frames is not None and len(frames) > 0:
-                        n = min(8, len(frames))
-                        if len(frames) <= n:
-                            sampled = [frame.copy() for frame in frames]
-                        else:
-                            import numpy as _np
-                            idx = _np.linspace(0, len(frames) - 1, n).astype(int)
-                            sampled = [frames[i].copy for i in idx]
-
-                    # Aggregate face mappings for the chunk (face_id -> img_access_id)
-                    face_map = {}
-                    for f in sampled:
-                        try:
-                            mapping, vec_ids, img_ids, face_ids = pipeline.process_frame(
-                                f, 
-                                chunk_id=chunk['chunk_id'],
-                                recent_faces_cache=recent_face_cache)
-                            # mapping may contain multiple faces; merge into face_map
-                            for k, v in mapping.items():
-                                face_map.setdefault(k, v)
-
-                            # collect created resource ids for potential rollback
-                            if vec_ids:
-                                created_face_embedding_ids.extend(vec_ids)
-                            if img_ids:
-                                created_face_image_ids.extend(img_ids)
-                            if face_ids:
-                                created_face_metadata_ids.extend(face_ids)
-                        except Exception as fe:
-                            logger.exception(f"Face processing failed for chunk {chunk['chunk_id']}: {fe}")
-                except Exception as e:
-                    logger.error(f"Failed to run face recognition for chunk {chunk['chunk_id']}: {e}")
-                    face_map = {}
 
                 chunk_details.append({
                     "chunk_id": chunk['chunk_id'],
                     "metadata": chunk['metadata'],
                     "memory_mb": chunk['memory_mb'],
-                    "faces": face_map,
                 })
 
-                # store the face appearance data for this chunk
-                for face_id in face_map.keys():
-                    success = self.face_appearance_repository.set_face_appearance(
-                        user_id=namespace,
-                        face_id=face_id,
-                        video_chunk_id=chunk['chunk_id']
-                    )
-                    if success:
-                        stored_face_appearance_ids.append([face_id, chunk['chunk_id']])
+            try:
+                from face_recognition.video_face_pipeline import VideoFacePipeline
+                face_map = {}
+                pipeline = VideoFacePipeline(
+                    namespace=namespace,
+                    face_detector=self.face_detector,
+                    face_repository=self.face_repository,
+                    face_metadata_repository=self.face_metadata_repository,
+                )
+                mapping, vec_ids, img_ids, face_ids = pipeline.process_video_chunks(processed_chunks)
+                for k, v in mapping.items():
+                    face_map.setdefault(k, v)
+
+                # collect created resource ids for potential rollback
+                if vec_ids:
+                    created_face_embedding_ids.extend(vec_ids)
+                if img_ids:
+                    created_face_image_ids.extend(img_ids)
+                if face_ids:
+                    created_face_metadata_ids.extend(face_ids)
+            except Exception as e:
+                logger.error(f"Failed to initialize VideoFacePipeline for chunk {chunk['chunk_id']}: {e}")
+                face_map = {}
+
+
+            for face_id in face_map.keys():
+                success = self.face_appearance_repository.set_face_appearance(
+                    user_id=namespace,
+                    face_id=face_id,
+                    video_chunk_id=video_id
+                )
+                if success:
+                    stored_face_appearance_ids.append(
+                        [face_id, video_id])
+                    logger.info(f"Stored face appearance for face_id={face_id}, video_id={video_id}")
+                else:
+                    logger.info(f"Failed to store face appearance for face_id={face_id}, video_id={video_id}")
+        
 
             result = {
                 "job_id": job_id,
@@ -524,10 +521,10 @@ class Server:
                         metadata = r.get("metadata", {}) if isinstance(r, dict) else {}
 
                         match_id = None
-                        if metadata.get("chunk_id") is not None:
-                            match_id = str(metadata.get("chunk_id"))
+                        if metadata.get("video_id") is not None:
+                            match_id = str(metadata.get("video_id"))
 
-                        logger.info(f"[Search][FaceFilter] Checking result chunk_id={match_id} against eligible_chunks")
+                        logger.info(f"[Search][FaceFilter] Checking result video_id={match_id} against eligible_chunks")
 
                         if match_id and (match_id in eligible_chunks):
                             filtered.append(r)
