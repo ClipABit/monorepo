@@ -4,14 +4,9 @@ import logging
 import uuid
 
 import modal
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 logger = logging.getLogger(__name__)
-
-
-def _user_id_from_request(request: Request) -> str:
-    """Dependency that returns the authenticated user_id from request.state (set by auth_connector)."""
-    return request.state.user_id
 
 
 class ServerFastAPIRouter:
@@ -90,12 +85,27 @@ class ServerFastAPIRouter:
 
     def _register_routes(self):
         """Registers all the FastAPI routes."""
-        auth = [Depends(self.server_instance.auth_connector)]
+        auth_connector = self.server_instance.auth_connector
+        auth = [Depends(auth_connector)]
+
+        # Route-specific closures that receive user_id through FastAPI's dependency
+        # injection directly (no request.state side-effects needed).
+        _self = self
+
+        async def _upload_handler(
+            files: list[UploadFile] = File(default=[]),
+            namespace: str = Form(""),
+            user_id: str = Depends(auth_connector),
+        ):
+            return await _self.upload(files, namespace, user_id)
+
+        async def _usage_me_handler(user_id: str = Depends(auth_connector)):
+            return await _self.usage_me(user_id)
 
         self.router.add_api_route("/health", self.health, methods=["GET"])
         self.router.add_api_route("/status", self.status, methods=["GET"], dependencies=auth)
-        self.router.add_api_route("/upload", self.upload, methods=["POST"], dependencies=auth)
-        self.router.add_api_route("/usage/me", self.usage_me, methods=["GET"], dependencies=auth)
+        self.router.add_api_route("/upload", _upload_handler, methods=["POST"])
+        self.router.add_api_route("/usage/me", _usage_me_handler, methods=["GET"])
         self.router.add_api_route("/videos", self.list_videos, methods=["GET"])
         self.router.add_api_route("/videos/{hashed_identifier}", self.delete_video, methods=["DELETE"], dependencies=auth)
         self.router.add_api_route("/cache/clear", self.clear_cache, methods=["POST"], dependencies=auth)
@@ -132,8 +142,7 @@ class ServerFastAPIRouter:
             }
         return job_data
 
-    async def upload(self, files: list[UploadFile] = File(default=[]), namespace: str = Form(""), user_id: str = Depends(_user_id_from_request),
-    ):
+    async def upload(self, files: list[UploadFile], namespace: str, user_id: str):
         """
         Handle video file upload and start background processing.
         Supports both single and batch uploads.
@@ -151,7 +160,7 @@ class ServerFastAPIRouter:
         """
         return await self.upload_handler.handle_upload(files, namespace, user_id=user_id)
 
-    async def usage_me(self, user_id: str = Depends(_user_id_from_request)):
+    async def usage_me(self, user_id: str):
         """
         Return aggregate usage metrics for the authenticated user.
 

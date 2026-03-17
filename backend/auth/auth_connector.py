@@ -101,5 +101,4 @@ class AuthConnector:
         user_id = await loop.run_in_executor(None, self.verify_token, token)
         if self.user_store:
             await loop.run_in_executor(None, self.user_store.get_or_create_user, user_id)
-        request.state.user_id = user_id
         return user_id

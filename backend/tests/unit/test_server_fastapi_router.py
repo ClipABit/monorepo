@@ -17,7 +17,6 @@ class FakeAuthConnector:
     """Fake auth connector that always succeeds."""
 
     async def __call__(self, request: Request) -> str:
-        request.state.user_id = "test-user-id"
         return "test-user-id"
 
 
