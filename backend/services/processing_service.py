@@ -80,6 +80,10 @@ class ProcessingService:
         hashed_identifier = None
         upserted_chunk_ids = []
 
+        import time
+
+        start_time = time.time()
+
         try:
             # Stage 1: Upload original video to R2 bucket
             success, hashed_identifier = self.r2_connector.upload_video(
@@ -109,9 +113,12 @@ class ProcessingService:
                 if processed_chunks else 0
             )
 
+            processing_time_seconds = time.time() - start_time
+
             logger.info(
                 f"[{self.__class__.__name__}][Job {job_id}] Complete: {len(processed_chunks)} chunks, "
-                f"{total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}"
+                f"{total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}, "
+                f"processing_time_s={processing_time_seconds:.2f}"
             )
 
             # Stage 3-4: Embed frames and store in Pinecone
@@ -168,6 +175,7 @@ class ProcessingService:
                 "total_frames": total_frames,
                 "total_memory_mb": total_memory,
                 "avg_complexity": avg_complexity,
+                "processing_time_seconds": processing_time_seconds,
                 "chunk_details": chunk_details,
             }
 
@@ -175,6 +183,31 @@ class ProcessingService:
 
             # Stage 5: Store result
             self.job_store.set_job_completed(job_id, result)
+
+            # Update user stats in Firestore if user_id is known.
+            try:
+                job_data = self.job_store.get_job(job_id) or {}
+                user_id = job_data.get("user_id")
+                size_bytes = job_data.get("size_bytes", 0)
+                if user_id:
+                    from database.firebase.user_store_connector import UserStoreConnector
+                    from firebase_admin import firestore
+
+                    firestore_client = firestore.client()
+                    user_store = UserStoreConnector(firestore_client=firestore_client)
+                    user_store.increment_usage(
+                        user_id=user_id,
+                        uploaded_bytes=size_bytes,
+                        upload_count=1,
+                        frames=total_frames,
+                    )
+            except Exception as usage_exc:
+                logger.error(
+                    "[%s][Job %s] Failed to update user usage aggregates: %s",
+                    self.__class__.__name__,
+                    job_id,
+                    usage_exc,
+                )
 
             # Update parent batch if exists
             if parent_batch_id:

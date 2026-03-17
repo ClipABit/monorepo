@@ -139,7 +139,32 @@ class FakeAuthConnector:
     """Fake auth connector that always succeeds."""
 
     async def __call__(self, request: Request) -> str:
+        request.state.user_id = "test-user-id"
         return "test-user-id"
+
+
+class FakeUserStore:
+    """Fake user store for usage stats with function get_or_create_user that returns user data to edit."""
+
+    def __init__(self) -> None:
+        self._user_data: Dict[str, Dict[str, Any]] = {}
+
+    def get_or_create_user(self, user_id: str) -> Dict[str, Any]:
+        if user_id not in self._user_data:
+            self._user_data[user_id] = {
+                "user_id": user_id,
+                "total_upload_bytes": 0,
+                "total_upload_count": 0,
+                "total_frames_uploaded": 0,
+            }
+        return self._user_data[user_id].copy()
+
+    def set_usage(self, user_id: str, total_upload_bytes: int = 0, total_upload_count: int = 0, total_frames_uploaded: int = 0) -> None:
+        """Set returned usage for a user (for testing)."""
+        self.get_or_create_user(user_id)  # ensure entry exists
+        self._user_data[user_id]["total_upload_bytes"] = total_upload_bytes
+        self._user_data[user_id]["total_upload_count"] = total_upload_count
+        self._user_data[user_id]["total_frames_uploaded"] = total_frames_uploaded
 
 
 class ServerStub:
@@ -151,6 +176,7 @@ class ServerStub:
         self.job_store = FakeJobStore()
         self.delete_video_background = FakeSpawner()
         self.auth_connector = FakeAuthConnector()
+        self.user_store = FakeUserStore()
         self.r2_connector = FakeR2Connector(
             videos=[
                 {
@@ -267,6 +293,44 @@ def test_upload_creates_job_and_spawns_processing_app(
     assert call_args[3] == "ns1"
     assert call_args[4] is None  # No parent batch
 
+    # Job created with authenticated user_id
+    job_data = server.job_store.get_job(job_id)
+    assert job_data is not None
+    assert job_data.get("user_id") == "test-user-id"
+
+
+def test_usage_me_returns_aggregates(test_client_internal: Tuple[TestClient, ServerStub, dict]) -> None:
+    """GET /usage/me returns user_id and usage fields (default zeros for new user)."""
+    client, server, _ = test_client_internal
+    resp = client.get("/usage/me")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["user_id"] == "test-user-id"
+    assert "total_upload_bytes" in data
+    assert "total_upload_count" in data
+    assert "total_frames_uploaded" in data
+    assert data["total_upload_bytes"] == 0
+    assert data["total_upload_count"] == 0
+    assert data["total_frames_uploaded"] == 0
+
+
+def test_usage_me_returns_stored_values(test_client_internal: Tuple[TestClient, ServerStub, dict]) -> None:
+    """GET /usage/me returns values previously set on the user store."""
+    client, server, _ = test_client_internal
+    server.user_store.set_usage(
+        "test-user-id",
+        total_upload_bytes=1000,
+        total_upload_count=5,
+        total_frames_uploaded=120,
+    )
+    resp = client.get("/usage/me")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["user_id"] == "test-user-id"
+    assert data["total_upload_bytes"] == 1000
+    assert data["total_upload_count"] == 5
+    assert data["total_frames_uploaded"] == 120
+
 
 def test_batch_upload_creates_batch_job_and_spawns_children(
     test_client_internal: Tuple[TestClient, ServerStub, dict]
@@ -316,6 +380,7 @@ def test_batch_upload_creates_batch_job_and_spawns_children(
         child_job = server.job_store.get_job(job_id)
         assert child_job is not None
         assert child_job["parent_batch_id"] == batch_job_id
+        assert child_job.get("user_id") == "test-user-id"
 
 
 def test_batch_upload_with_validation_failures(

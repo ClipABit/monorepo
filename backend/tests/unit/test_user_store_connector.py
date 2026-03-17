@@ -144,3 +144,54 @@ class TestUserExists:
         )
 
         assert connector.user_exists("auth0|nonexistent") is False
+
+
+class TestIncrementUsage:
+    """Test increment_usage updates Firestore with Increment sentinels."""
+
+    def test_calls_get_or_create_user_then_update(self, connector, mock_firestore):
+        """Increment usage ensures user exists then updates with increments."""
+        from google.cloud.firestore import Increment
+
+        mock_doc_ref = MagicMock()
+        mock_doc_ref.get.return_value = _mock_doc(exists=True, data={"user_id": "auth0|u1"})
+        mock_firestore.collection.return_value.document.return_value = mock_doc_ref
+
+        connector.increment_usage(
+            user_id="auth0|u1",
+            uploaded_bytes=1000,
+            upload_count=1,
+            frames=20,
+        )
+
+        mock_doc_ref.update.assert_called_once()
+        updates = mock_doc_ref.update.call_args[0][0]
+        assert updates["total_upload_bytes"] == Increment(1000)
+        assert updates["total_upload_count"] == Increment(1)
+        assert updates["total_frames_uploaded"] == Increment(20)
+
+    def test_skips_update_when_all_zero(self, connector, mock_firestore):
+        """Increment usage does not call update when all deltas are zero."""
+        update_mock = MagicMock()
+        mock_firestore.collection.return_value.document.return_value.update = update_mock
+        connector.increment_usage(user_id="auth0|u1", uploaded_bytes=0, upload_count=0, frames=0)
+        update_mock.assert_not_called()
+
+    def test_update_only_includes_non_zero_fields(self, connector, mock_firestore):
+        """Only non-zero arguments are added to the update dict."""
+        from google.cloud.firestore import Increment
+
+        mock_doc_ref = MagicMock()
+        mock_doc_ref.get.return_value = _mock_doc(exists=True, data={"user_id": "auth0|u1"})
+        mock_firestore.collection.return_value.document.return_value = mock_doc_ref
+
+        connector.increment_usage(
+            user_id="auth0|u1",
+            uploaded_bytes=500,
+            upload_count=0,
+            frames=0,
+        )
+
+        updates = mock_doc_ref.update.call_args[0][0]
+        assert list(updates.keys()) == ["total_upload_bytes"]
+        assert updates["total_upload_bytes"] == Increment(500)

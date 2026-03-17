@@ -4,9 +4,14 @@ import logging
 import uuid
 
 import modal
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 logger = logging.getLogger(__name__)
+
+
+def _user_id_from_request(request: Request) -> str:
+    """Dependency that returns the authenticated user_id from request.state (set by auth_connector)."""
+    return request.state.user_id
 
 
 class ServerFastAPIRouter:
@@ -90,6 +95,7 @@ class ServerFastAPIRouter:
         self.router.add_api_route("/health", self.health, methods=["GET"])
         self.router.add_api_route("/status", self.status, methods=["GET"], dependencies=auth)
         self.router.add_api_route("/upload", self.upload, methods=["POST"], dependencies=auth)
+        self.router.add_api_route("/usage/me", self.usage_me, methods=["GET"], dependencies=auth)
         self.router.add_api_route("/videos", self.list_videos, methods=["GET"])
         self.router.add_api_route("/videos/{hashed_identifier}", self.delete_video, methods=["DELETE"], dependencies=auth)
         self.router.add_api_route("/cache/clear", self.clear_cache, methods=["POST"], dependencies=auth)
@@ -126,7 +132,8 @@ class ServerFastAPIRouter:
             }
         return job_data
 
-    async def upload(self, files: list[UploadFile] = File(default=[]), namespace: str = Form("")):
+    async def upload(self, files: list[UploadFile] = File(default=[]), namespace: str = Form(""), user_id: str = Depends(_user_id_from_request),
+    ):
         """
         Handle video file upload and start background processing.
         Supports both single and batch uploads.
@@ -142,7 +149,25 @@ class ServerFastAPIRouter:
         Raises:
             HTTPException: 400 if validation fails, 500 if processing errors
         """
-        return await self.upload_handler.handle_upload(files, namespace)
+        return await self.upload_handler.handle_upload(files, namespace, user_id=user_id)
+
+    async def usage_me(self, user_id: str = Depends(_user_id_from_request)):
+        """
+        Return aggregate usage metrics for the authenticated user.
+
+        Response includes:
+        - user_id
+        - total_upload_bytes
+        - total_upload_count
+        - total_frames_uploaded
+        """
+        user = self.server_instance.user_store.get_or_create_user(user_id)
+        return {
+            "user_id": user_id,
+            "total_upload_bytes": user.get("total_upload_bytes", 0),
+            "total_upload_count": user.get("total_upload_count", 0),
+            "total_frames_uploaded": user.get("total_frames_uploaded", 0),
+        }
 
     async def list_videos(
         self,
