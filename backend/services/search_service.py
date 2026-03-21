@@ -86,9 +86,14 @@ class SearchService:
         """Create FastAPI app with search routes."""
         from fastapi import FastAPI
         from fastapi.middleware.cors import CORSMiddleware
-        from api.search_fastapi_router import SearchFastAPIRouter
+        from api.search_fastapi_router import SearchFastAPIRouter, limiter
+        from slowapi.errors import RateLimitExceeded
+        from slowapi import _rate_limit_exceeded_handler
 
         app = FastAPI(title="ClipABit Search API")
+
+        app.state.limiter = limiter
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
         # Add CORS middleware
         app.add_middleware(
