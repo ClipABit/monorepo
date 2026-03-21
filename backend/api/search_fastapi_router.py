@@ -45,14 +45,20 @@ class SearchFastAPIRouter:
         auth = [Depends(self.auth_connector)] if self.auth_connector else []
 
         self.router.add_api_route("/health", self.health, methods=["GET"])
-        self.router.add_api_route("/search", self.search, methods=["GET"], dependencies=auth)
-        self.router.add_api_route("/demo-search", self.demo_search, methods=["GET"])
+        self.router.add_api_route(
+            "/search", self.search, methods=["GET"], dependencies=auth
+        )
+
+        # Apply the limiter to the bound method at registration time.
+        # This ensures 'request' is at index 0, which avoids the slowapi IndexError for bound class methods.
+        self.router.add_api_route(
+            "/demo-search", limiter.limit("5/minute")(self.demo_search), methods=["GET"]
+        )
 
     async def health(self):
         """Health check endpoint."""
         return {"status": "ok", "service": "search"}
 
-    @limiter.limit("5/minute")
     async def demo_search(self, request: Request, query: str, top_k: int = 10):
         """
         Public demo search endpoint - accepts a text query and returns semantic search results for the demo namespace.
@@ -61,22 +67,24 @@ class SearchFastAPIRouter:
         try:
             t_start = time.perf_counter()
             namespace = "web-demo"
-            logger.info(f"[Search] Demo Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
+            logger.info(
+                f"[Search] Demo Query: '{query}' | namespace='{namespace}' | top_k={top_k}"
+            )
 
             # Call search directly on the service instance (no RPC, no cross-app call)
             results = self.search_service._search_internal(query, namespace, top_k)
 
             t_done = time.perf_counter()
-            logger.info(f"[Search] Found {len(results)} demo results in {t_done - t_start:.3f}s")
+            logger.info(
+                f"[Search] Found {len(results)} demo results in {t_done - t_start:.3f}s"
+            )
 
             return {
                 "query": query,
                 "results": results,
-                "timing": {
-                    "total_s": round(t_done - t_start, 3)
-                }
+                "timing": {"total_s": round(t_done - t_start, 3)},
             }
-        except Exception as e:
+        except Exception:
             logger.exception("[Search] Error in demo search")
             raise HTTPException(
                 status_code=500,
@@ -100,20 +108,22 @@ class SearchFastAPIRouter:
         """
         try:
             t_start = time.perf_counter()
-            logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
+            logger.info(
+                f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}"
+            )
 
             # Call search directly on the service instance (no RPC, no cross-app call)
             results = self.search_service._search_internal(query, namespace, top_k)
 
             t_done = time.perf_counter()
-            logger.info(f"[Search] Found {len(results)} results in {t_done - t_start:.3f}s")
+            logger.info(
+                f"[Search] Found {len(results)} results in {t_done - t_start:.3f}s"
+            )
 
             return {
                 "query": query,
                 "results": results,
-                "timing": {
-                    "total_s": round(t_done - t_start, 3)
-                }
+                "timing": {"total_s": round(t_done - t_start, 3)},
             }
         except Exception as e:
             logger.error(f"[Search] Error: {e}")

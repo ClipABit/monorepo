@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from typing import Tuple
+from typing import Optional, Tuple
 from fastapi import UploadFile, HTTPException
 
 logger = logging.getLogger(__name__)
@@ -12,17 +12,27 @@ class UploadHandler:
     """Handles video upload validation and orchestration."""
 
     ALLOWED_MIME_TYPES = {
-        'video/mp4',
-        'video/mpeg',
-        'video/quicktime',  # .mov
-        'video/x-msvideo',  # .avi
-        'video/x-matroska',  # .mkv
-        'video/webm',
-        'video/x-flv',
-        'application/octet-stream'  # Some clients send this for video files
+        "video/mp4",
+        "video/mpeg",
+        "video/quicktime",  # .mov
+        "video/x-msvideo",  # .avi
+        "video/x-matroska",  # .mkv
+        "video/webm",
+        "video/x-flv",
+        "application/octet-stream",  # Some clients send this for video files
     }
 
-    ALLOWED_EXTENSIONS = {'.mp4', '.mpeg', '.mpg', '.mov', '.avi', '.mkv', '.webm', '.flv', '.m4v'}
+    ALLOWED_EXTENSIONS = {
+        ".mp4",
+        ".mpeg",
+        ".mpg",
+        ".mov",
+        ".avi",
+        ".mkv",
+        ".webm",
+        ".flv",
+        ".m4v",
+    }
     MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
     MAX_BATCH_SIZE = 200
 
@@ -39,7 +49,9 @@ class UploadHandler:
         self.job_store = job_store
         self.process_video_spawn = process_video_spawn_fn
 
-    def validate_file(self, file: UploadFile, file_contents: bytes = None) -> Tuple[bool, str]:
+    def validate_file(
+        self, file: UploadFile, file_contents: Optional[bytes] = None
+    ) -> Tuple[bool, str]:
         """
         Validate uploaded file for security and compatibility.
 
@@ -56,13 +68,16 @@ class UploadHandler:
             return False, "File has no filename"
 
         # Check path traversal
-        if any(c in file.filename for c in ['..', '/', '\\']):
+        if any(c in file.filename for c in ["..", "/", "\\"]):
             return False, "Filename contains invalid characters"
 
         # Check file extension
         filename_lower = file.filename.lower()
         if not any(filename_lower.endswith(ext) for ext in self.ALLOWED_EXTENSIONS):
-            return False, f"Invalid file type. Allowed: {', '.join(self.ALLOWED_EXTENSIONS)}"
+            return (
+                False,
+                f"Invalid file type. Allowed: {', '.join(self.ALLOWED_EXTENSIONS)}",
+            )
 
         # Warn about unexpected MIME type (lenient)
         if file.content_type and file.content_type not in self.ALLOWED_MIME_TYPES:
@@ -74,7 +89,10 @@ class UploadHandler:
             if size == 0:
                 return False, "File is empty"
             if size > self.MAX_FILE_SIZE:
-                return False, f"File too large ({size / 1024 / 1024:.1f} MB, max {self.MAX_FILE_SIZE / 1024 / 1024:.0f} MB)"
+                return (
+                    False,
+                    f"File too large ({size / 1024 / 1024:.1f} MB, max {self.MAX_FILE_SIZE / 1024 / 1024:.0f} MB)",
+                )
 
         return True, ""
 
@@ -105,16 +123,19 @@ class UploadHandler:
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_msg)
 
-        self.job_store.create_job(job_id, {
-            "job_id": job_id,
-            "job_type": "video",
-            "parent_batch_id": None,
-            "filename": file.filename,
-            "status": "processing",
-            "size_bytes": len(contents),
-            "content_type": file.content_type,
-            "namespace": namespace
-        })
+        self.job_store.create_job(
+            job_id,
+            {
+                "job_id": job_id,
+                "job_type": "video",
+                "parent_batch_id": None,
+                "filename": file.filename,
+                "status": "processing",
+                "size_bytes": len(contents),
+                "content_type": file.content_type,
+                "namespace": namespace,
+            },
+        )
 
         self.process_video_spawn(contents, file.filename, job_id, namespace, None)
 
@@ -124,10 +145,12 @@ class UploadHandler:
             "content_type": file.content_type,
             "size_bytes": len(contents),
             "status": "processing",
-            "message": "Video uploaded successfully, processing in background"
+            "message": "Video uploaded successfully, processing in background",
         }
 
-    async def handle_batch_upload(self, files: list[UploadFile], namespace: str) -> dict:
+    async def handle_batch_upload(
+        self, files: list[UploadFile], namespace: str
+    ) -> dict:
         """
         Handle batch file upload with streaming and partial failure support.
 
@@ -159,19 +182,25 @@ class UploadHandler:
                 if is_valid:
                     validated.append({"job_id": str(uuid.uuid4()), "file": file})
                 else:
-                    logger.warning(f"[Batch {batch_job_id}] Skipped {file.filename}: {error_msg}")
+                    logger.warning(
+                        f"[Batch {batch_job_id}] Skipped {file.filename}: {error_msg}"
+                    )
 
             if not validated:
-                raise HTTPException(status_code=400, detail="All files failed validation")
+                raise HTTPException(
+                    status_code=400, detail="All files failed validation"
+                )
 
             # Create batch job FIRST (before spawning children)
             self.job_store.create_batch_job(
                 batch_job_id=batch_job_id,
                 child_job_ids=[v["job_id"] for v in validated],
-                namespace=namespace
+                namespace=namespace,
             )
             batch_created = True
-            logger.info(f"[Batch {batch_job_id}] Created batch with {len(validated)} videos")
+            logger.info(
+                f"[Batch {batch_job_id}] Created batch with {len(validated)} videos"
+            )
 
             # Process files one at a time (read, validate size, spawn, discard)
             spawned, total_size = [], 0
@@ -186,31 +215,49 @@ class UploadHandler:
                     total_size += len(contents)
 
                     # Create job and spawn processing
-                    self.job_store.create_job(meta["job_id"], {
-                        "job_id": meta["job_id"],
-                        "job_type": "video",
-                        "parent_batch_id": batch_job_id,
-                        "filename": meta["file"].filename,
-                        "status": "processing",
-                        "size_bytes": len(contents),
-                        "content_type": meta["file"].content_type,
-                        "namespace": namespace
-                    })
+                    self.job_store.create_job(
+                        meta["job_id"],
+                        {
+                            "job_id": meta["job_id"],
+                            "job_type": "video",
+                            "parent_batch_id": batch_job_id,
+                            "filename": meta["file"].filename,
+                            "status": "processing",
+                            "size_bytes": len(contents),
+                            "content_type": meta["file"].content_type,
+                            "namespace": namespace,
+                        },
+                    )
 
                     self.process_video_spawn(
-                        contents, meta["file"].filename, meta["job_id"], namespace, batch_job_id
+                        contents,
+                        meta["file"].filename,
+                        meta["job_id"],
+                        namespace,
+                        batch_job_id,
                     )
                     spawned.append(meta["job_id"])
 
                 except Exception as e:
-                    logger.error(f"[Batch {batch_job_id}] Failed {meta['file'].filename}: {e}")
+                    logger.error(
+                        f"[Batch {batch_job_id}] Failed {meta['file'].filename}: {e}"
+                    )
                     # Mark failed and update parent
                     try:
-                        self.job_store.set_job_failed(meta["job_id"], f"Upload failed: {e}")
-                        update_success = self.job_store.update_batch_on_child_completion(
-                            batch_job_id, meta["job_id"],
-                            {"job_id": meta["job_id"], "status": "failed",
-                             "filename": meta["file"].filename, "error": str(e)}
+                        self.job_store.set_job_failed(
+                            meta["job_id"], f"Upload failed: {e}"
+                        )
+                        update_success = (
+                            self.job_store.update_batch_on_child_completion(
+                                batch_job_id,
+                                meta["job_id"],
+                                {
+                                    "job_id": meta["job_id"],
+                                    "status": "failed",
+                                    "filename": meta["file"].filename,
+                                    "error": str(e),
+                                },
+                            )
                         )
                         if not update_success:
                             logger.error(
@@ -221,7 +268,9 @@ class UploadHandler:
                         logger.error(f"[Batch {batch_job_id}] Update failed: {ue}")
 
             if not spawned:
-                raise HTTPException(status_code=500, detail="All videos failed to process")
+                raise HTTPException(
+                    status_code=500, detail="All videos failed to process"
+                )
 
             logger.info(
                 f"[Batch {batch_job_id}] Spawned {len(spawned)}/{len(validated)} videos, "
@@ -236,7 +285,7 @@ class UploadHandler:
                 "total_videos": len(validated),
                 "successfully_spawned": len(spawned),
                 "failed_at_upload": len(validated) - len(spawned),
-                "message": "Batch upload complete, videos processing in background"
+                "message": "Batch upload complete, videos processing in background",
             }
 
         except HTTPException:
@@ -273,7 +322,7 @@ class UploadHandler:
         if len(files) > self.MAX_BATCH_SIZE:
             raise HTTPException(
                 status_code=400,
-                detail=f"Batch size ({len(files)}) exceeds maximum ({self.MAX_BATCH_SIZE})"
+                detail=f"Batch size ({len(files)}) exceeds maximum ({self.MAX_BATCH_SIZE})",
             )
 
         # Single file upload (backward compatible)
