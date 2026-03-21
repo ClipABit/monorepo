@@ -17,6 +17,7 @@ class FakeAuthConnector:
     """Fake auth connector that always succeeds."""
 
     async def __call__(self, request: Request) -> str:
+        request.state.user_id = "test-user-id"
         return "test-user-id"
 
 
@@ -26,6 +27,13 @@ def _make_server_instance(auth_connector=None):
     instance.auth_connector = auth_connector or FakeAuthConnector()
     instance.job_store = MagicMock()
     instance.r2_connector = MagicMock()
+    instance.user_store = MagicMock()
+    instance.user_store.get_or_create_user.return_value = {
+        "user_id": "test-user-id",
+        "total_upload_bytes": 0,
+        "total_upload_count": 0,
+        "total_modal_tokens": 0,
+    }
     return instance
 
 
@@ -104,6 +112,24 @@ class TestProtectedEndpointsWithFakeAuth:
         resp = client.post("/cache/clear", headers=AUTH_HEADERS)
         assert resp.status_code == 200
 
+    def test_usage_me_returns_ok(self):
+        """Verify GET /usage/me works with auth and returns usage fields."""
+        client, server = _make_client()
+        server.user_store.get_or_create_user.return_value = {
+            "user_id": "test-user-id",
+            "total_upload_bytes": 100,
+            "total_upload_count": 2,
+            "total_frames_uploaded": 50,
+        }
+
+        resp = client.get("/usage/me", headers=AUTH_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["user_id"] == "test-user-id"
+        assert data["total_upload_bytes"] == 100
+        assert data["total_upload_count"] == 2
+        assert data["total_frames_uploaded"] == 50
+
 
 class TestProtectedEndpointsRejectUnauthenticated:
     """Test protected endpoints return 401 without auth."""
@@ -132,6 +158,11 @@ class TestProtectedEndpointsRejectUnauthenticated:
     def test_clear_cache_rejects_no_auth(self, real_auth_client):
         client, _ = real_auth_client
         resp = client.post("/cache/clear")
+        assert resp.status_code == 401
+
+    def test_usage_me_rejects_no_auth(self, real_auth_client):
+        client, _ = real_auth_client
+        resp = client.get("/usage/me")
         assert resp.status_code == 401
 
     def test_status_rejects_invalid_scheme(self, real_auth_client):

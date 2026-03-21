@@ -78,7 +78,7 @@ class UploadHandler:
 
         return True, ""
 
-    async def handle_single_upload(self, file: UploadFile, namespace: str) -> dict:
+    async def handle_single_upload(self, file: UploadFile, namespace: str, user_id: str | None = None) -> dict:
         """
         Handle single file upload.
 
@@ -113,7 +113,8 @@ class UploadHandler:
             "status": "processing",
             "size_bytes": len(contents),
             "content_type": file.content_type,
-            "namespace": namespace
+            "namespace": namespace,
+            "user_id": user_id,
         })
 
         self.process_video_spawn(contents, file.filename, job_id, namespace, None)
@@ -127,7 +128,7 @@ class UploadHandler:
             "message": "Video uploaded successfully, processing in background"
         }
 
-    async def handle_batch_upload(self, files: list[UploadFile], namespace: str) -> dict:
+    async def handle_batch_upload(self, files: list[UploadFile], namespace: str, user_id: str | None = None) -> dict:
         """
         Handle batch file upload with streaming and partial failure support.
 
@@ -194,7 +195,8 @@ class UploadHandler:
                         "status": "processing",
                         "size_bytes": len(contents),
                         "content_type": meta["file"].content_type,
-                        "namespace": namespace
+                        "namespace": namespace,
+                        "user_id": user_id,
                     })
 
                     self.process_video_spawn(
@@ -250,7 +252,7 @@ class UploadHandler:
                     logger.error(f"[Batch {batch_job_id}] Cleanup failed: {ce}")
             raise HTTPException(status_code=500, detail=f"Batch upload failed: {e}")
 
-    async def handle_upload(self, files: list[UploadFile], namespace: str) -> dict:
+    async def handle_upload(self, files: list[UploadFile], namespace: str, user_id: str | None = None) -> dict:
         """
         Handle video file upload - auto-detects single or batch mode.
 
@@ -278,8 +280,8 @@ class UploadHandler:
 
         # Single file upload (backward compatible)
         if len(files) == 1:
-            return await self.handle_single_upload(files[0], namespace)
+            return await self.handle_single_upload(files[0], namespace, user_id=user_id)
 
         # Batch upload
         else:
-            return await self.handle_batch_upload(files, namespace)
+            return await self.handle_batch_upload(files, namespace, user_id=user_id)

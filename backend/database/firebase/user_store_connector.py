@@ -56,3 +56,44 @@ class UserStoreConnector(FirebaseConnector):
     def user_exists(self, user_id: str) -> bool:
         """Check if a user exists."""
         return self.db.collection(self.collection).document(user_id).get().exists
+
+    def increment_usage(
+        self,
+        user_id: str,
+        uploaded_bytes: int = 0,
+        upload_count: int = 0,
+        frames: int = 0,
+    ) -> None:
+        """
+        Increment aggregate usage metrics for a user.
+
+        This stores simple lifetime aggregates on the user document:
+        - total_upload_bytes
+        - total_upload_count
+        - total_frames_uploaded
+        """
+        from google.cloud.firestore import Increment
+
+        doc_ref = self.db.collection(self.collection).document(user_id)
+
+        updates = {}
+        if uploaded_bytes:
+            updates["total_upload_bytes"] = Increment(uploaded_bytes)
+        if upload_count:
+            updates["total_upload_count"] = Increment(upload_count)
+        if frames:
+            updates["total_frames_uploaded"] = Increment(frames)
+
+        if not updates:
+            return
+
+        # Ensure the user exists before incrementing
+        self.get_or_create_user(user_id)
+        doc_ref.update(updates)
+        logger.info(
+            "Updated usage for user %s (bytes=%s, uploads=%s, frames=%s)",
+            user_id,
+            uploaded_bytes,
+            upload_count,
+            frames,
+        )
