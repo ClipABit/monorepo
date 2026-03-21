@@ -28,4 +28,4 @@ app = modal.App(
 )
 
 # Register ProcessingService with this app
-app.cls(cpu=4.0, memory=4096)(ProcessingService)
+app.cls(cpu=4.0, memory=4096, timeout=3600)(ProcessingService)
