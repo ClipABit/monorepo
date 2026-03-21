@@ -82,7 +82,8 @@ def get_server_image() -> modal.Image:
             "numpy",
             "firebase-admin",
             "pyjwt[crypto]",
-            "requests" "slowapi",
+            "requests",
+            "slowapi",
         )
         .add_local_python_source(
             "database",
