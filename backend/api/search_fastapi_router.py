@@ -77,8 +77,11 @@ class SearchFastAPIRouter:
                 }
             }
         except Exception as e:
-            logger.error(f"[Search] Error in demo search: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            logger.exception("[Search] Error in demo search")
+            raise HTTPException(
+                status_code=500,
+                detail="An internal error occurred while processing the demo search request.",
+            )
 
     async def search(self, query: str, namespace: str = "", top_k: int = 10):
         """
