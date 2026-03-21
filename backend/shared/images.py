@@ -199,6 +199,7 @@ def get_search_image() -> modal.Image:
             "pyjwt[crypto]",
             "requests",
             "firebase-admin",
+            "slowapi",
         )
         .add_local_python_source(
             "api",
@@ -241,6 +242,7 @@ def get_processing_image() -> modal.Image:
             "numpy",
             "pinecone",
             "boto3",
+            "slowapi",
         )
         .run_function(_download_clip_full_model)
         .add_local_python_source(
