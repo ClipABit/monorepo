@@ -28,6 +28,7 @@ class SearchService:
         from database.firebase.user_store_connector import UserStoreConnector
         from search.text_embedder import TextEmbedder
         from auth.auth_connector import AuthConnector
+        from face_recognition import FaceAppearanceRepository
 
         env = get_environment()
         logger.info(f"[{self.__class__.__name__}] Starting up in '{env}' environment")
@@ -71,6 +72,7 @@ class SearchService:
         )
 
         self.user_store = UserStoreConnector(firestore_client=firestore_client)
+        self.face_appearance_repository = FaceAppearanceRepository(firestore_client)
         self.auth_connector = AuthConnector(
             domain=get_env_var("AUTH0_DOMAIN"),
             audience=get_env_var("AUTH0_AUDIENCE"),
@@ -110,13 +112,28 @@ class SearchService:
         """Expose FastAPI app as ASGI endpoint."""
         return self.fastapi_app
 
-    def _search_internal(self, query: str, namespace: str = "", top_k: int = 10) -> list:
+    def _search_internal(
+        self,
+        query: str,
+        namespace: str = "",
+        top_k: int = 10,
+        include_faces: list[str] | None = None,
+        include_faces_mode: str = "all",
+    ) -> list:
         """
         Internal search implementation.
 
         Called directly by the FastAPI router (no RPC overhead).
         """
-        logger.info(f"[{self.__class__.__name__}] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
+        logger.info(
+            "[%s] Query: '%s' | namespace='%s' | top_k=%d | include_faces=%s | include_faces_mode=%s",
+            self.__class__.__name__,
+            query,
+            namespace,
+            top_k,
+            include_faces,
+            include_faces_mode,
+        )
 
         # Generate query embedding
         query_embedding = self.embedder.embed_text(query)
@@ -161,6 +178,76 @@ class SearchService:
                 'metadata': metadata
             }
             results.append(result)
+
+        # Optional face-based filtering: restrict to videos that contain given face ids
+        if include_faces:
+            mode = (include_faces_mode or "all").lower()
+            if mode not in ("all", "any"):
+                mode = "all"
+
+            logger.info(
+                "[%s][FaceFilter] include_faces=%s mode=%s",
+                self.__class__.__name__,
+                include_faces,
+                mode,
+            )
+
+            # Build sets of chunk/video ids for each face
+            face_chunk_sets: list[set[str]] = []
+            for face_id in include_faces:
+                appearances = self.face_appearance_repository.get_chunks_for_face(namespace, face_id)
+                logger.info(
+                    "[%s][FaceFilter] face_id=%s appearances_count=%s",
+                    self.__class__.__name__,
+                    face_id,
+                    len(appearances) if appearances else 0,
+                )
+                chunk_ids: set[str] = set()
+                if appearances:
+                    for doc in appearances.values():
+                        cid = doc.get("video_chunk_id")
+                        if cid is not None:
+                            chunk_ids.add(str(cid))
+                face_chunk_sets.append(chunk_ids)
+
+            if mode == "all":
+                if not face_chunk_sets:
+                    eligible_chunks: set[str] = set()
+                else:
+                    eligible_chunks = set.intersection(*face_chunk_sets) if face_chunk_sets else set()
+            else:
+                eligible_chunks = set().union(*face_chunk_sets) if face_chunk_sets else set()
+
+            logger.info(
+                "[%s][FaceFilter] eligible_chunks_count=%d eligible_chunks=%s",
+                self.__class__.__name__,
+                len(eligible_chunks),
+                eligible_chunks,
+            )
+
+            if not eligible_chunks:
+                results = []
+            else:
+                filtered: list[dict] = []
+                for r in results:
+                    if not isinstance(r, dict):
+                        continue
+                    metadata = r.get("metadata", {}) if isinstance(r, dict) else {}
+
+                    match_id = None
+                    if metadata.get("video_id") is not None:
+                        match_id = str(metadata.get("video_id"))
+
+                    if match_id and (match_id in eligible_chunks):
+                        filtered.append(r)
+
+                logger.info(
+                    "[%s][FaceFilter] results_before=%d results_after=%d",
+                    self.__class__.__name__,
+                    len(results),
+                    len(filtered),
+                )
+                results = filtered
 
         logger.info(f"[{self.__class__.__name__}] Found {len(results)} results")
         return results

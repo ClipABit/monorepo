@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 env = get_environment()
 logger.info(f"Starting Processing App in '{env}' environment")
 
+# Shared volume for models (e.g., MediaPipe face_landmarker.task)
+models_vol = modal.Volume.from_name("models")
+
 # Create Modal app with processing-specific image
 app = modal.App(
     name=f"{env}-processing",
@@ -27,5 +30,5 @@ app = modal.App(
     secrets=[get_secrets()]
 )
 
-# Register ProcessingService with this app
-app.cls(cpu=4.0, memory=4096, timeout=600)(ProcessingService)
+# Register ProcessingService with this app, mounting the models volume at /models
+app.cls(cpu=4.0, memory=4096, timeout=600, volumes={"/models": models_vol})(ProcessingService)

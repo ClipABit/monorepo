@@ -9,8 +9,9 @@ __all__ = ["SearchFastAPIRouter"]
 
 import logging
 import time
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,14 @@ class SearchFastAPIRouter:
         """Health check endpoint."""
         return {"status": "ok", "service": "search"}
 
-    async def search(self, query: str, namespace: str = "", top_k: int = 10):
+    async def search(
+        self,
+        query: str,
+        namespace: str = "",
+        top_k: int = 10,
+        include_faces: list[str] | None = Query(default=None),
+        include_faces_mode: Literal["all", "any"] = "all",
+    ):
         """
         Search endpoint - accepts a text query and returns semantic search results.
 
@@ -64,10 +72,23 @@ class SearchFastAPIRouter:
         """
         try:
             t_start = time.perf_counter()
-            logger.info(f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
+            logger.info(
+                "[Search] Query: '%s' | namespace='%s' | top_k=%d | include_faces=%s | include_faces_mode=%s",
+                query,
+                namespace,
+                top_k,
+                include_faces,
+                include_faces_mode,
+            )
 
             # Call search directly on the service instance (no RPC, no cross-app call)
-            results = self.search_service._search_internal(query, namespace, top_k)
+            results = self.search_service._search_internal(
+                query=query,
+                namespace=namespace,
+                top_k=top_k,
+                include_faces=include_faces,
+                include_faces_mode=include_faces_mode,
+            )
 
             t_done = time.perf_counter()
             logger.info(f"[Search] Found {len(results)} results in {t_done - t_start:.3f}s")

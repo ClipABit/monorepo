@@ -45,7 +45,11 @@ def get_dev_image() -> modal.Image:
             "tokenizers",
             "firebase-admin",
             "pyjwt[crypto]",
-            "requests"
+            "requests",
+            "deepface",
+            "tf-keras>=2.20.1",
+            "mediapipe",
+            "scikit-learn",
         )
         .run_function(_download_clip_full_model_for_dev)
         .run_function(_export_clip_text_to_onnx)
@@ -58,7 +62,8 @@ def get_dev_image() -> modal.Image:
             "shared",
             "preprocessing",
             "search",
-            "services"
+            "services",
+            "face_recognition",
         )
     )
 
@@ -88,6 +93,7 @@ def get_server_image() -> modal.Image:
             "auth",
             "shared",
             "services",
+            "face_recognition",
         )
     )
 
@@ -207,6 +213,7 @@ def get_search_image() -> modal.Image:
             "search",
             "shared",
             "services",
+            "face_recognition",
         )
     )
 
@@ -241,6 +248,10 @@ def get_processing_image() -> modal.Image:
             "numpy",
             "pinecone",
             "boto3",
+            "deepface",
+            "tf-keras>=2.20.1",
+            "mediapipe",
+            "scikit-learn",
         )
         .run_function(_download_clip_full_model)
         .add_local_python_source(
@@ -249,6 +260,7 @@ def get_processing_image() -> modal.Image:
             "embeddings",
             "models",
             "shared",
-            "services"
+            "services",
+            "face_recognition",
         )
     )

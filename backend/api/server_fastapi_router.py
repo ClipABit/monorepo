@@ -4,7 +4,7 @@ import logging
 import uuid
 
 import modal
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,8 @@ class ServerFastAPIRouter:
         self.router.add_api_route("/videos", self.list_videos, methods=["GET"])
         self.router.add_api_route("/videos/{hashed_identifier}", self.delete_video, methods=["DELETE"], dependencies=auth)
         self.router.add_api_route("/cache/clear", self.clear_cache, methods=["POST"], dependencies=auth)
+        self.router.add_api_route("/faces", self.list_faces, methods=["GET"], dependencies=auth)
+        self.router.add_api_route("/faces", self.update_face, methods=["POST"], dependencies=auth)
 
     async def health(self):
         """
@@ -261,5 +263,74 @@ class ServerFastAPIRouter:
             }
         except Exception as e:
             logger.error(f"[Clear Cache] Error clearing cache: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def list_faces(self, namespace: str = "__default__"):
+        """
+        List all face metadata for a specific user (namespace).
+        Returns a list of face objects containing face_id, image identifier, and a presigned URL to view the image.
+        """
+        logger.info(f"[List Faces] Fetching faces for namespace: {namespace}")
+
+        try:
+            face_docs = self.server_instance.face_metadata_repository.list_face_metadata(namespace)
+
+            faces_out: list[dict] = []
+            for meta in face_docs:
+                face_id = meta.get("face_id")
+                image_identifier = meta.get("image_url")
+                given_name = meta.get("given_name") if meta.get("given_name") is not None else None
+
+                presigned = None
+                try:
+                    if image_identifier:
+                        presigned = self.server_instance.r2_connector.generate_presigned_url(image_identifier)
+                except Exception as e:
+                    logger.warning(f"[List Faces] Failed to generate presigned url for {image_identifier}: {e}")
+
+                faces_out.append({
+                    "face_id": face_id,
+                    "image_identifier": image_identifier,
+                    "presigned_url": presigned,
+                    "given_name": given_name,
+                })
+
+            return {
+                "status": "success",
+                "namespace": namespace,
+                "faces": faces_out,
+            }
+        except Exception as e:
+            logger.error(f"[List Faces] Error fetching faces: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def update_face(self, payload: dict = Body(...)):
+        """
+        Update face metadata for a given user and face_id. Expects JSON body with keys:
+        - namespace: user id / namespace
+        - face_id: id of the face to update
+        - given_name: new given name (can be None or empty string)
+        """
+        try:
+            namespace = payload.get("namespace", "")
+            face_id = payload.get("face_id")
+            given_name = payload.get("given_name")
+
+            if not face_id:
+                raise HTTPException(status_code=400, detail="Missing 'face_id' in request body")
+
+            ok = self.server_instance.face_metadata_repository.update_face_metadata(
+                namespace,
+                face_id,
+                {"given_name": given_name},
+            )
+            if not ok:
+                raise HTTPException(status_code=500, detail="Failed to update face metadata")
+
+            return {"status": "success", "face_id": face_id, "given_name": given_name}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[Update Face] Error updating face metadata: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 

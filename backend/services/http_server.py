@@ -23,6 +23,7 @@ class ServerService:
         from database.r2_connector import R2Connector
         from database.firebase.user_store_connector import UserStoreConnector
         from auth.auth_connector import AuthConnector
+        from face_recognition import FaceMetadataRepository
 
         env = get_environment()
         logger.info(f"[{self.__class__.__name__}] Starting up in '{env}' environment")
@@ -63,6 +64,7 @@ class ServerService:
             environment=env
         )
         self.user_store = UserStoreConnector(firestore_client=firestore_client)
+        self.face_metadata_repository = FaceMetadataRepository(firestore_client)
         self.auth_connector = AuthConnector(
             domain=get_env_var("AUTH0_DOMAIN"),
             audience=get_env_var("AUTH0_AUDIENCE"),
