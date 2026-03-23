@@ -9,9 +9,11 @@ Separates dependencies to minimize cold start times:
 
 import modal
 
+
 def _download_clip_full_model_for_dev():
     """Pre-download full CLIP model for video processing at image build time."""
     from transformers import CLIPModel, CLIPProcessor
+
     model_name = "openai/clip-vit-base-patch32"
     # Full model for video processing
     CLIPModel.from_pretrained(model_name)
@@ -45,7 +47,8 @@ def get_dev_image() -> modal.Image:
             "tokenizers",
             "firebase-admin",
             "pyjwt[crypto]",
-            "requests"
+            "requests",
+            "slowapi",
         )
         .run_function(_download_clip_full_model_for_dev)
         .run_function(_export_clip_text_to_onnx)
@@ -58,9 +61,10 @@ def get_dev_image() -> modal.Image:
             "shared",
             "preprocessing",
             "search",
-            "services"
+            "services",
         )
     )
+
 
 def get_server_image() -> modal.Image:
     """
@@ -79,7 +83,8 @@ def get_server_image() -> modal.Image:
             "numpy",
             "firebase-admin",
             "pyjwt[crypto]",
-            "requests"
+            "requests",
+            "slowapi",
         )
         .add_local_python_source(
             "database",
@@ -90,6 +95,7 @@ def get_server_image() -> modal.Image:
             "services",
         )
     )
+
 
 def _export_clip_text_to_onnx():
     """
@@ -131,13 +137,15 @@ def _export_clip_text_to_onnx():
         dynamic_axes={
             "input_ids": {0: "batch_size", 1: "sequence_length"},
             "attention_mask": {0: "batch_size", 1: "sequence_length"},
-            "text_embeds": {0: "batch_size"}
+            "text_embeds": {0: "batch_size"},
         },
         opset_version=14,
         do_constant_folding=True,
     )
 
-    print(f"[BUILD TIME] ONNX model saved: {os.path.getsize(onnx_path) / 1024 / 1024:.1f} MB")
+    print(
+        f"[BUILD TIME] ONNX model saved: {os.path.getsize(onnx_path) / 1024 / 1024:.1f} MB"
+    )
 
     # Save the fast tokenizer
     print(f"[BUILD TIME] Saving tokenizer to: {tokenizer_path}")
@@ -149,13 +157,12 @@ def _export_clip_text_to_onnx():
     import onnxruntime as ort
     import numpy as np
 
-    session = ort.InferenceSession(onnx_path, providers=['CPUExecutionProvider'])
+    session = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
     test_input_ids = np.random.randint(0, 49408, (1, 77), dtype=np.int64)
     test_attention_mask = np.ones((1, 77), dtype=np.int64)
-    outputs = session.run(None, {
-        "input_ids": test_input_ids,
-        "attention_mask": test_attention_mask
-    })
+    outputs = session.run(
+        None, {"input_ids": test_input_ids, "attention_mask": test_attention_mask}
+    )
 
     print(f"[BUILD TIME] ✓ ONNX model verified! Output shape: {outputs[0].shape}")
     print("[BUILD TIME] ✓ Export complete!")
@@ -199,6 +206,7 @@ def get_search_image() -> modal.Image:
             "pyjwt[crypto]",
             "requests",
             "firebase-admin",
+            "slowapi",
         )
         .add_local_python_source(
             "api",
@@ -210,9 +218,11 @@ def get_search_image() -> modal.Image:
         )
     )
 
+
 def _download_clip_full_model():
     """Pre-download full CLIP model (vision + text) at image build time."""
     from transformers import CLIPModel, CLIPProcessor
+
     model_name = "openai/clip-vit-base-patch32"
     CLIPModel.from_pretrained(model_name)
     CLIPProcessor.from_pretrained(model_name, use_fast=True)
@@ -221,10 +231,10 @@ def _download_clip_full_model():
 def get_processing_image() -> modal.Image:
     """
     Create the Modal image for the Processing app.
-    
+
     Heavy dependencies for video processing pipeline.
     Includes: ffmpeg, opencv, scenedetect, full CLIP model, etc.
-    
+
     Pre-downloads the model at build time to eliminate cold start downloads.
     """
     return (
@@ -241,14 +251,10 @@ def get_processing_image() -> modal.Image:
             "numpy",
             "pinecone",
             "boto3",
+            "slowapi",
         )
         .run_function(_download_clip_full_model)
         .add_local_python_source(
-            "database",
-            "preprocessing",
-            "embeddings",
-            "models",
-            "shared",
-            "services"
+            "database", "preprocessing", "embeddings", "models", "shared", "services"
         )
     )

@@ -28,4 +28,5 @@ app = modal.App(
 )
 
 # Register ProcessingService with this app
-app.cls(cpu=4.0, memory=4096, timeout=600)(ProcessingService)
+# GPU dramatically speeds up CLIP embeddings (~10x faster: 20-50s → 2-5s per video)
+app.cls(cpu=2.0, gpu="T4", memory=8192, timeout=3600)(ProcessingService)
