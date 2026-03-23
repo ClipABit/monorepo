@@ -40,11 +40,12 @@ class ServerFastAPIRouter:
         self.processing_service_cls = processing_service_cls
         self.router = APIRouter()
 
-        # Initialize UploadHandler with process_video spawn function
+        # Initialize UploadHandler with process_video spawn and remote functions
         from services.upload_handler import UploadHandler
         self.upload_handler = UploadHandler(
             job_store=server_instance.job_store,
-            process_video_spawn_fn=self._get_process_video_spawn_fn()
+            process_video_spawn_fn=self._get_process_video_spawn_fn(),
+            process_video_remote_fn=self._get_process_video_remote_fn(),
         )
 
         self._register_routes()
@@ -82,6 +83,33 @@ class ServerFastAPIRouter:
                 raise
 
         return spawn_process_video
+
+    def _get_process_video_remote_fn(self):
+        """
+        Create a blocking remote function for sequential batch processing.
+        Uses .remote() instead of .spawn() so each video completes before the next starts.
+        """
+        def remote_process_video(video_bytes: bytes, filename: str, job_id: str, namespace: str, parent_batch_id: str | None):
+            try:
+                if self.processing_service_cls:
+                    return self.processing_service_cls().process_video_background.remote(
+                        video_bytes, filename, job_id, namespace, parent_batch_id
+                    )
+                from shared.config import get_modal_environment
+                processing_app_name = f"{self.environment}-processing"
+                ProcessingService = modal.Cls.from_name(
+                    processing_app_name,
+                    "ProcessingService",
+                    environment_name=get_modal_environment()
+                )
+                return ProcessingService().process_video_background.remote(
+                    video_bytes, filename, job_id, namespace, parent_batch_id
+                )
+            except Exception as e:
+                logger.error(f"[Upload] Failed to process video {job_id}: {e}")
+                raise
+
+        return remote_process_video
 
     def _register_routes(self):
         """Registers all the FastAPI routes."""

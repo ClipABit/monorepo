@@ -1,8 +1,9 @@
 """Upload validation and orchestration service."""
 
+import asyncio
 import logging
 import uuid
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 from fastapi import UploadFile, HTTPException
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,12 @@ class UploadHandler:
     MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB in bytes
     MAX_BATCH_SIZE = 200
 
-    def __init__(self, job_store, process_video_spawn_fn):
+    def __init__(
+        self,
+        job_store,
+        process_video_spawn_fn: Callable,
+        process_video_remote_fn: Optional[Callable] = None,
+    ):
         """
         Initialize upload handler.
 
@@ -45,9 +51,12 @@ class UploadHandler:
             process_video_spawn_fn: Callable that spawns async video processing
                 For dev mode: ProcessingService().process_video_background.spawn
                 For prod mode: modal.Cls.from_name(...).process_video_background.spawn
+            process_video_remote_fn: Callable that runs video processing synchronously (batch uploads).
+                Uses .remote() to process one video at a time. If None, batch falls back to spawn.
         """
         self.job_store = job_store
         self.process_video_spawn = process_video_spawn_fn
+        self.process_video_remote = process_video_remote_fn or process_video_spawn_fn
 
     def validate_file(
         self, file: UploadFile, file_contents: Optional[bytes] = None
@@ -202,8 +211,9 @@ class UploadHandler:
                 f"[Batch {batch_job_id}] Created batch with {len(validated)} videos"
             )
 
-            # Process files one at a time (read, validate size, spawn, discard)
-            spawned, total_size = [], 0
+            # Process files one at a time (read, validate, process sequentially with .remote())
+            processed, total_size = [], 0
+            remote_fn = self.process_video_remote
 
             for meta in validated:
                 try:
@@ -214,7 +224,7 @@ class UploadHandler:
 
                     total_size += len(contents)
 
-                    # Create job and spawn processing
+                    # Create job
                     self.job_store.create_job(
                         meta["job_id"],
                         {
@@ -229,14 +239,39 @@ class UploadHandler:
                         },
                     )
 
-                    self.process_video_spawn(
+                    # Run processing synchronously to avoid blocking the event loop
+                    result = await asyncio.to_thread(
+                        remote_fn,
                         contents,
                         meta["file"].filename,
                         meta["job_id"],
                         namespace,
                         batch_job_id,
                     )
-                    spawned.append(meta["job_id"])
+                    if isinstance(result, dict) and result.get("status") == "completed":
+                        processed.append(meta["job_id"])
+
+                except asyncio.CancelledError:
+                    logger.warning(
+                        f"[Batch {batch_job_id}] Request cancelled by client (was processing {meta['file'].filename})"
+                    )
+                    try:
+                        self.job_store.set_job_failed(
+                            meta["job_id"], "Request cancelled by client"
+                        )
+                        self.job_store.update_batch_on_child_completion(
+                            batch_job_id,
+                            meta["job_id"],
+                            {
+                                "job_id": meta["job_id"],
+                                "status": "failed",
+                                "filename": meta["file"].filename,
+                                "error": "Request cancelled by client",
+                            },
+                        )
+                    except Exception as ue:
+                        logger.error(f"[Batch {batch_job_id}] Cleanup on cancel failed: {ue}")
+                    raise
 
                 except Exception as e:
                     logger.error(
@@ -267,28 +302,31 @@ class UploadHandler:
                     except Exception as ue:
                         logger.error(f"[Batch {batch_job_id}] Update failed: {ue}")
 
-            if not spawned:
+            if not processed:
                 raise HTTPException(
                     status_code=500, detail="All videos failed to process"
                 )
 
             logger.info(
-                f"[Batch {batch_job_id}] Spawned {len(spawned)}/{len(validated)} videos, "
+                f"[Batch {batch_job_id}] Processed {len(processed)}/{len(validated)} videos sequentially, "
                 f"{total_size / 1024 / 1024:.2f} MB"
             )
 
             return {
                 "batch_job_id": batch_job_id,
-                "status": "processing",
+                "status": "completed" if len(processed) == len(validated) else "partial",
                 "total_submitted": len(files),
                 "failed_validation": len(files) - len(validated),
                 "total_videos": len(validated),
-                "successfully_spawned": len(spawned),
-                "failed_at_upload": len(validated) - len(spawned),
-                "message": "Batch upload complete, videos processing in background",
+                "successfully_processed": len(processed),
+                "failed_at_processing": len(validated) - len(processed),
+                "message": "Batch upload complete, videos processed sequentially",
             }
 
         except HTTPException:
+            raise
+        except asyncio.CancelledError:
+            logger.warning(f"[Batch {batch_job_id}] Request cancelled by client")
             raise
         except Exception as e:
             logger.error(f"[Batch {batch_job_id}] Batch upload failed: {e}")

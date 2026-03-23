@@ -185,6 +185,9 @@ def mock_modal_lookup():
             return FakeServiceClass(fake_process_fn)
         raise ValueError(f"Unknown app: {app_name}, class: {class_name}")
 
+    # Batch uses .remote() (sequential); remote must return success shape
+    fake_process_fn.remote_return_value = {"status": "completed", "job_id": "", "filename": ""}
+
     # Mock modal.Cls.from_name
     with patch.object(modal.Cls, "from_name", side_effect=lookup_side_effect):
         yield {
@@ -282,11 +285,11 @@ def test_batch_upload_creates_batch_job_and_spawns_children(
     assert resp.status_code == 200
     data = resp.json()
 
-    # Check batch response
-    assert data["status"] == "processing"
+    # Check batch response (sequential processing completes before return)
+    assert data["status"] == "completed"
     assert "batch_job_id" in data
     assert data["total_videos"] == 3
-    assert data["successfully_spawned"] == 3
+    assert data["successfully_processed"] == 3
     assert data["failed_validation"] == 0
 
     batch_job_id = data["batch_job_id"]
@@ -298,11 +301,11 @@ def test_batch_upload_creates_batch_job_and_spawns_children(
     assert batch_job["job_type"] == "batch"
     assert len(batch_job["child_job_ids"]) == 3
 
-    # All child jobs spawned
-    assert len(mock_fns["process_fn"].spawn_calls) == 3
+    # All child jobs processed sequentially via .remote()
+    assert len(mock_fns["process_fn"].remote_calls) == 3
 
     # Check each child job was created and linked to batch
-    for i, call_args in enumerate(mock_fns["process_fn"].spawn_calls):
+    for i, call_args in enumerate(mock_fns["process_fn"].remote_calls):
         filename = call_args[1]
         job_id = call_args[2]
         namespace = call_args[3]
@@ -336,10 +339,10 @@ def test_batch_upload_with_validation_failures(
     assert data["total_submitted"] == 3
     assert data["failed_validation"] == 1
     assert data["total_videos"] == 2
-    assert data["successfully_spawned"] == 2
+    assert data["successfully_processed"] == 2
 
-    # Only 2 spawns for valid files
-    assert len(mock_fns["process_fn"].spawn_calls) == 2
+    # Only 2 remote calls for valid files (sequential batch)
+    assert len(mock_fns["process_fn"].remote_calls) == 2
 
 
 def test_batch_upload_rejects_empty_list(
