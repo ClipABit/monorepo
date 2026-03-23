@@ -253,24 +253,8 @@ class UploadHandler:
 
                 except asyncio.CancelledError:
                     logger.warning(
-                        f"[Batch {batch_job_id}] Request cancelled by client (was processing {meta['file'].filename})"
+                        f"[Batch {batch_job_id}] Request cancelled by client (processing of {meta['file'].filename} continues in background)"
                     )
-                    try:
-                        self.job_store.set_job_failed(
-                            meta["job_id"], "Request cancelled by client"
-                        )
-                        self.job_store.update_batch_on_child_completion(
-                            batch_job_id,
-                            meta["job_id"],
-                            {
-                                "job_id": meta["job_id"],
-                                "status": "failed",
-                                "filename": meta["file"].filename,
-                                "error": "Request cancelled by client",
-                            },
-                        )
-                    except Exception as ue:
-                        logger.error(f"[Batch {batch_job_id}] Cleanup on cancel failed: {ue}")
                     raise
 
                 except Exception as e:
