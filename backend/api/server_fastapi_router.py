@@ -88,21 +88,22 @@ class ServerFastAPIRouter:
         """
         Create a blocking remote function for sequential batch processing.
         Uses .remote() instead of .spawn() so each video completes before the next starts.
+        Resolves ProcessingService once at construction to avoid per-video lookup latency.
         """
+        if self.processing_service_cls:
+            processing_cls = self.processing_service_cls
+        else:
+            from shared.config import get_modal_environment
+            processing_app_name = f"{self.environment}-processing"
+            processing_cls = modal.Cls.from_name(
+                processing_app_name,
+                "ProcessingService",
+                environment_name=get_modal_environment()
+            )
+
         def remote_process_video(video_bytes: bytes, filename: str, job_id: str, namespace: str, parent_batch_id: str | None):
             try:
-                if self.processing_service_cls:
-                    return self.processing_service_cls().process_video_background.remote(
-                        video_bytes, filename, job_id, namespace, parent_batch_id
-                    )
-                from shared.config import get_modal_environment
-                processing_app_name = f"{self.environment}-processing"
-                ProcessingService = modal.Cls.from_name(
-                    processing_app_name,
-                    "ProcessingService",
-                    environment_name=get_modal_environment()
-                )
-                return ProcessingService().process_video_background.remote(
+                return processing_cls().process_video_background.remote(
                     video_bytes, filename, job_id, namespace, parent_batch_id
                 )
             except Exception as e:
