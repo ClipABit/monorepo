@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import uuid
-from typing import Callable, Optional, Tuple
+from typing import Optional, Tuple
 from fastapi import UploadFile, HTTPException
 
 logger = logging.getLogger(__name__)
@@ -40,23 +40,23 @@ class UploadHandler:
     def __init__(
         self,
         job_store,
-        process_video_spawn_fn: Callable,
-        process_video_remote_fn: Optional[Callable] = None,
+        process_video_spawn_fn,
+        process_video_remote_fn,
     ):
         """
         Initialize upload handler.
 
         Args:
             job_store: JobStoreConnector instance for job tracking and status updates
-            process_video_spawn_fn: Callable that spawns async video processing
+            process_video_spawn_fn: Callable that spawns async video processing for single uploads
                 For dev mode: ProcessingService().process_video_background.spawn
                 For prod mode: modal.Cls.from_name(...).process_video_background.spawn
-            process_video_remote_fn: Callable that runs video processing synchronously (batch uploads).
-                Uses .remote() to process one video at a time. If None, batch falls back to spawn.
+            process_video_remote_fn: Callable that runs video processing synchronously for batch uploads
+                Uses .remote() - blocks until complete, returns dict with status
         """
         self.job_store = job_store
         self.process_video_spawn = process_video_spawn_fn
-        self.process_video_remote = process_video_remote_fn or process_video_spawn_fn
+        self.process_video_remote = process_video_remote_fn
 
     def validate_file(
         self, file: UploadFile, file_contents: Optional[bytes] = None
