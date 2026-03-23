@@ -372,12 +372,13 @@ def processing_service(mocker):
         service = processing_app.ProcessingService()
         
         # Mock all the components that would be set in startup()
-        service.r2_connector = mocker.MagicMock()
+        # Note: No r2_connector — processing pipeline doesn't use R2
         service.pinecone_connector = mocker.MagicMock()
         service.preprocessor = mocker.MagicMock()
         service.video_embedder = mocker.MagicMock()
         service.job_store = mocker.MagicMock()
-        
+        service.user_store = mocker.MagicMock()
+
         yield service
 
 

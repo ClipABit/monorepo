@@ -251,6 +251,9 @@ def get_processing_image() -> modal.Image:
             "pinecone",
             "boto3",
             "slowapi",
+            "firebase-admin",
+            "pyjwt[crypto]",
+            "requests",
         )
         .run_function(_download_clip_full_model)
         .add_local_python_source(

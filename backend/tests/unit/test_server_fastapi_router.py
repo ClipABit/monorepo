@@ -83,19 +83,6 @@ class TestProtectedEndpointsWithFakeAuth:
         # Upload handler handles validation, just check auth didn't block
         assert resp.status_code != 401
 
-    def test_delete_video_returns_ok(self):
-        """Verify /videos/{id} DELETE works with auth."""
-        client, server = _make_client()
-        server.delete_video_background = MagicMock()
-        server.delete_video_background.spawn = MagicMock()
-
-        resp = client.delete(
-            "/videos/abc123",
-            params={"filename": "test.mp4", "namespace": ""},
-            headers=AUTH_HEADERS,
-        )
-        assert resp.status_code == 200
-
     def test_clear_cache_returns_ok(self):
         """Verify /cache/clear works with auth."""
         client, server = _make_client()
@@ -122,11 +109,6 @@ class TestProtectedEndpointsRejectUnauthenticated:
     def test_upload_rejects_no_auth(self, real_auth_client):
         client, _ = real_auth_client
         resp = client.post("/upload", data={"namespace": ""})
-        assert resp.status_code == 401
-
-    def test_delete_video_rejects_no_auth(self, real_auth_client):
-        client, _ = real_auth_client
-        resp = client.delete("/videos/abc123", params={"filename": "test.mp4"})
         assert resp.status_code == 401
 
     def test_clear_cache_rejects_no_auth(self, real_auth_client):

@@ -24,16 +24,25 @@ class ProcessingService:
         from embeddings.video_embedder import VideoEmbedder
         from database.pinecone_connector import PineconeConnector
         from database.cache.job_store_connector import JobStoreConnector
-        from database.r2_connector import R2Connector
+        from database.firebase.user_store_connector import UserStoreConnector
 
         env = get_environment()
         logger.info(f"[{self.__class__.__name__}] Starting up in '{env}' environment")
 
+        # Initialize Firebase Admin SDK (required for Firestore)
+        import firebase_admin
+        import json
+        from firebase_admin import credentials, firestore
+        firebase_credentials = json.loads(get_env_var("FIREBASE_ADMIN_KEY"))
+        cred = credentials.Certificate(firebase_credentials)
+        try:
+            firebase_admin.initialize_app(cred)
+        except ValueError:
+            pass  # Already initialized
+        firestore_client = firestore.client()
+
         # Get environment variables
         PINECONE_API_KEY = get_env_var("PINECONE_API_KEY")
-        R2_ACCOUNT_ID = get_env_var("R2_ACCOUNT_ID")
-        R2_ACCESS_KEY_ID = get_env_var("R2_ACCESS_KEY_ID")
-        R2_SECRET_ACCESS_KEY = get_env_var("R2_SECRET_ACCESS_KEY")
 
         pinecone_index = get_pinecone_index()
         logger.info(f"[{self.__class__.__name__}] Using Pinecone index: {pinecone_index}")
@@ -53,12 +62,7 @@ class ProcessingService:
             index_name=pinecone_index
         )
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
-        self.r2_connector = R2Connector(
-            account_id=R2_ACCOUNT_ID,
-            access_key_id=R2_ACCESS_KEY_ID,
-            secret_access_key=R2_SECRET_ACCESS_KEY,
-            environment=env
-        )
+        self.user_store = UserStoreConnector(firestore_client=firestore_client)
 
         logger.info(f"[{self.__class__.__name__}] Initialized and ready!")
 
@@ -69,30 +73,26 @@ class ProcessingService:
         filename: str,
         job_id: str,
         namespace: str = "",
-        parent_batch_id: str = None
+        parent_batch_id: str = None,
+        user_id: str = None,
+        hashed_identifier: str = "",
     ):
-        """Process an uploaded video through the full pipeline."""
+        """
+        Process an uploaded video through the full pipeline.
+
+        Video files are not stored server-side — they live on the user's local machine.
+        We only extract embeddings, store vectors in Pinecone, and track metadata.
+        The hashed_identifier is generated client-side by the plugin and passed through.
+        """
         logger.info(
             f"[{self.__class__.__name__}][Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) "
-            f"| namespace='{namespace}' | batch={parent_batch_id or 'None'}"
+            f"| namespace='{namespace}' | batch={parent_batch_id or 'None'} | hash={hashed_identifier or 'None'}"
         )
 
-        hashed_identifier = None
         upserted_chunk_ids = []
 
         try:
-            # Stage 1: Upload original video to R2 bucket
-            success, hashed_identifier = self.r2_connector.upload_video(
-                video_data=video_bytes,
-                filename=filename,
-                namespace=namespace
-            )
-            if not success:
-                upload_error_details = hashed_identifier
-                hashed_identifier = None
-                raise Exception(f"Failed to upload video to R2 storage: {upload_error_details}")
-
-            # Stage 2: Process video through preprocessing pipeline
+            # Stage 1: Process video through preprocessing pipeline
             processed_chunks = self.preprocessor.process_video_from_bytes(
                 video_bytes=video_bytes,
                 video_id=job_id,
@@ -114,7 +114,7 @@ class ProcessingService:
                 f"{total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}"
             )
 
-            # Stage 3-4: Embed frames and store in Pinecone
+            # Stage 2: Embed frames and store in Pinecone
             logger.info(f"[{self.__class__.__name__}][Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
 
             chunk_details = []
@@ -159,6 +159,21 @@ class ProcessingService:
                     "memory_mb": chunk['memory_mb'],
                 })
 
+            # Stage 3: Update vector quota tracking
+            if user_id:
+                chunk_count = len(upserted_chunk_ids)
+                try:
+                    self.user_store.increment_vector_count(user_id, chunk_count)
+                    self.user_store.register_video(user_id, hashed_identifier, chunk_count, filename)
+                    logger.info(
+                        f"[{self.__class__.__name__}][Job {job_id}] Updated quota: +{chunk_count} vectors for user {user_id}"
+                    )
+                except Exception as quota_exc:
+                    logger.critical(
+                        f"[{self.__class__.__name__}][Job {job_id}] CRITICAL: Failed to update vector quota for user {user_id}: {quota_exc}. "
+                        f"Vectors are in Pinecone but quota may be out of sync."
+                    )
+
             result = {
                 "job_id": job_id,
                 "status": "completed",
@@ -173,7 +188,7 @@ class ProcessingService:
 
             logger.info(f"[{self.__class__.__name__}][Job {job_id}] Finished processing {filename}")
 
-            # Stage 5: Store result
+            # Stage 4: Store result
             self.job_store.set_job_completed(job_id, result)
 
             # Update parent batch if exists
@@ -190,22 +205,12 @@ class ProcessingService:
                         f"[{self.__class__.__name__}][Job {job_id}] CRITICAL: Failed to update parent batch {parent_batch_id}"
                     )
 
-            # Invalidate cache
-            try:
-                self.r2_connector.clear_cache(namespace or "__default__")
-            except Exception as cache_exc:
-                logger.error(f"[{self.__class__.__name__}][Job {job_id}] Failed to clear cache: {cache_exc}")
-
             return result
 
         except Exception as e:
             logger.error(f"[{self.__class__.__name__}][Job {job_id}] Processing failed: {e}")
 
-            # Rollback
-            if hashed_identifier:
-                logger.info(f"[{self.__class__.__name__}][Job {job_id}] Rolling back: Deleting video from R2")
-                self.r2_connector.delete_video(hashed_identifier)
-
+            # Rollback: delete any vectors already upserted to Pinecone
             if upserted_chunk_ids:
                 logger.info(f"[{self.__class__.__name__}][Job {job_id}] Rolling back: Deleting chunks from Pinecone")
                 self.pinecone_connector.delete_chunks(upserted_chunk_ids, namespace=namespace)

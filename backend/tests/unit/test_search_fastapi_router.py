@@ -5,6 +5,7 @@ Tests the search API endpoint with mocked SearchService and auth.
 """
 
 from typing import Any, List, Dict
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI, Request
@@ -13,15 +14,31 @@ from fastapi.testclient import TestClient
 from api.search_fastapi_router import SearchFastAPIRouter
 
 
+class FakeUserStore:
+    """Fake UserStoreConnector for testing."""
+
+    def __init__(self, namespace="user_test_ns"):
+        self.namespace = namespace
+
+    def get_or_create_user(self, user_id):
+        return {
+            "user_id": user_id,
+            "namespace": self.namespace,
+            "vector_count": 0,
+            "vector_quota": 10_000,
+        }
+
+
 class FakeSearchService:
     """Fake SearchService for testing the router."""
 
-    def __init__(self, results: List[Dict[str, Any]] | None = None):
+    def __init__(self, results: List[Dict[str, Any]] | None = None, namespace="user_test_ns"):
         self.results = results or []
         self.last_query: str | None = None
         self.last_namespace: str | None = None
         self.last_top_k: int | None = None
         self.should_raise: Exception | None = None
+        self.user_store = FakeUserStore(namespace=namespace)
 
     def _search_internal(self, query: str, namespace: str = "", top_k: int = 10) -> List[Dict[str, Any]]:
         """Mock search implementation."""
@@ -137,19 +154,22 @@ class TestSearchEndpoint:
 
         assert service.last_query == "test query"
 
-    def test_search_with_namespace(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify namespace parameter is passed to service."""
-        client, service = test_client
-        client.get("/search", params={"query": "test", "namespace": "my-namespace"}, headers=AUTH_HEADERS)
-
-        assert service.last_namespace == "my-namespace"
-
-    def test_search_with_default_namespace(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify default namespace is empty string."""
+    def test_search_uses_user_namespace(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify user's namespace from Firestore is used, not client-provided."""
         client, service = test_client
         client.get("/search", params={"query": "test"}, headers=AUTH_HEADERS)
 
-        assert service.last_namespace == ""
+        # Namespace should come from user_store, not client params
+        assert service.last_namespace == "user_test_ns"
+
+    def test_search_ignores_client_namespace_param(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify client-provided namespace param is ignored."""
+        client, service = test_client
+        # Even if client sends a namespace param, the user's assigned namespace is used
+        client.get("/search", params={"query": "test", "namespace": "client-ns"}, headers=AUTH_HEADERS)
+
+        # Should still be user's namespace, not "client-ns"
+        assert service.last_namespace == "user_test_ns"
 
     def test_search_with_top_k(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
         """Verify top_k parameter is passed to service."""
@@ -165,18 +185,18 @@ class TestSearchEndpoint:
 
         assert service.last_top_k == 10
 
-    def test_search_with_all_parameters(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify all parameters are passed correctly."""
-        client, service = test_client
-        client.get("/search", params={
-            "query": "my search",
-            "namespace": "custom-ns",
-            "top_k": 5
-        }, headers=AUTH_HEADERS)
+    def test_search_with_custom_namespace_service(self) -> None:
+        """Verify search uses the namespace from the user's Firestore doc."""
+        service = FakeSearchService(results=list(SAMPLE_RESULTS), namespace="custom-ns")
+        app = FastAPI()
+        router = SearchFastAPIRouter(search_service_instance=service, auth_connector=FakeAuthConnector())
+        app.include_router(router.router)
+        client = TestClient(app)
+
+        client.get("/search", params={"query": "my search"}, headers=AUTH_HEADERS)
 
         assert service.last_query == "my search"
         assert service.last_namespace == "custom-ns"
-        assert service.last_top_k == 5
 
     def test_search_missing_query_returns_error(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
         """Verify missing query parameter returns 422."""
@@ -222,8 +242,9 @@ class TestSearchAuth:
         """Verify search returns 401 without auth header."""
         app = FastAPI()
         from auth.auth_connector import AuthConnector
+        service = FakeSearchService()
         auth = AuthConnector(domain="test.auth0.com", audience="https://test-api")
-        router = SearchFastAPIRouter(search_service_instance=FakeSearchService(), auth_connector=auth)
+        router = SearchFastAPIRouter(search_service_instance=service, auth_connector=auth)
         app.include_router(router.router)
         client = TestClient(app, raise_server_exceptions=False)
 
@@ -234,8 +255,9 @@ class TestSearchAuth:
         """Verify search returns 401 with non-Bearer auth."""
         app = FastAPI()
         from auth.auth_connector import AuthConnector
+        service = FakeSearchService()
         auth = AuthConnector(domain="test.auth0.com", audience="https://test-api")
-        router = SearchFastAPIRouter(search_service_instance=FakeSearchService(), auth_connector=auth)
+        router = SearchFastAPIRouter(search_service_instance=service, auth_connector=auth)
         app.include_router(router.router)
         client = TestClient(app, raise_server_exceptions=False)
 

@@ -96,7 +96,7 @@ class UploadHandler:
 
         return True, ""
 
-    async def handle_single_upload(self, file: UploadFile, namespace: str) -> dict:
+    async def handle_single_upload(self, file: UploadFile, namespace: str, user_id: str = None, hashed_identifier: str = "") -> dict:
         """
         Handle single file upload.
 
@@ -134,10 +134,11 @@ class UploadHandler:
                 "size_bytes": len(contents),
                 "content_type": file.content_type,
                 "namespace": namespace,
+                "user_id": user_id,
             },
         )
 
-        self.process_video_spawn(contents, file.filename, job_id, namespace, None)
+        self.process_video_spawn(contents, file.filename, job_id, namespace, None, user_id, hashed_identifier)
 
         return {
             "job_id": job_id,
@@ -149,7 +150,7 @@ class UploadHandler:
         }
 
     async def handle_batch_upload(
-        self, files: list[UploadFile], namespace: str
+        self, files: list[UploadFile], namespace: str, user_id: str = None, hashed_identifier: str = ""
     ) -> dict:
         """
         Handle batch file upload with streaming and partial failure support.
@@ -226,6 +227,7 @@ class UploadHandler:
                             "size_bytes": len(contents),
                             "content_type": meta["file"].content_type,
                             "namespace": namespace,
+                            "user_id": user_id,
                         },
                     )
 
@@ -235,6 +237,8 @@ class UploadHandler:
                         meta["job_id"],
                         namespace,
                         batch_job_id,
+                        user_id,
+                        "",  # hashed_identifier: not supported for batch uploads yet
                     )
                     spawned.append(meta["job_id"])
 
@@ -299,7 +303,7 @@ class UploadHandler:
                     logger.error(f"[Batch {batch_job_id}] Cleanup failed: {ce}")
             raise HTTPException(status_code=500, detail=f"Batch upload failed: {e}")
 
-    async def handle_upload(self, files: list[UploadFile], namespace: str) -> dict:
+    async def handle_upload(self, files: list[UploadFile], namespace: str, user_id: str = None, hashed_identifier: str = "") -> dict:
         """
         Handle video file upload - auto-detects single or batch mode.
 
@@ -327,8 +331,8 @@ class UploadHandler:
 
         # Single file upload (backward compatible)
         if len(files) == 1:
-            return await self.handle_single_upload(files[0], namespace)
+            return await self.handle_single_upload(files[0], namespace, user_id, hashed_identifier)
 
         # Batch upload
         else:
-            return await self.handle_batch_upload(files, namespace)
+            return await self.handle_batch_upload(files, namespace, user_id, hashed_identifier)

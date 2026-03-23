@@ -74,9 +74,15 @@ class TestGetOrCreateUser:
 
         assert result["user_id"] == "auth0|new456"
         assert "created_at" in result
+        assert "namespace" in result
+        assert result["vector_count"] == 0
+        assert result["vector_quota"] == 10_000
         mock_doc_ref.set.assert_called_once()
         saved_data = mock_doc_ref.set.call_args[0][0]
         assert saved_data["user_id"] == "auth0|new456"
+        assert saved_data["namespace"] == UserStoreConnector.resolve_namespace("auth0|new456")
+        assert saved_data["vector_count"] == 0
+        assert saved_data["vector_quota"] == 10_000
 
     def test_uses_correct_collection_and_document_id(self, connector, mock_firestore):
         """Verify Firestore is queried with correct collection and document ID."""
