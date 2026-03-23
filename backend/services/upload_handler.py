@@ -302,25 +302,32 @@ class UploadHandler:
                     except Exception as ue:
                         logger.error(f"[Batch {batch_job_id}] Update failed: {ue}")
 
-            if not processed:
-                raise HTTPException(
-                    status_code=500, detail="All videos failed to process"
-                )
+            status = (
+                "completed"
+                if len(processed) == len(validated)
+                else "partial"
+                if processed
+                else "failed"
+            )
 
             logger.info(
                 f"[Batch {batch_job_id}] Processed {len(processed)}/{len(validated)} videos sequentially, "
-                f"{total_size / 1024 / 1024:.2f} MB"
+                f"status={status}, {total_size / 1024 / 1024:.2f} MB"
             )
 
             return {
                 "batch_job_id": batch_job_id,
-                "status": "completed" if len(processed) == len(validated) else "partial",
+                "status": status,
                 "total_submitted": len(files),
                 "failed_validation": len(files) - len(validated),
                 "total_videos": len(validated),
                 "successfully_processed": len(processed),
                 "failed_at_processing": len(validated) - len(processed),
-                "message": "Batch upload complete, videos processed sequentially",
+                "message": (
+                    "Batch upload complete, videos processed sequentially"
+                    if processed
+                    else "All videos failed to process; batch job available for status polling"
+                ),
             }
 
         except HTTPException:
