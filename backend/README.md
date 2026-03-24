@@ -27,6 +27,178 @@ Single combined Modal app (`dev_combined.py`) with all three services:
 | **dev-combined** | Server + Search + Processing in one app |
 This allows hot-reload on all services without cross-app lookup issues. Cold start time is acceptable for local development where iteration speed matters more than cold start performance.
 
+## Namespace Pool & Vector Quota System
+
+### Shared Namespace Pool
+
+Users are assigned to a shared pool of **20 Pinecone namespaces** (`ns_00` through `ns_19`). This replaces the old per-user namespace hashing.
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `NAMESPACE_POOL_SIZE` | 20 | Total namespaces in the pool |
+| `MAX_VECTORS_PER_NAMESPACE` | 100,000 | Max vectors per namespace |
+| `MAX_USERS_PER_NAMESPACE` | 10 | Max users sharing a namespace |
+| `DEFAULT_VECTOR_QUOTA` | 10,000 | Per-user vector limit |
+
+**Assignment strategy:** New users are assigned to the namespace with the most remaining vector capacity (even-spread). Once assigned, the binding is permanent.
+
+**Legacy backfill:** Users with old-format namespaces (not starting with `ns_`) are automatically reassigned to the pool on their next authentication.
+
+### Vector Quota Enforcement
+
+Quota is enforced at **two levels** to prevent overspending:
+
+1. **Soft pre-check (upload endpoint):** Before spawning processing, the server checks `user_store.check_quota()`. Returns HTTP 429 if the user is at or over their 10,000 vector limit.
+
+2. **Hard gate (processing service):** Before any Pinecone upserts, the processing service re-checks the quota. If `current_count + new_chunks > quota`, processing aborts and no vectors are written. This catches concurrent uploads that pass the soft check simultaneously.
+
+After successful upserts, vector counts are atomically incremented at both the **user level** and **namespace level** in Firestore using `Increment()`.
+
+### Firestore Data Model
+
+```
+users/{user_id}
+  ├── user_id: string
+  ├── namespace: string          # e.g. "ns_03"
+  ├── vector_count: number       # current vectors stored
+  ├── vector_quota: number       # max allowed (default 10,000)
+  ├── created_at: string
+  └── videos/{hashed_identifier}
+        ├── hashed_identifier: string
+        ├── chunk_count: number
+        ├── filename: string
+        └── created_at: string
+
+namespaces/{ns_id}               # e.g. "ns_00"
+  ├── namespace_id: string
+  ├── vector_count: number       # total vectors across all users
+  └── user_count: number         # users assigned to this namespace
+```
+
+### Search Isolation
+
+Users sharing a namespace are isolated via **metadata filtering**. Every vector upserted to Pinecone includes `user_id` and optionally `project_id` in its metadata. Authenticated search automatically applies:
+
+```json
+{"user_id": {"$eq": "<authenticated_user_id>"}}
+```
+
+The public demo search endpoint (`/demo-search`) uses a hardcoded `web-demo` namespace with no user filter.
+
+## API Endpoints
+
+### Server Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | No | Health check |
+| `GET` | `/status?job_id=` | Yes | Poll job processing status |
+| `GET` | `/quota` | Yes | Get current vector usage and quota |
+| `POST` | `/upload` | Yes | Upload video(s) for processing |
+| `GET` | `/videos` | Yes | List videos in user's namespace |
+| `POST` | `/cache/clear` | Yes | Clear URL cache for user's namespace |
+
+### Search Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | No | Search service health check |
+| `GET` | `/search?query=&top_k=` | Yes | Semantic search (user's namespace, filtered by user_id) |
+| `GET` | `/demo-search?query=&top_k=` | No | Public demo search (rate limited, `web-demo` namespace) |
+
+### Upload Request
+
+```
+POST /upload
+Content-Type: multipart/form-data
+Authorization: Bearer <token>
+
+Form fields:
+  files:              Video file(s) - supports single or batch (up to 200)
+  namespace:          (ignored) Server always uses user's assigned namespace
+  hashed_identifier:  Client-generated hash identifying the video file
+  project_id:         Resolve project identifier for metadata filtering
+```
+
+### Upload Response (single)
+
+```json
+{
+  "job_id": "uuid",
+  "filename": "clip.mp4",
+  "content_type": "video/mp4",
+  "size_bytes": 1234567,
+  "status": "processing",
+  "namespace": "ns_03",
+  "vector_count": 4821,
+  "vector_quota": 10000,
+  "estimated_new_vectors": 30
+}
+```
+
+### Upload Response (batch)
+
+```json
+{
+  "batch_job_id": "batch-uuid",
+  "status": "processing",
+  "total_submitted": 5,
+  "total_videos": 5,
+  "successfully_spawned": 5,
+  "failed_validation": 0,
+  "failed_at_upload": 0,
+  "namespace": "ns_03",
+  "vector_count": 4821,
+  "vector_quota": 10000,
+  "estimated_new_vectors": 0
+}
+```
+
+### Quota Response
+
+```
+GET /quota
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "user_id": "auth0|abc123",
+  "namespace": "ns_03",
+  "vector_count": 4821,
+  "vector_quota": 10000,
+  "vectors_remaining": 5179
+}
+```
+
+### Vector Metadata (stored in Pinecone)
+
+Each vector upserted to Pinecone includes this metadata:
+
+```json
+{
+  "user_id": "auth0|abc123",
+  "project_id": "proj_abc",
+  "file_filename": "clip.mp4",
+  "file_type": "video/mp4",
+  "file_hashed_identifier": "client_hash_xyz",
+  "start_time_s": 0.0,
+  "end_time_s": 5.0,
+  "frame_count": 8,
+  "complexity_score": 0.42
+}
+```
+
+### Processing Pipeline
+
+1. **Preprocessing** — Video is chunked by scene detection, frames extracted with adaptive sampling
+2. **Embedding** — CLIP vision encoder generates 512-dim embeddings per chunk
+3. **Hard quota check** — Re-verifies `current_count + new_chunks <= quota` before any Pinecone writes
+4. **Upsert** — Vectors written to Pinecone in user's assigned namespace with full metadata
+5. **Quota update** — Atomic `Increment()` on both user and namespace Firestore docs
+6. **Video registration** — Chunk count stored in `users/{id}/videos/{hash}` subcollection
+7. **Rollback on failure** — If any upsert fails, all previously upserted vectors are deleted from Pinecone
+
 ## Quick Start
 
 ```bash
@@ -107,6 +279,17 @@ uv run pytest --cov              # With coverage
 ```
 
 Note: Some integration tests require `ffmpeg` to be installed locally.
+
+### Key Test Files
+
+| File | Coverage |
+|------|----------|
+| `test_processing_quota.py` | Hard quota enforcement, increment/decrement, rollback |
+| `test_namespace_pool.py` | Quota rejection (429), multi-user namespace isolation, search filtering, metadata injection |
+| `test_user_store_quota.py` | Namespace assignment, even-spread, quota checks, video registration |
+| `test_user_store_connector.py` | User CRUD, backfill of legacy namespaces |
+| `test_search_fastapi_router.py` | Search endpoint, auth, user namespace resolution |
+| `test_search_namespace.py` | Search user isolation, demo search unchanged |
 
 ## Deployment
 
