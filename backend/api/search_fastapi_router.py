@@ -121,8 +121,9 @@ class SearchFastAPIRouter:
                 f"[Search] Query: '{query}' | namespace='{namespace}' | user={user_id} | top_k={top_k}"
             )
 
-            # Call search directly on the service instance (no RPC, no cross-app call)
-            results = self.search_service._search_internal(query, namespace, top_k)
+            # Filter results to this user only (shared namespace isolation)
+            metadata_filter = {"user_id": {"$eq": user_id}}
+            results = self.search_service._search_internal(query, namespace, top_k, metadata_filter=metadata_filter)
 
             t_done = time.perf_counter()
             logger.info(

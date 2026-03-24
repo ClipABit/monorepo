@@ -378,6 +378,7 @@ def processing_service(mocker):
         service.video_embedder = mocker.MagicMock()
         service.job_store = mocker.MagicMock()
         service.user_store = mocker.MagicMock()
+        service.user_store.check_quota.return_value = (True, 0, 10_000)
 
         yield service
 

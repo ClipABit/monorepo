@@ -48,6 +48,9 @@ class TestProcessingQuota:
         # Setup pinecone to return success
         service.pinecone_connector.upsert_chunk.return_value = True
 
+        # Default: user under quota with room
+        service.user_store.check_quota.return_value = (True, 0, 10_000)
+
         return service
 
     def test_increments_count_after_upsert(self):
@@ -64,7 +67,7 @@ class TestProcessingQuota:
             hashed_identifier="hashed_id_123",
         )
 
-        service.user_store.increment_vector_count.assert_called_once_with("auth0|user1", 1)
+        service.user_store.increment_vector_count.assert_called_once_with("auth0|user1", 1, "user_ns")
 
     def test_registers_video_after_upsert(self):
         """register_video called with hashed_identifier after successful upsert."""
@@ -151,7 +154,7 @@ class TestProcessingQuota:
             hashed_identifier="hashed_id_123",
         )
 
-        service.user_store.increment_vector_count.assert_called_once_with("auth0|user1", 3)
+        service.user_store.increment_vector_count.assert_called_once_with("auth0|user1", 3, "user_ns")
         service.user_store.register_video.assert_called_once_with(
             "auth0|user1", "hashed_id_123", 3, "test.mp4"
         )
@@ -209,3 +212,79 @@ class TestProcessingQuota:
         service.user_store.register_video.assert_called_once_with(
             "auth0|user1", "client_generated_hash_abc", 1, "test.mp4"
         )
+
+    def test_hard_quota_check_blocks_upsert_when_at_limit(self):
+        """Processing aborts before upserting if user is already at quota."""
+        service = self._create_service_with_mocks()
+        service.user_store.check_quota.return_value = (False, 10_000, 10_000)
+
+        result = service.process_video_background(
+            video_bytes=b"fake_video",
+            filename="test.mp4",
+            job_id="job1",
+            namespace="user_ns",
+            parent_batch_id=None,
+            user_id="auth0|user1",
+            hashed_identifier="hash123",
+        )
+
+        assert result["status"] == "failed"
+        assert "quota" in result["error"].lower()
+        service.pinecone_connector.upsert_chunk.assert_not_called()
+        service.user_store.increment_vector_count.assert_not_called()
+
+    def test_hard_quota_check_blocks_when_chunks_would_exceed(self):
+        """Processing aborts if current_count + new_chunks > quota, even if not yet at limit."""
+        service = self._create_service_with_mocks()
+
+        # User at 9,998 with 3 chunks to add = 10,001 > 10,000
+        service.user_store.check_quota.return_value = (True, 9_998, 10_000)
+
+        # Setup 3 chunks
+        mock_chunks = []
+        for i in range(3):
+            mock_chunks.append({
+                "chunk_id": f"job1_chunk_{i:04d}",
+                "frames": [np.zeros((480, 640, 3), dtype=np.uint8)],
+                "metadata": {
+                    "frame_count": 8,
+                    "complexity_score": 0.5,
+                    "timestamp_range": (i * 5.0, (i + 1) * 5.0),
+                    "file_info": {"filename": "test.mp4", "type": "video/mp4", "hashed_identifier": "hash123"},
+                },
+                "memory_mb": 1.0,
+            })
+        service.preprocessor.process_video_from_bytes.return_value = mock_chunks
+
+        result = service.process_video_background(
+            video_bytes=b"fake_video",
+            filename="test.mp4",
+            job_id="job1",
+            namespace="user_ns",
+            parent_batch_id=None,
+            user_id="auth0|user1",
+            hashed_identifier="hash123",
+        )
+
+        assert result["status"] == "failed"
+        assert "exceed quota" in result["error"].lower()
+        service.pinecone_connector.upsert_chunk.assert_not_called()
+
+    def test_hard_quota_check_allows_when_exactly_fitting(self):
+        """Processing proceeds if current_count + new_chunks == quota exactly."""
+        service = self._create_service_with_mocks()
+        # User at 9,999 with 1 chunk = 10,000 == quota, should pass
+        service.user_store.check_quota.return_value = (True, 9_999, 10_000)
+
+        result = service.process_video_background(
+            video_bytes=b"fake_video",
+            filename="test.mp4",
+            job_id="job1",
+            namespace="user_ns",
+            parent_batch_id=None,
+            user_id="auth0|user1",
+            hashed_identifier="hash123",
+        )
+
+        assert result["status"] == "completed"
+        service.pinecone_connector.upsert_chunk.assert_called_once()

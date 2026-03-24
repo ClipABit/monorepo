@@ -40,11 +40,12 @@ class FakeSearchService:
         self.should_raise: Exception | None = None
         self.user_store = FakeUserStore(namespace=namespace)
 
-    def _search_internal(self, query: str, namespace: str = "", top_k: int = 10) -> List[Dict[str, Any]]:
+    def _search_internal(self, query: str, namespace: str = "", top_k: int = 10, metadata_filter: dict = None) -> List[Dict[str, Any]]:
         """Mock search implementation."""
         self.last_query = query
         self.last_namespace = namespace
         self.last_top_k = top_k
+        self.last_metadata_filter = metadata_filter
 
         if self.should_raise:
             raise self.should_raise

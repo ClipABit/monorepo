@@ -363,7 +363,7 @@ def _make_search_app(auth_connector):
         def __init__(self):
             self.user_store = FakeUserStore()
 
-        def _search_internal(self, query, namespace="", top_k=10):
+        def _search_internal(self, query, namespace="", top_k=10, metadata_filter=None):
             return [{"id": "result-1", "score": 0.9, "metadata": {}}]
 
     app = FastAPI()

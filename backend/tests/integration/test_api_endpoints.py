@@ -150,7 +150,7 @@ class FakeUserStore:
     def get_or_create_user(self, user_id):
         return {
             "user_id": user_id,
-            "namespace": "user_test_ns",
+            "namespace": "ns_00",
             "vector_count": 100,
             "vector_quota": 10_000,
         }
@@ -236,13 +236,13 @@ def test_list_videos_returns_data(test_client_internal: Tuple[TestClient, Server
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "success"
-    assert data["namespace"] == "user_test_ns"
+    assert data["namespace"] == "ns_00"
     assert isinstance(data["videos"], list)
     assert data["videos"][0]["file_name"] == "sample.mp4"
     assert data["total_videos"] == 1
     assert data["total_pages"] == 1
     assert data["next_page_token"] is None
-    assert server.r2_connector.last_namespace == "user_test_ns"
+    assert server.r2_connector.last_namespace == "ns_00"
 
 
 def test_status_processing_when_unknown_job(test_client_internal: Tuple[TestClient, ServerStub, dict]) -> None:
@@ -262,7 +262,7 @@ def test_upload_creates_job_and_spawns_processing_app(
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "processing"
-    assert data["namespace"] == "user_test_ns"
+    assert data["namespace"] == "ns_00"
     assert data["vector_count"] == 100
     assert data["vector_quota"] == 10_000
     job_id = data["job_id"]
@@ -274,7 +274,7 @@ def test_upload_creates_job_and_spawns_processing_app(
     # args: (contents, filename, job_id, namespace, parent_batch_id, user_id)
     assert call_args[1] == "clip.mp4"
     assert call_args[2] == job_id
-    assert call_args[3] == "user_test_ns"
+    assert call_args[3] == "ns_00"
     assert call_args[4] is None  # No parent batch
     assert call_args[5] == "test-user-id"
 
@@ -299,7 +299,7 @@ def test_batch_upload_creates_batch_job_and_spawns_children(
     assert data["total_videos"] == 3
     assert data["successfully_spawned"] == 3
     assert data["failed_validation"] == 0
-    assert data["namespace"] == "user_test_ns"
+    assert data["namespace"] == "ns_00"
 
     batch_job_id = data["batch_job_id"]
     assert batch_job_id.startswith("batch-")
@@ -322,7 +322,7 @@ def test_batch_upload_creates_batch_job_and_spawns_children(
         user_id = call_args[5]
 
         assert filename in ["video1.mp4", "video2.mp4", "video3.mp4"]
-        assert namespace == "user_test_ns"
+        assert namespace == "ns_00"
         assert parent_batch_id == batch_job_id
         assert user_id == "test-user-id"
 

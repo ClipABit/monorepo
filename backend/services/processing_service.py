@@ -76,6 +76,7 @@ class ProcessingService:
         parent_batch_id: str = None,
         user_id: str = None,
         hashed_identifier: str = "",
+        project_id: str = "",
     ):
         """
         Process an uploaded video through the full pipeline.
@@ -86,7 +87,7 @@ class ProcessingService:
         """
         logger.info(
             f"[{self.__class__.__name__}][Job {job_id}] Processing started: {filename} ({len(video_bytes)} bytes) "
-            f"| namespace='{namespace}' | batch={parent_batch_id or 'None'} | hash={hashed_identifier or 'None'}"
+            f"| namespace='{namespace}' | batch={parent_batch_id or 'None'} | hash={hashed_identifier or 'None'} | project={project_id or 'None'}"
         )
 
         upserted_chunk_ids = []
@@ -113,6 +114,23 @@ class ProcessingService:
                 f"[{self.__class__.__name__}][Job {job_id}] Complete: {len(processed_chunks)} chunks, "
                 f"{total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}"
             )
+
+            # Hard quota check before upserting any vectors
+            # The upload endpoint does a soft pre-check, but concurrent uploads
+            # could pass that check simultaneously. This is the hard gate.
+            if user_id:
+                is_ok, current_count, vector_quota = self.user_store.check_quota(user_id)
+                total_new = len(processed_chunks)
+                if not is_ok:
+                    raise Exception(
+                        f"Quota exceeded before upsert: {current_count}/{vector_quota} vectors. "
+                        f"Aborting {total_new} chunks."
+                    )
+                if current_count + total_new > vector_quota:
+                    raise Exception(
+                        f"Upload would exceed quota: {current_count} + {total_new} = {current_count + total_new} > {vector_quota}. "
+                        f"Aborting."
+                    )
 
             # Stage 2: Embed frames and store in Pinecone
             logger.info(f"[{self.__class__.__name__}][Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
@@ -141,6 +159,12 @@ class ProcessingService:
                 for k in keys_to_delete:
                     del chunk['metadata'][k]
 
+                # Inject user and project identifiers for search filtering
+                if user_id:
+                    chunk['metadata']['user_id'] = user_id
+                if project_id:
+                    chunk['metadata']['project_id'] = project_id
+
                 success = self.pinecone_connector.upsert_chunk(
                     chunk_id=chunk['chunk_id'],
                     chunk_embedding=embedding.numpy(),
@@ -163,7 +187,7 @@ class ProcessingService:
             if user_id:
                 chunk_count = len(upserted_chunk_ids)
                 try:
-                    self.user_store.increment_vector_count(user_id, chunk_count)
+                    self.user_store.increment_vector_count(user_id, chunk_count, namespace)
                     self.user_store.register_video(user_id, hashed_identifier, chunk_count, filename)
                     logger.info(
                         f"[{self.__class__.__name__}][Job {job_id}] Updated quota: +{chunk_count} vectors for user {user_id}"

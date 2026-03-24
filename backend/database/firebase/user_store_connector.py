@@ -1,8 +1,7 @@
 """
-Firestore-backed user store for JIT user creation, namespace management, and vector quota tracking.
+Firestore-backed user store for JIT user creation, namespace pool management, and vector quota tracking.
 """
 
-import hashlib
 import logging
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
@@ -20,47 +19,114 @@ class UserStoreConnector(FirebaseConnector):
     Firestore wrapper for user records.
 
     Creates user documents on first authentication (JIT provisioning).
-    Manages per-user Pinecone namespaces and vector quota tracking.
+    Assigns users to a shared pool of Pinecone namespaces (ns_00..ns_19).
+    Tracks vector counts at both user and namespace level.
     """
 
     DEFAULT_COLLECTION = "users"
     DEFAULT_VECTOR_QUOTA = 10_000
 
+    NAMESPACE_POOL_SIZE = 20
+    MAX_VECTORS_PER_NAMESPACE = 100_000
+    MAX_USERS_PER_NAMESPACE = 10
+    NAMESPACES_COLLECTION = "namespaces"
+
     def __init__(self, firestore_client, collection: str = DEFAULT_COLLECTION):
         super().__init__(firestore_client)
         self.collection = collection
+        self._namespace_docs_initialized = False
         logger.info(f"Initialized UserStoreConnector with collection: {collection}")
 
-    @staticmethod
-    def resolve_namespace(user_id: str) -> str:
-        """
-        Generate a deterministic, URL-safe Pinecone namespace from a user ID.
+    # ── Namespace pool ──────────────────────────────────────────────
 
-        Uses SHA-256 hash prefix to avoid special characters in Auth0 IDs (|, @, etc.).
+    def _namespace_id(self, index: int) -> str:
+        return f"ns_{index:02d}"
+
+    def _ensure_namespace_docs(self) -> None:
+        """Lazily create the 20 namespace docs if they don't exist yet."""
+        if self._namespace_docs_initialized:
+            return
+        ns_col = self.db.collection(self.NAMESPACES_COLLECTION)
+        for i in range(self.NAMESPACE_POOL_SIZE):
+            ns_id = self._namespace_id(i)
+            doc = ns_col.document(ns_id).get()
+            if not doc.exists:
+                ns_col.document(ns_id).set({
+                    "namespace_id": ns_id,
+                    "vector_count": 0,
+                    "user_count": 0,
+                })
+        self._namespace_docs_initialized = True
+
+    def _assign_namespace(self) -> str:
         """
-        return "user_" + hashlib.sha256(user_id.encode()).hexdigest()[:16]
+        Pick the namespace with the most remaining vector capacity.
+
+        Returns the namespace_id string (e.g. "ns_03").
+        Raises RuntimeError if every namespace is full.
+        """
+        self._ensure_namespace_docs()
+        ns_col = self.db.collection(self.NAMESPACES_COLLECTION)
+
+        best_ns = None
+        best_remaining = -1
+
+        for i in range(self.NAMESPACE_POOL_SIZE):
+            ns_id = self._namespace_id(i)
+            doc = ns_col.document(ns_id).get()
+            data = doc.to_dict() if doc.exists else {"vector_count": 0, "user_count": 0}
+
+            if data.get("user_count", 0) >= self.MAX_USERS_PER_NAMESPACE:
+                continue
+
+            remaining = self.MAX_VECTORS_PER_NAMESPACE - data.get("vector_count", 0)
+            if remaining > best_remaining:
+                best_remaining = remaining
+                best_ns = ns_id
+
+        if best_ns is None:
+            raise RuntimeError("All namespaces are full — no capacity for new users")
+
+        ns_col.document(best_ns).update({"user_count": Increment(1)})
+        logger.info(f"Assigned namespace {best_ns} (remaining capacity ~{best_remaining} vectors)")
+        return best_ns
+
+    # ── User CRUD ───────────────────────────────────────────────────
 
     def get_or_create_user(self, user_id: str) -> Dict[str, Any]:
         """
         Get existing user or create a new one with default fields.
 
-        Returns the user document data.
+        Always guarantees namespace, vector_count, and vector_quota exist.
         """
         doc_ref = self.db.collection(self.collection).document(user_id)
         doc = doc_ref.get()
 
         if doc.exists:
-            return doc.to_dict()
+            user_data = doc.to_dict()
+            updates = {}
+            if not user_data.get("namespace") or not user_data["namespace"].startswith("ns_"):
+                updates["namespace"] = self._assign_namespace()
+            if "vector_count" not in user_data:
+                updates["vector_count"] = 0
+            if "vector_quota" not in user_data:
+                updates["vector_quota"] = self.DEFAULT_VECTOR_QUOTA
+            if updates:
+                doc_ref.update(updates)
+                user_data.update(updates)
+                logger.info(f"Backfilled fields {list(updates.keys())} for user {user_id}")
+            return user_data
 
+        namespace = self._assign_namespace()
         user_data = {
             "user_id": user_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "namespace": self.resolve_namespace(user_id),
+            "namespace": namespace,
             "vector_count": 0,
             "vector_quota": self.DEFAULT_VECTOR_QUOTA,
         }
         doc_ref.set(user_data)
-        logger.info(f"Created new user: {user_id}")
+        logger.info(f"Created new user: {user_id} -> {namespace}")
         return user_data
 
     def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -74,11 +140,11 @@ class UserStoreConnector(FirebaseConnector):
         """Check if a user exists."""
         return self.db.collection(self.collection).document(user_id).get().exists
 
+    # ── Quota ───────────────────────────────────────────────────────
+
     def check_quota(self, user_id: str) -> Tuple[bool, int, int]:
         """
         Check if a user is under their vector quota.
-
-        Handles pre-existing users missing quota fields by treating them as defaults.
 
         Returns:
             (is_under_quota, current_count, quota)
@@ -86,60 +152,53 @@ class UserStoreConnector(FirebaseConnector):
         user_data = self.get_or_create_user(user_id)
         current_count = user_data.get("vector_count", 0)
         quota = user_data.get("vector_quota", self.DEFAULT_VECTOR_QUOTA)
-
-        # Backfill missing fields for pre-existing users
-        updates = {}
-        if "vector_count" not in user_data:
-            updates["vector_count"] = 0
-        if "vector_quota" not in user_data:
-            updates["vector_quota"] = self.DEFAULT_VECTOR_QUOTA
-        if "namespace" not in user_data:
-            updates["namespace"] = self.resolve_namespace(user_id)
-        if updates:
-            self.db.collection(self.collection).document(user_id).update(updates)
-
         return (current_count < quota, current_count, quota)
 
-    def increment_vector_count(self, user_id: str, count: int) -> None:
+    def increment_vector_count(self, user_id: str, count: int, namespace: str = "") -> None:
         """
-        Atomically increment a user's vector count.
-
-        Uses Firestore's server-side Increment to avoid race conditions.
+        Atomically increment vector count at both user and namespace level.
         """
         if count <= 0:
             return
-        doc_ref = self.db.collection(self.collection).document(user_id)
-        doc_ref.update({"vector_count": Increment(count)})
-        logger.info(f"Incremented vector count by {count} for user {user_id}")
+        self.db.collection(self.collection).document(user_id).update(
+            {"vector_count": Increment(count)}
+        )
+        if namespace:
+            self.db.collection(self.NAMESPACES_COLLECTION).document(namespace).update(
+                {"vector_count": Increment(count)}
+            )
+        logger.info(f"Incremented vector count by {count} for user {user_id} (namespace={namespace})")
 
-    def decrement_vector_count(self, user_id: str, count: int) -> None:
+    def decrement_vector_count(self, user_id: str, count: int, namespace: str = "") -> None:
         """
-        Atomically decrement a user's vector count, flooring at 0.
-
-        Uses Firestore's server-side Increment with a negative value.
-        Reads after update to floor at 0 if the result went negative.
+        Atomically decrement vector count at both user and namespace level, flooring at 0.
         """
         if count <= 0:
             return
-        doc_ref = self.db.collection(self.collection).document(user_id)
-        doc_ref.update({"vector_count": Increment(-count)})
 
-        # Floor at 0 to prevent negative counts
-        doc = doc_ref.get()
-        if doc.exists:
-            current = doc.to_dict().get("vector_count", 0)
-            if current < 0:
-                doc_ref.update({"vector_count": 0})
-                logger.warning(f"Floored negative vector count to 0 for user {user_id}")
+        # User-level decrement
+        user_ref = self.db.collection(self.collection).document(user_id)
+        user_ref.update({"vector_count": Increment(-count)})
+        doc = user_ref.get()
+        if doc.exists and doc.to_dict().get("vector_count", 0) < 0:
+            user_ref.update({"vector_count": 0})
+            logger.warning(f"Floored negative vector count to 0 for user {user_id}")
 
-        logger.info(f"Decremented vector count by {count} for user {user_id}")
+        # Namespace-level decrement
+        if namespace:
+            ns_ref = self.db.collection(self.NAMESPACES_COLLECTION).document(namespace)
+            ns_ref.update({"vector_count": Increment(-count)})
+            ns_doc = ns_ref.get()
+            if ns_doc.exists and ns_doc.to_dict().get("vector_count", 0) < 0:
+                ns_ref.update({"vector_count": 0})
+                logger.warning(f"Floored negative vector count to 0 for namespace {namespace}")
+
+        logger.info(f"Decremented vector count by {count} for user {user_id} (namespace={namespace})")
+
+    # ── Video registration ──────────────────────────────────────────
 
     def register_video(self, user_id: str, hashed_identifier: str, chunk_count: int, filename: str) -> None:
-        """
-        Register a processed video in the user's videos subcollection.
-
-        Stores chunk count so we know how many vectors to decrement on deletion.
-        """
+        """Register a processed video in the user's videos subcollection."""
         doc_ref = (
             self.db.collection(self.collection)
             .document(user_id)
@@ -155,11 +214,7 @@ class UserStoreConnector(FirebaseConnector):
         logger.info(f"Registered video {hashed_identifier} ({chunk_count} chunks) for user {user_id}")
 
     def get_video_chunk_count(self, user_id: str, hashed_identifier: str) -> int:
-        """
-        Get the chunk count for a registered video.
-
-        Returns 0 if the video is not found.
-        """
+        """Get the chunk count for a registered video. Returns 0 if not found."""
         doc = (
             self.db.collection(self.collection)
             .document(user_id)
@@ -172,11 +227,7 @@ class UserStoreConnector(FirebaseConnector):
         return 0
 
     def deregister_video(self, user_id: str, hashed_identifier: str) -> None:
-        """
-        Remove a video from the user's videos subcollection.
-
-        Safe to call even if the video doesn't exist.
-        """
+        """Remove a video from the user's videos subcollection."""
         doc_ref = (
             self.db.collection(self.collection)
             .document(user_id)

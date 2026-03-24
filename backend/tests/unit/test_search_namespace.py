@@ -57,7 +57,7 @@ class TestSearchUsesUserNamespace:
 
     @pytest.mark.asyncio
     async def test_search_uses_user_namespace(self, router, mock_search_service, mock_auth_connector):
-        """Authenticated search resolves namespace from user doc."""
+        """Authenticated search resolves namespace from user doc and filters by user_id."""
         request = _make_mock_request()
 
         await router.search(request, query="cat on a table", top_k=5)
@@ -65,12 +65,14 @@ class TestSearchUsesUserNamespace:
         # Verify auth was called
         mock_auth_connector.assert_called_once_with(request)
 
-        # Verify search used user's namespace, not client-provided
+        # Verify search used user's namespace with user_id metadata filter
         mock_search_service._search_internal.assert_called_once()
         call_args = mock_search_service._search_internal.call_args[0]
+        call_kwargs = mock_search_service._search_internal.call_args[1]
         assert call_args[0] == "cat on a table"  # query
         assert call_args[1] == "user_abc123"  # namespace from user doc
         assert call_args[2] == 5  # top_k
+        assert call_kwargs["metadata_filter"] == {"user_id": {"$eq": "auth0|user1"}}
 
     @pytest.mark.asyncio
     async def test_search_response_structure(self, router, mock_search_service):
@@ -99,13 +101,16 @@ class TestDemoSearchUnchanged:
 
     @pytest.mark.asyncio
     async def test_demo_search_uses_web_demo(self, router, mock_search_service):
-        """Demo search uses hardcoded web-demo namespace."""
+        """Demo search uses hardcoded web-demo namespace with no metadata filter."""
         request = _make_mock_request()
 
         await router.demo_search(request, query="sunset", top_k=5)
 
         call_args = mock_search_service._search_internal.call_args[0]
         assert call_args[1] == "web-demo"  # namespace
+        # Demo search should NOT pass metadata_filter
+        call_kwargs = mock_search_service._search_internal.call_args[1] or {}
+        assert "metadata_filter" not in call_kwargs
 
     @pytest.mark.asyncio
     async def test_demo_search_no_auth(self, router, mock_auth_connector):

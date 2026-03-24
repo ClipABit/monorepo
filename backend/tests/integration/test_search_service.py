@@ -28,11 +28,13 @@ class FakePineconeConnector:
         self,
         query_embedding: np.ndarray,
         namespace: str = "",
-        top_k: int = 5
+        top_k: int = 5,
+        filter: dict = None,
     ) -> List[Dict[str, Any]]:
         self.last_query_embedding = query_embedding
         self.last_namespace = namespace
         self.last_top_k = top_k
+        self.last_filter = filter
         return self.matches
 
 

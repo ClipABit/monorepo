@@ -115,11 +115,12 @@ class SearchService:
         """Expose FastAPI app as ASGI endpoint."""
         return self.fastapi_app
 
-    def _search_internal(self, query: str, namespace: str = "", top_k: int = 10) -> list:
+    def _search_internal(self, query: str, namespace: str = "", top_k: int = 10, metadata_filter: dict = None) -> list:
         """
         Internal search implementation.
 
         Called directly by the FastAPI router (no RPC overhead).
+        metadata_filter is passed through to Pinecone for user-level isolation in shared namespaces.
         """
         logger.info(f"[{self.__class__.__name__}] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
 
@@ -130,7 +131,8 @@ class SearchService:
         matches = self.pinecone_connector.query_chunks(
             query_embedding=query_embedding,
             namespace=namespace,
-            top_k=top_k
+            top_k=top_k,
+            filter=metadata_filter
         )
 
         # Format results with presigned URLs
