@@ -10,10 +10,9 @@ Covers:
 """
 
 import io
-import pytest
 import numpy as np
-from unittest.mock import MagicMock, AsyncMock, patch
-from fastapi import FastAPI, Request
+from unittest.mock import MagicMock, AsyncMock
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.server_fastapi_router import ServerFastAPIRouter

@@ -3,7 +3,6 @@ __all__ = ["ServerFastAPIRouter"]
 import asyncio
 import logging
 import math
-import uuid
 
 import modal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile

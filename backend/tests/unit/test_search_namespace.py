@@ -6,7 +6,7 @@ and demo search continues to use the hardcoded web-demo namespace.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from fastapi import Request
 
 from api.search_fastapi_router import SearchFastAPIRouter

@@ -3,7 +3,7 @@ Extensive tests for UserStoreConnector quota, namespace pool, and video registra
 """
 
 import pytest
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
 from database.firebase.user_store_connector import UserStoreConnector
 

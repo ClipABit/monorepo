@@ -5,7 +5,7 @@ Tests JIT user creation, retrieval, and existence checks.
 """
 
 import pytest
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 from datetime import datetime
 
 from database.firebase.user_store_connector import UserStoreConnector

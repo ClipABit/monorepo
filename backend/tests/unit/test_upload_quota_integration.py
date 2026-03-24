@@ -5,8 +5,8 @@ Verifies user_id threading, quota checking, namespace override, and response enr
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi import HTTPException, UploadFile
+from unittest.mock import AsyncMock, MagicMock
+from fastapi import UploadFile
 
 from services.upload_handler import UploadHandler
 
@@ -104,7 +104,7 @@ class TestUploadNullUserId:
         """Handles None user_id without error."""
         file = _make_upload_file()
 
-        result = await handler.handle_single_upload(file, "ns")
+        await handler.handle_single_upload(file, "ns")
 
         mock_spawn.assert_called_once()
         assert mock_spawn.call_args[0][5] is None

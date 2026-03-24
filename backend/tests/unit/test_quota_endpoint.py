@@ -5,7 +5,7 @@ Verifies it returns user namespace, vector count, quota, and remaining vectors.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from fastapi import Request
 
 from api.server_fastapi_router import ServerFastAPIRouter

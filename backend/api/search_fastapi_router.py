@@ -10,7 +10,7 @@ __all__ = ["SearchFastAPIRouter", "limiter"]
 import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 

@@ -4,7 +4,6 @@ Tests for delete flow vector quota decrement.
 Verifies that vector count is decremented and video deregistered on successful deletion.
 """
 
-import pytest
 from unittest.mock import MagicMock
 
 

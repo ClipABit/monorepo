@@ -5,8 +5,7 @@ Verifies that vector count is incremented and video is registered after successf
 and that no increment happens on failure or when user_id is None.
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 import numpy as np
 
 
