@@ -132,7 +132,7 @@ class TestQuotaExceeded:
         """User at exactly 10,000 gets 429."""
         client, _ = self._make_client(10_000)
         files = [("files", ("clip.mp4", io.BytesIO(b"fake"), "video/mp4"))]
-        resp = client.post("/upload", files=files, data={"namespace": "x"}, headers=AUTH_HEADERS)
+        resp = client.post("/upload", files=files, data={"namespace": "x", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
         assert resp.status_code == 429
         assert "quota" in resp.json()["detail"].lower()
 
@@ -140,14 +140,14 @@ class TestQuotaExceeded:
         """User over 10,000 gets 429."""
         client, _ = self._make_client(12_000)
         files = [("files", ("clip.mp4", io.BytesIO(b"fake"), "video/mp4"))]
-        resp = client.post("/upload", files=files, data={"namespace": "x"}, headers=AUTH_HEADERS)
+        resp = client.post("/upload", files=files, data={"namespace": "x", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
         assert resp.status_code == 429
 
     def test_allows_under_limit(self):
         """User at 9,999 still gets through."""
         client, fn = self._make_client(9_999)
         files = [("files", ("clip.mp4", io.BytesIO(b"fake"), "video/mp4"))]
-        resp = client.post("/upload", files=files, data={"namespace": "x"}, headers=AUTH_HEADERS)
+        resp = client.post("/upload", files=files, data={"namespace": "x", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
         assert resp.status_code == 200
         assert len(fn.spawn_calls) == 1
 
@@ -158,7 +158,7 @@ class TestQuotaExceeded:
             ("files", ("v1.mp4", io.BytesIO(b"fake1"), "video/mp4")),
             ("files", ("v2.mp4", io.BytesIO(b"fake2"), "video/mp4")),
         ]
-        resp = client.post("/upload", files=files, data={"namespace": "x"}, headers=AUTH_HEADERS)
+        resp = client.post("/upload", files=files, data={"namespace": "x", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
         assert resp.status_code == 429
 
 
@@ -204,14 +204,14 @@ class TestTwoUsersDifferentNamespaces:
         # User A uploads
         current_user["id"] = "user-a"
         files_a = [("files", ("a.mp4", io.BytesIO(b"video-a"), "video/mp4"))]
-        resp_a = client.post("/upload", files=files_a, data={"namespace": ""}, headers=AUTH_HEADERS)
+        resp_a = client.post("/upload", files=files_a, data={"namespace": "", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
         assert resp_a.status_code == 200
         assert resp_a.json()["namespace"] == "ns_00"
 
         # User B uploads
         current_user["id"] = "user-b"
         files_b = [("files", ("b.mp4", io.BytesIO(b"video-b"), "video/mp4"))]
-        resp_b = client.post("/upload", files=files_b, data={"namespace": ""}, headers=AUTH_HEADERS)
+        resp_b = client.post("/upload", files=files_b, data={"namespace": "", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
         assert resp_b.status_code == 200
         assert resp_b.json()["namespace"] == "ns_01"
 
@@ -269,13 +269,13 @@ class TestTwoUsersSameNamespace:
         # User X uploads
         current_user["id"] = "user-x"
         files_x = [("files", ("x.mp4", io.BytesIO(b"video-x"), "video/mp4"))]
-        resp_x = client.post("/upload", files=files_x, data={"namespace": ""}, headers=AUTH_HEADERS)
+        resp_x = client.post("/upload", files=files_x, data={"namespace": "", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
         assert resp_x.status_code == 200
 
         # User Y uploads
         current_user["id"] = "user-y"
         files_y = [("files", ("y.mp4", io.BytesIO(b"video-y"), "video/mp4"))]
-        resp_y = client.post("/upload", files=files_y, data={"namespace": ""}, headers=AUTH_HEADERS)
+        resp_y = client.post("/upload", files=files_y, data={"namespace": "", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
         assert resp_y.status_code == 200
 
         # Both hit same namespace

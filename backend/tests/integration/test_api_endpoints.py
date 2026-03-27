@@ -258,7 +258,7 @@ def test_upload_creates_job_and_spawns_processing_app(
 ) -> None:
     client, server, mock_fns = test_client_internal
     files = [("files", ("clip.mp4", io.BytesIO(b"fake-bytes"), "video/mp4"))]
-    resp = client.post("/upload", files=files, data={"namespace": "ns1"}, headers=AUTH_HEADERS)
+    resp = client.post("/upload", files=files, data={"namespace": "ns1", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "processing"
@@ -289,7 +289,7 @@ def test_batch_upload_creates_batch_job_and_spawns_children(
         ("files", ("video2.mp4", io.BytesIO(b"fake-bytes-2"), "video/mp4")),
         ("files", ("video3.mp4", io.BytesIO(b"fake-bytes-3"), "video/mp4")),
     ]
-    resp = client.post("/upload", files=files, data={"namespace": "batch-ns"}, headers=AUTH_HEADERS)
+    resp = client.post("/upload", files=files, data={"namespace": "batch-ns", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
 
@@ -342,7 +342,7 @@ def test_batch_upload_with_validation_failures(
         ("files", ("bad.txt", io.BytesIO(b"not-a-video"), "text/plain")),  # Invalid extension
         ("files", ("video2.mp4", io.BytesIO(b"fake-bytes-2"), "video/mp4")),
     ]
-    resp = client.post("/upload", files=files, data={"namespace": "ns1"}, headers=AUTH_HEADERS)
+    resp = client.post("/upload", files=files, data={"namespace": "ns1", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
 
@@ -360,7 +360,7 @@ def test_batch_upload_rejects_empty_list(
     test_client_internal: Tuple[TestClient, ServerStub, dict]
 ) -> None:
     client, _, _ = test_client_internal
-    resp = client.post("/upload", files=[], data={"namespace": "ns1"}, headers=AUTH_HEADERS)
+    resp = client.post("/upload", files=[], data={"namespace": "ns1", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
     assert resp.status_code == 400
     assert "No files provided" in resp.json()["detail"]
 

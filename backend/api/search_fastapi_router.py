@@ -108,9 +108,11 @@ class SearchFastAPIRouter:
         """
         try:
             # Authenticate and resolve user namespace
+            if not self.auth_connector:
+                raise HTTPException(status_code=401, detail="Authentication is not configured")
             user_id = await self.auth_connector(request)
             import asyncio
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             user_data = await loop.run_in_executor(
                 None, self.search_service.user_store.get_or_create_user, user_id
             )

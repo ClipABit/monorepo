@@ -6,6 +6,7 @@ import logging
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 
+from google.cloud import firestore
 from google.cloud.firestore_v1.transforms import Increment
 
 from database.firebase.firebase_connector import FirebaseConnector
@@ -62,32 +63,44 @@ class UserStoreConnector(FirebaseConnector):
         """
         Pick the namespace with the most remaining vector capacity.
 
+        Uses a Firestore transaction so the read + user_count increment
+        is atomic — concurrent signups cannot push a namespace past its caps.
+
         Returns the namespace_id string (e.g. "ns_03").
         Raises RuntimeError if every namespace is full.
         """
         self._ensure_namespace_docs()
         ns_col = self.db.collection(self.NAMESPACES_COLLECTION)
 
-        best_ns = None
-        best_remaining = -1
+        @firestore.transactional
+        def _pick_and_claim(transaction):
+            best_ns = None
+            best_remaining = -1
 
-        for i in range(self.NAMESPACE_POOL_SIZE):
-            ns_id = self._namespace_id(i)
-            doc = ns_col.document(ns_id).get()
-            data = doc.to_dict() if doc.exists else {"vector_count": 0, "user_count": 0}
+            for i in range(self.NAMESPACE_POOL_SIZE):
+                ns_id = self._namespace_id(i)
+                doc = ns_col.document(ns_id).get(transaction=transaction)
+                data = doc.to_dict() if doc.exists else {"vector_count": 0, "user_count": 0}
 
-            if data.get("user_count", 0) >= self.MAX_USERS_PER_NAMESPACE:
-                continue
+                if data.get("user_count", 0) >= self.MAX_USERS_PER_NAMESPACE:
+                    continue
 
-            remaining = self.MAX_VECTORS_PER_NAMESPACE - data.get("vector_count", 0)
-            if remaining > best_remaining:
-                best_remaining = remaining
-                best_ns = ns_id
+                remaining = self.MAX_VECTORS_PER_NAMESPACE - data.get("vector_count", 0)
+                if remaining <= 0:
+                    continue
 
-        if best_ns is None:
-            raise RuntimeError("All namespaces are full — no capacity for new users")
+                if remaining > best_remaining:
+                    best_remaining = remaining
+                    best_ns = ns_id
 
-        ns_col.document(best_ns).update({"user_count": Increment(1)})
+            if best_ns is None:
+                raise RuntimeError("All namespaces are full — no capacity for new users")
+
+            transaction.update(ns_col.document(best_ns), {"user_count": Increment(1)})
+            return best_ns, best_remaining
+
+        transaction = self.db.transaction()
+        best_ns, best_remaining = _pick_and_claim(transaction)
         logger.info(f"Assigned namespace {best_ns} (remaining capacity ~{best_remaining} vectors)")
         return best_ns
 

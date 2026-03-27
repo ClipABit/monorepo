@@ -165,7 +165,7 @@ class TestUploadQuotaCheck:
         mock_file.read = AsyncMock(return_value=b"x" * 1000)
 
         with pytest.raises(HTTPException) as exc_info:
-            await router.upload(request, files=[mock_file])
+            await router.upload(request, files=[mock_file], hashed_identifier="testhash123")
 
         assert exc_info.value.status_code == 429
         assert "quota exceeded" in exc_info.value.detail.lower()
@@ -183,7 +183,7 @@ class TestUploadQuotaCheck:
         mock_file.content_type = "video/mp4"
         mock_file.read = AsyncMock(return_value=b"x" * 1000)
 
-        result = await router.upload(request, files=[mock_file])
+        result = await router.upload(request, files=[mock_file], hashed_identifier="testhash123")
 
         assert result["namespace"] == "user_abc123"
 
@@ -200,7 +200,7 @@ class TestUploadQuotaCheck:
         mock_file.content_type = "video/mp4"
         mock_file.read = AsyncMock(return_value=b"x" * 1000)
 
-        result = await router.upload(request, files=[mock_file])
+        result = await router.upload(request, files=[mock_file], hashed_identifier="testhash123")
 
         assert "vector_count" in result
         assert "vector_quota" in result
@@ -221,7 +221,7 @@ class TestUploadQuotaCheck:
         mock_file.read = AsyncMock(return_value=b"x" * 1000)
 
         # Client tries to send a different namespace — should be ignored
-        result = await router.upload(request, files=[mock_file], namespace="client_ns")
+        result = await router.upload(request, files=[mock_file], namespace="client_ns", hashed_identifier="testhash123")
 
         # The result namespace should be the user's assigned namespace
         assert result["namespace"] == "user_abc123"

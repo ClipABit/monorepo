@@ -112,7 +112,7 @@ class ServerFastAPIRouter:
             (user_id, user_data) where user_data includes namespace, vector_count, etc.
         """
         user_id = await self._get_user_id(request)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         user_data = await loop.run_in_executor(
             None, self.server_instance.user_store.get_or_create_user, user_id
         )
@@ -195,12 +195,16 @@ class ServerFastAPIRouter:
         user_id, user_data = await self._get_user_data(request)
         user_namespace = user_data.get("namespace", "")
 
+        # Validate required fields (after auth so unauthenticated requests get 401)
+        if not hashed_identifier or not hashed_identifier.strip():
+            raise HTTPException(status_code=400, detail="hashed_identifier is required — the plugin must generate a hash of the video file")
+
         if not user_namespace:
             logger.error(f"[Upload] No namespace resolved for user {user_id}")
             raise HTTPException(status_code=500, detail="Failed to resolve user namespace")
 
         # Check vector quota
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         is_ok, current_count, vector_quota = await loop.run_in_executor(
             None, self.server_instance.user_store.check_quota, user_id
         )
