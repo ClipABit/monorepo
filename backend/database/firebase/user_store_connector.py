@@ -25,7 +25,7 @@ class UserStoreConnector(FirebaseConnector):
     """
 
     DEFAULT_COLLECTION = "users"
-    DEFAULT_VECTOR_QUOTA = 10_000
+    DEFAULT_VECTOR_QUOTA = 1000
 
     NAMESPACE_POOL_SIZE = 20
     MAX_VECTORS_PER_NAMESPACE = 100_000
