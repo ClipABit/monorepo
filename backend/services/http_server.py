@@ -142,7 +142,7 @@ class ServerService:
                 try:
                     chunk_count = self.user_store.get_video_chunk_count(user_id, hashed_identifier)
                     if chunk_count > 0:
-                        self.user_store.decrement_vector_count(user_id, chunk_count)
+                        self.user_store.decrement_vector_count(user_id, chunk_count, namespace=namespace)
                     self.user_store.deregister_video(user_id, hashed_identifier)
                     logger.info(
                         f"[{self.__class__.__name__}][Job {job_id}] Decremented vector count by {chunk_count} for user {user_id}"

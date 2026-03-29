@@ -33,7 +33,7 @@ class TestDeleteQuota:
 
         service.delete_video_background("job1", "hash123", "user_ns", "auth0|user1")
 
-        service.user_store.decrement_vector_count.assert_called_once_with("auth0|user1", 15)
+        service.user_store.decrement_vector_count.assert_called_once_with("auth0|user1", 15, namespace="user_ns")
 
     def test_deregisters_video(self):
         """Subcollection entry removed on successful delete."""
