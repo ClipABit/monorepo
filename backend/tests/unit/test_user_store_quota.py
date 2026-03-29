@@ -168,7 +168,7 @@ class TestGetOrCreateUserQuotaFields:
         assert result["vector_count"] == 0
 
     def test_new_user_has_vector_quota(self, connector, mock_firestore):
-        """New user gets default vector quota of 10,000."""
+        """New user gets DEFAULT_VECTOR_QUOTA."""
         mock_doc_ref = MagicMock()
         mock_doc_ref.get.return_value = _mock_doc(exists=False)
         mock_firestore.collection.return_value.document.return_value = mock_doc_ref
@@ -233,7 +233,7 @@ class TestCheckQuota:
         assert quota == 10_000
 
     def test_at_limit(self, connector, mock_firestore):
-        """Returns (False, 10000, 10000) when exactly at limit."""
+        """Returns (False, count, quota) when exactly at limit."""
         user_data = {
             "user_id": "u2",
             "vector_count": 10_000,
@@ -285,7 +285,7 @@ class TestCheckQuota:
         assert count == 0
 
     def test_one_below_limit_passes(self, connector, mock_firestore):
-        """User at 9999/10000 still passes."""
+        """User one below quota still passes."""
         user_data = {
             "user_id": "u6",
             "vector_count": 9_999,

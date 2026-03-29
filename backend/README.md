@@ -48,7 +48,7 @@ Users are assigned to a shared pool of **20 Pinecone namespaces** (`ns_00` throu
 
 Quota is enforced at **two levels** to prevent overspending:
 
-1. **Soft pre-check (upload endpoint):** Before spawning processing, the server checks `user_store.check_quota()`. Returns HTTP 429 if the user is at or over their 10,000 vector limit.
+1. **Soft pre-check (upload endpoint):** Before spawning processing, the server checks `user_store.check_quota()`. Returns HTTP 429 if the user is at or over their vector limit.
 
 2. **Hard gate (processing service):** Before any Pinecone upserts, the processing service re-checks the quota. If `current_count + new_chunks > quota`, processing aborts and no vectors are written. This catches concurrent uploads that pass the soft check simultaneously.
 
@@ -61,7 +61,7 @@ users/{user_id}
   ├── user_id: string
   ├── namespace: string          # e.g. "ns_03"
   ├── vector_count: number       # current vectors stored
-  ├── vector_quota: number       # max allowed (default 10,000)
+  ├── vector_quota: number       # max allowed (see DEFAULT_VECTOR_QUOTA)
   ├── created_at: string
   └── videos/{hashed_identifier}
         ├── hashed_identifier: string
@@ -131,7 +131,7 @@ Form fields:
   "status": "processing",
   "namespace": "ns_03",
   "vector_count": 4821,
-  "vector_quota": 10000
+  "vector_quota": 1000
 }
 ```
 
@@ -148,7 +148,7 @@ Form fields:
   "failed_at_upload": 0,
   "namespace": "ns_03",
   "vector_count": 4821,
-  "vector_quota": 10000
+  "vector_quota": 1000
 }
 ```
 
@@ -164,8 +164,8 @@ Authorization: Bearer <token>
   "user_id": "auth0|abc123",
   "namespace": "ns_03",
   "vector_count": 4821,
-  "vector_quota": 10000,
-  "vectors_remaining": 5179
+  "vector_quota": 1000,
+  "vectors_remaining": 179
 }
 ```
 

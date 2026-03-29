@@ -135,8 +135,8 @@ class TestProcessingEdgeCases:
         also raises (same side_effect), so the function propagates the exception.
         Vectors are deleted and quota released before the second raise."""
         service = self._create_service_with_mocks()
-        # First call (success path line 216) raises → enters except block
-        # Second call (error path line 261) also raises → propagates out
+        # First call (success path) raises → enters except block
+        # Second call (error path) also raises → propagates out
         service.job_store.update_batch_on_child_completion.side_effect = Exception("Batch store broken")
 
         with pytest.raises(Exception, match="Batch store broken"):

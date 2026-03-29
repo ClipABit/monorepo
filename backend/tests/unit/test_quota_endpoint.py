@@ -71,7 +71,7 @@ class TestQuotaEndpoint:
 
     @pytest.mark.asyncio
     async def test_new_user_returns_defaults(self):
-        """Fresh user sees 0/10000."""
+        """Fresh user sees zero usage with full quota remaining."""
         router, _ = _create_router_with_mocks(user_data={
             "user_id": "auth0|new_user",
             "namespace": "user_newns",

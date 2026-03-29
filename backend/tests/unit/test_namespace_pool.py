@@ -103,7 +103,7 @@ def _make_app(server, fake_fn):
 
 
 class TestQuotaExceeded:
-    """Upload should return 429 when user is at or over their 10,000 vector quota."""
+    """Upload should return 429 when user is at or over their vector quota."""
 
     def _make_client(self, vector_count, vector_quota=10_000):
         class UserStore:
@@ -129,7 +129,7 @@ class TestQuotaExceeded:
         return TestClient(app), fake_fn
 
     def test_rejects_at_limit(self):
-        """User at exactly 10,000 gets 429."""
+        """User at exactly their quota gets 429."""
         client, _ = self._make_client(10_000)
         files = [("files", ("clip.mp4", io.BytesIO(b"fake"), "video/mp4"))]
         resp = client.post("/upload", files=files, data={"namespace": "x", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
@@ -137,7 +137,7 @@ class TestQuotaExceeded:
         assert "quota" in resp.json()["detail"].lower()
 
     def test_rejects_over_limit(self):
-        """User over 10,000 gets 429."""
+        """User over their quota gets 429."""
         client, _ = self._make_client(12_000)
         files = [("files", ("clip.mp4", io.BytesIO(b"fake"), "video/mp4"))]
         resp = client.post("/upload", files=files, data={"namespace": "x", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)

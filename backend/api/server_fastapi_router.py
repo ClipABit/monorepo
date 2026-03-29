@@ -6,6 +6,8 @@ import logging
 import modal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
+from database.firebase.user_store_connector import UserStoreConnector
+
 logger = logging.getLogger(__name__)
 
 
@@ -155,7 +157,7 @@ class ServerFastAPIRouter:
         """
         user_id, user_data = await self._get_user_data(request)
         vector_count = user_data.get("vector_count", 0)
-        vector_quota = user_data.get("vector_quota", 10_000)
+        vector_quota = user_data.get("vector_quota", UserStoreConnector.DEFAULT_VECTOR_QUOTA)
         return {
             "user_id": user_id,
             "namespace": user_data.get("namespace", ""),

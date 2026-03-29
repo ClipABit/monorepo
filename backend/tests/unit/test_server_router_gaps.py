@@ -72,7 +72,7 @@ class TestQuotaEndpointDefaults:
 
     @pytest.mark.asyncio
     async def test_missing_vector_quota_defaults(self):
-        """User data without vector_quota → defaults to 10_000 (hardcoded in endpoint)."""
+        """User data without vector_quota → falls back to DEFAULT_VECTOR_QUOTA."""
         router, _ = _create_router(user_data={
             "user_id": "auth0|user1",
             "namespace": "ns_03",
@@ -81,7 +81,8 @@ class TestQuotaEndpointDefaults:
 
         result = await router.quota(_make_mock_request())
 
-        assert result["vector_quota"] == 10_000
+        from database.firebase.user_store_connector import UserStoreConnector
+        assert result["vector_quota"] == UserStoreConnector.DEFAULT_VECTOR_QUOTA
 
     @pytest.mark.asyncio
     async def test_missing_namespace_defaults_to_empty(self):
