@@ -114,9 +114,9 @@ class ServerService:
         return self.fastapi_app
 
     @modal.method()
-    def delete_video_background(self, job_id: str, hashed_identifier: str, namespace: str = ""):
-        """Background job that deletes a video and all associated chunks."""
-        logger.info(f"[{self.__class__.__name__}][Job {job_id}] Deletion started: {hashed_identifier} | namespace='{namespace}'")
+    def delete_video_background(self, job_id: str, hashed_identifier: str, namespace: str = "", user_id: str = ""):
+        """Background job that deletes a video and all associated chunks. Decrements vector quota."""
+        logger.info(f"[{self.__class__.__name__}][Job {job_id}] Deletion started: {hashed_identifier} | namespace='{namespace}' | user={user_id or 'None'}")
 
         try:
             # Delete chunks from Pinecone
@@ -136,13 +136,31 @@ class ServerService:
                 )
                 raise Exception("Failed to delete video from R2 after deleting chunks. System may be inconsistent.")
 
+            # Decrement vector count for the user
+            chunk_count = 0
+            if user_id:
+                try:
+                    chunk_count = self.user_store.get_video_chunk_count(user_id, hashed_identifier)
+                    if chunk_count > 0:
+                        self.user_store.decrement_vector_count(user_id, chunk_count, namespace=namespace)
+                    self.user_store.deregister_video(user_id, hashed_identifier)
+                    logger.info(
+                        f"[{self.__class__.__name__}][Job {job_id}] Decremented vector count by {chunk_count} for user {user_id}"
+                    )
+                except Exception as quota_exc:
+                    logger.critical(
+                        f"[{self.__class__.__name__}][Job {job_id}] CRITICAL: Failed to update vector quota for user {user_id}: {quota_exc}. "
+                        f"Vectors deleted from Pinecone but quota may be out of sync."
+                    )
+
             result = {
                 "job_id": job_id,
                 "status": "completed",
                 "hashed_identifier": hashed_identifier,
                 "namespace": namespace,
                 "r2": {"deleted": r2_success},
-                "pinecone": {"deleted": pinecone_success}
+                "pinecone": {"deleted": pinecone_success},
+                "vectors_removed": chunk_count,
             }
 
             logger.info(f"[{self.__class__.__name__}][Job {job_id}] Deletion completed")

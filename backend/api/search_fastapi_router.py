@@ -10,7 +10,7 @@ __all__ = ["SearchFastAPIRouter", "limiter"]
 import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -42,11 +42,10 @@ class SearchFastAPIRouter:
 
     def _register_routes(self):
         """Register all search routes."""
-        auth = [Depends(self.auth_connector)] if self.auth_connector else []
-
         self.router.add_api_route("/health", self.health, methods=["GET"])
+        # Search handles auth manually to extract user_id and resolve namespace
         self.router.add_api_route(
-            "/search", self.search, methods=["GET"], dependencies=auth
+            "/search", self.search, methods=["GET"]
         )
 
         # Apply the limiter to the bound method at registration time.
@@ -91,13 +90,14 @@ class SearchFastAPIRouter:
                 detail="An internal error occurred while processing the demo search request.",
             )
 
-    async def search(self, query: str, namespace: str = "", top_k: int = 10):
+    async def search(self, request: Request, query: str, top_k: int = 10):
         """
         Search endpoint - accepts a text query and returns semantic search results.
+        Authenticates user and searches their assigned namespace.
 
         Args:
+            request: FastAPI Request object for auth extraction
             query (str): The search query string (required)
-            namespace (str, optional): Namespace for Pinecone search (default: "")
             top_k (int, optional): Number of top results to return (default: 10)
 
         Returns:
@@ -107,13 +107,25 @@ class SearchFastAPIRouter:
             HTTPException: If search fails (500 Internal Server Error)
         """
         try:
+            # Authenticate and resolve user namespace
+            if not self.auth_connector:
+                raise HTTPException(status_code=401, detail="Authentication is not configured")
+            user_id = await self.auth_connector(request)
+            import asyncio
+            loop = asyncio.get_running_loop()
+            user_data = await loop.run_in_executor(
+                None, self.search_service.user_store.get_or_create_user, user_id
+            )
+            namespace = user_data.get("namespace", "")
+
             t_start = time.perf_counter()
             logger.info(
-                f"[Search] Query: '{query}' | namespace='{namespace}' | top_k={top_k}"
+                f"[Search] Query: '{query}' | namespace='{namespace}' | user={user_id} | top_k={top_k}"
             )
 
-            # Call search directly on the service instance (no RPC, no cross-app call)
-            results = self.search_service._search_internal(query, namespace, top_k)
+            # Filter results to this user only (shared namespace isolation)
+            metadata_filter = {"user_id": {"$eq": user_id}}
+            results = self.search_service._search_internal(query, namespace, top_k, metadata_filter=metadata_filter)
 
             t_done = time.perf_counter()
             logger.info(
@@ -125,6 +137,8 @@ class SearchFastAPIRouter:
                 "results": results,
                 "timing": {"total_s": round(t_done - t_start, 3)},
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"[Search] Error: {e}")
             raise HTTPException(status_code=500, detail=str(e))

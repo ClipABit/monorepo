@@ -350,8 +350,20 @@ def _make_server_app(auth_connector):
 
 def _make_search_app(auth_connector):
     """Create a full FastAPI app with SearchFastAPIRouter and real auth."""
+    class FakeUserStore:
+        def get_or_create_user(self, user_id):
+            return {
+                "user_id": user_id,
+                "namespace": "user_test_ns",
+                "vector_count": 0,
+                "vector_quota": 10_000,
+            }
+
     class FakeSearchService:
-        def _search_internal(self, query, namespace="", top_k=10):
+        def __init__(self):
+            self.user_store = FakeUserStore()
+
+        def _search_internal(self, query, namespace="", top_k=10, metadata_filter=None):
             return [{"id": "result-1", "score": 0.9, "metadata": {}}]
 
     app = FastAPI()

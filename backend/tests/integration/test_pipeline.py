@@ -6,6 +6,10 @@ class TestProcessingPipeline:
     """
     Integration tests for the video processing pipeline (ProcessingService).
     Covers success paths, failure/rollback scenarios, and edge cases.
+
+    Note: R2 is not used in the processing pipeline. Videos stay on the user's
+    local machine. Only vectors and metadata are stored server-side.
+    The hashed_identifier is generated client-side by the plugin and passed through.
     """
 
     # ==========================================================================
@@ -17,7 +21,6 @@ class TestProcessingPipeline:
         """
         Scenario: Happy path - everything succeeds.
         Expectation:
-            - R2 upload called.
             - Preprocessing called.
             - Embeddings generated.
             - Pinecone upsert called for all chunks.
@@ -26,30 +29,29 @@ class TestProcessingPipeline:
         """
         # Setup
         hashed_id = "hash-success"
-        processing_service.r2_connector.upload_video.return_value = (True, hashed_id)
-        
+
         # Mock Preprocessor output
         chunks = [
             {
-                "chunk_id": "c1", 
-                "frames": [1, 2], 
-                "metadata": {"frame_count": 10, "complexity_score": 0.5, "timestamp_range": [0.0, 5.0]}, 
+                "chunk_id": "c1",
+                "frames": [1, 2],
+                "metadata": {"frame_count": 10, "complexity_score": 0.5, "timestamp_range": [0.0, 5.0]},
                 "memory_mb": 1.0
             },
             {
-                "chunk_id": "c2", 
-                "frames": [3, 4], 
-                "metadata": {"frame_count": 15, "complexity_score": 0.8, "timestamp_range": [5.0, 10.0]}, 
+                "chunk_id": "c2",
+                "frames": [3, 4],
+                "metadata": {"frame_count": 15, "complexity_score": 0.8, "timestamp_range": [5.0, 10.0]},
                 "memory_mb": 1.5
             }
         ]
         processing_service.preprocessor.process_video_from_bytes.return_value = chunks
-        
+
         # Mock Embedder
         mock_embedding = MagicMock()
         mock_embedding.numpy.return_value = [0.1, 0.2]
         processing_service.video_embedder._generate_clip_embedding.return_value = mock_embedding
-        
+
         # Mock Pinecone success
         processing_service.pinecone_connector.upsert_chunk.return_value = True
 
@@ -58,7 +60,8 @@ class TestProcessingPipeline:
             video_bytes=sample_video_bytes,
             filename="success.mp4",
             job_id="job-success",
-            namespace="test-ns"
+            namespace="test-ns",
+            hashed_identifier=hashed_id,
         )
 
         # Verify Result
@@ -67,13 +70,12 @@ class TestProcessingPipeline:
         assert result["chunks"] == 2
         assert result["total_frames"] == 25
         assert result["total_memory_mb"] == 2.5
-        
+
         # Verify Interactions
-        processing_service.r2_connector.upload_video.assert_called_once()
         processing_service.preprocessor.process_video_from_bytes.assert_called_once()
         assert processing_service.video_embedder._generate_clip_embedding.call_count == 2
         assert processing_service.pinecone_connector.upsert_chunk.call_count == 2
-        
+
         # Verify Job Store Update
         processing_service.job_store.set_job_completed.assert_called_once_with("job-success", result)
 
@@ -87,7 +89,6 @@ class TestProcessingPipeline:
             - No Pinecone upserts.
         """
         # Setup
-        processing_service.r2_connector.upload_video.return_value = (True, "hash-empty")
         processing_service.preprocessor.process_video_from_bytes.return_value = []  # No chunks
 
         # Execute
@@ -95,13 +96,14 @@ class TestProcessingPipeline:
             video_bytes=b"short-video",
             filename="short.mp4",
             job_id="job-empty",
-            namespace="test-ns"
+            namespace="test-ns",
+            hashed_identifier="hash-empty",
         )
 
         # Verify
         assert result["status"] == "completed"
         assert result["chunks"] == 0
-        
+
         processing_service.video_embedder._generate_clip_embedding.assert_not_called()
         processing_service.pinecone_connector.upsert_chunk.assert_not_called()
 
@@ -110,44 +112,14 @@ class TestProcessingPipeline:
     # ==========================================================================
 
     @pytest.mark.asyncio
-    async def test_rollback_on_r2_upload_failure(self, processing_service):
-        """
-        Scenario: R2 upload fails immediately.
-        Expectation: 
-            - Job marked failed.
-            - No rollback actions (delete_video, delete_chunks) because nothing was created.
-        """
-        # Setup
-        processing_service.r2_connector.upload_video.side_effect = Exception("R2 Upload Error")
-
-        # Execute
-        result = processing_service.process_video_background(
-            video_bytes=b"fake-video-data",
-            filename="test.mp4",
-            job_id="job-1",
-            namespace="test-ns"
-        )
-
-        # Verify
-        assert result["status"] == "failed"
-        assert "R2 Upload Error" in result["error"]
-
-        # Rollback checks
-        processing_service.r2_connector.delete_video.assert_not_called()
-        processing_service.pinecone_connector.delete_chunks.assert_not_called()
-
-    @pytest.mark.asyncio
     async def test_rollback_on_preprocessing_failure(self, processing_service):
         """
-        Scenario: R2 upload succeeds, but Preprocessing fails.
+        Scenario: Preprocessing fails.
         Expectation:
             - Job marked failed.
-            - R2 video is deleted (Rollback).
             - Pinecone delete not called (nothing upserted).
         """
         # Setup
-        hashed_id = "hash-123"
-        processing_service.r2_connector.upload_video.return_value = (True, hashed_id)
         processing_service.preprocessor.process_video_from_bytes.side_effect = Exception("Preprocessing Failed")
 
         # Execute
@@ -155,7 +127,8 @@ class TestProcessingPipeline:
             video_bytes=b"fake-video-data",
             filename="test.mp4",
             job_id="job-2",
-            namespace="test-ns"
+            namespace="test-ns",
+            hashed_identifier="hash-123",
         )
 
         # Verify
@@ -163,23 +136,17 @@ class TestProcessingPipeline:
         assert "Preprocessing Failed" in result["error"]
 
         # Rollback checks
-        processing_service.r2_connector.delete_video.assert_called_once_with(hashed_id)
         processing_service.pinecone_connector.delete_chunks.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_rollback_on_embedding_failure(self, processing_service):
         """
-        Scenario: R2 upload & Preprocessing succeed, but Embedding generation fails.
+        Scenario: Preprocessing succeeds, but Embedding generation fails.
         Expectation:
             - Job marked failed.
-            - R2 video is deleted.
-            - Pinecone delete not called (nothing upserted).
+            - Pinecone delete not called (nothing upserted yet).
         """
         # Setup
-        hashed_id = "hash-456"
-        processing_service.r2_connector.upload_video.return_value = (True, hashed_id)
-        
-        # Mock preprocessor to return one chunk
         chunk = {
             "chunk_id": "chunk-1",
             "frames": [1, 2, 3],
@@ -187,7 +154,7 @@ class TestProcessingPipeline:
             "memory_mb": 1.0
         }
         processing_service.preprocessor.process_video_from_bytes.return_value = [chunk]
-        
+
         # Fail embedding
         processing_service.video_embedder._generate_clip_embedding.side_effect = Exception("Embedding Model Error")
 
@@ -196,34 +163,29 @@ class TestProcessingPipeline:
             video_bytes=b"fake-video-data",
             filename="test.mp4",
             job_id="job-3",
-            namespace="test-ns"
+            namespace="test-ns",
+            hashed_identifier="hash-456",
         )
 
         # Verify
         assert result["status"] == "failed"
         assert "Embedding Model Error" in result["error"]
 
-        # Rollback checks
-        processing_service.r2_connector.delete_video.assert_called_once_with(hashed_id)
+        # Rollback checks — nothing was upserted, so no Pinecone delete
         processing_service.pinecone_connector.delete_chunks.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_rollback_on_partial_pinecone_failure(self, processing_service):
         """
-        Scenario: 
-            - R2 upload succeeds.
+        Scenario:
             - Preprocessing succeeds (2 chunks).
             - Chunk 1 upsert succeeds.
             - Chunk 2 upsert fails.
         Expectation:
             - Job marked failed.
-            - R2 video is deleted.
             - Pinecone delete called for Chunk 1 (Rollback).
         """
         # Setup
-        hashed_id = "hash-789"
-        processing_service.r2_connector.upload_video.return_value = (True, hashed_id)
-        
         chunks = [
             {
                 "chunk_id": "chunk-1",
@@ -239,7 +201,7 @@ class TestProcessingPipeline:
             }
         ]
         processing_service.preprocessor.process_video_from_bytes.return_value = chunks
-        
+
         # Mock embedding to succeed
         mock_embedding = MagicMock()
         mock_embedding.numpy.return_value = [0.1, 0.2]
@@ -253,59 +215,47 @@ class TestProcessingPipeline:
             video_bytes=b"fake-video-data",
             filename="test.mp4",
             job_id="job-4",
-            namespace="test-ns"
+            namespace="test-ns",
+            hashed_identifier="hash-789",
         )
 
         # Verify
         assert result["status"] == "failed"
         assert "Failed to upsert chunk chunk-2" in result["error"]
 
-        # Rollback checks
-        processing_service.r2_connector.delete_video.assert_called_once_with(hashed_id)
-        
         # Should delete the one that succeeded (chunk-1)
         processing_service.pinecone_connector.delete_chunks.assert_called_once_with(
-            ["chunk-1"], 
+            ["chunk-1"],
             namespace="test-ns"
         )
 
     @pytest.mark.asyncio
-    async def test_rollback_best_effort_when_cleanup_fails(self, processing_service):
+    async def test_rollback_best_effort_pinecone_cleanup(self, processing_service):
         """
-        Scenario: 
-            - Pipeline fails (triggering rollback).
-            - R2 deletion fails (Rollback step 1 fails).
-        Expectation:
-            - Pinecone deletion (Rollback step 2) should still be attempted.
+        Scenario:
+            - Pipeline fails (partial Pinecone upsert).
+            - Pinecone cleanup should be attempted for successfully upserted chunks.
         """
-        # Setup failure in pipeline (Partial Pinecone failure to ensure we have chunks to delete)
-        hashed_id = "hash-fail-cleanup"
-        processing_service.r2_connector.upload_video.return_value = (True, hashed_id)
-        
+        # Setup
         chunks = [
             {"chunk_id": "c1", "frames": [], "metadata": {"frame_count": 10, "complexity_score": 0.5}, "memory_mb": 1},
             {"chunk_id": "c2", "frames": [], "metadata": {"frame_count": 10, "complexity_score": 0.5}, "memory_mb": 1}
         ]
         processing_service.preprocessor.process_video_from_bytes.return_value = chunks
         processing_service.video_embedder._generate_clip_embedding.return_value = MagicMock(numpy=lambda: [0.1])
-        
+
         # Upsert: True, False (Trigger rollback)
         processing_service.pinecone_connector.upsert_chunk.side_effect = [True, False]
-        
-        # Setup failure in R2 cleanup
-        processing_service.r2_connector.delete_video.return_value = False
-        
+
         # Execute
         result = processing_service.process_video_background(
-            video_bytes=b"data", filename="test.mp4", job_id="job-5", namespace="ns"
+            video_bytes=b"data", filename="test.mp4", job_id="job-5", namespace="ns",
+            hashed_identifier="hash-cleanup",
         )
-            
-        # Verify R2 delete was called (and failed)
-        processing_service.r2_connector.delete_video.assert_called_once_with(hashed_id)
-        
-        # Verify Pinecone delete was called DESPITE R2 delete failure
+
+        # Verify Pinecone delete was called for the successfully upserted chunk
         processing_service.pinecone_connector.delete_chunks.assert_called_once_with(["c1"], namespace="ns")
-        
+
         # Verify result is still failed
         assert result["status"] == "failed"
 
@@ -323,8 +273,6 @@ class TestProcessingPipeline:
             - Null values are removed.
         """
         # Setup
-        processing_service.r2_connector.upload_video.return_value = (True, "hash-meta")
-        
         raw_metadata = {
             "frame_count": 10,
             "complexity_score": 0.5,
@@ -332,32 +280,35 @@ class TestProcessingPipeline:
             "file_info": {"size": 100, "type": "mp4"},
             "optional_field": None
         }
-        
+
         chunks = [{
-            "chunk_id": "c1", 
-            "frames": [], 
-            "metadata": raw_metadata, 
+            "chunk_id": "c1",
+            "frames": [],
+            "metadata": raw_metadata,
             "memory_mb": 1.0
         }]
         processing_service.preprocessor.process_video_from_bytes.return_value = chunks
-        
+
         # Mock embedding
         processing_service.video_embedder._generate_clip_embedding.return_value = MagicMock(numpy=lambda: [0.1])
         processing_service.pinecone_connector.upsert_chunk.return_value = True
 
         # Execute
-        processing_service.process_video_background(b"data", "test.mp4", "job-meta", "ns")
+        processing_service.process_video_background(
+            b"data", "test.mp4", "job-meta", "ns",
+            hashed_identifier="hash-meta",
+        )
 
         # Verify Upsert Call Arguments
         call_args = processing_service.pinecone_connector.upsert_chunk.call_args
         upserted_metadata = call_args.kwargs['metadata']
-        
+
         # Check transformations
         assert upserted_metadata['start_time_s'] == 10.5
         assert upserted_metadata['end_time_s'] == 20.5
         assert upserted_metadata['file_size'] == 100
         assert upserted_metadata['file_type'] == "mp4"
-        
+
         # Check removals
         assert 'timestamp_range' not in upserted_metadata
         assert 'file_info' not in upserted_metadata
@@ -367,6 +318,7 @@ class TestProcessingPipeline:
 class TestDeletionPipeline:
     """
     Integration tests for the video deletion pipeline (ServerService.delete_video_background).
+    Note: Deletion is currently deactivated at the API level but the background method still exists.
     """
 
     # ==========================================================================

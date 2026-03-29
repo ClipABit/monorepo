@@ -28,11 +28,13 @@ class FakePineconeConnector:
         self,
         query_embedding: np.ndarray,
         namespace: str = "",
-        top_k: int = 5
+        top_k: int = 5,
+        filter: dict = None,
     ) -> List[Dict[str, Any]]:
         self.last_query_embedding = query_embedding
         self.last_namespace = namespace
         self.last_top_k = top_k
+        self.last_filter = filter
         return self.matches
 
 
@@ -157,6 +159,16 @@ def search_service_instance(mocker):
         )
 
         service.auth_connector = FakeAuthConnector()
+
+        # Mock user store for namespace resolution
+        mock_user_store = MagicMock()
+        mock_user_store.get_or_create_user.return_value = {
+            "user_id": "test-user-id",
+            "namespace": "user_test_ns",
+            "vector_count": 0,
+            "vector_quota": 10_000,
+        }
+        service.user_store = mock_user_store
 
         yield service
 
@@ -305,7 +317,7 @@ class TestSearchServiceHTTPEndpoints:
         """Verify /search endpoint returns results."""
         client, service = search_test_client
 
-        resp = client.get("/search", params={"query": "test query"})
+        resp = client.get("/search", params={"query": "test query"}, headers={"Authorization": "Bearer test-token"})
 
         assert resp.status_code == 200
         data = resp.json()
@@ -314,18 +326,19 @@ class TestSearchServiceHTTPEndpoints:
         assert "timing" in data
 
     def test_search_with_namespace(self, search_test_client):
-        """Verify namespace is passed through."""
+        """Verify user namespace from Firestore is used (client namespace ignored)."""
         client, service = search_test_client
 
-        client.get("/search", params={"query": "test", "namespace": "custom-ns"})
+        client.get("/search", params={"query": "test"}, headers={"Authorization": "Bearer test-token"})
 
-        assert service.pinecone_connector.last_namespace == "custom-ns"
+        # Namespace comes from user_store, not client params
+        assert service.pinecone_connector.last_namespace == "user_test_ns"
 
     def test_search_with_top_k(self, search_test_client):
         """Verify top_k is passed through."""
         client, service = search_test_client
 
-        client.get("/search", params={"query": "test", "top_k": 25})
+        client.get("/search", params={"query": "test", "top_k": 25}, headers={"Authorization": "Bearer test-token"})
 
         assert service.pinecone_connector.last_top_k == 25
 
@@ -333,7 +346,7 @@ class TestSearchServiceHTTPEndpoints:
         """Verify missing query returns 422."""
         client, _ = search_test_client
 
-        resp = client.get("/search")
+        resp = client.get("/search", headers={"Authorization": "Bearer test-token"})
 
         assert resp.status_code == 422
 

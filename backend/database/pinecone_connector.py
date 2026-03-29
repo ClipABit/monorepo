@@ -66,7 +66,7 @@ class PineconeConnector:
             logger.error(f"Error deleting chunks from index {self.index_name}: {e}")
             return False
 
-    def query_chunks(self, query_embedding: np.ndarray, namespace: str = "__default__", top_k: int = 5) -> list:
+    def query_chunks(self, query_embedding: np.ndarray, namespace: str = "__default__", top_k: int = 5, filter: dict = None) -> list:
         """
         Query the Pinecone index for similar chunks.
 
@@ -74,14 +74,18 @@ class PineconeConnector:
             query_embedding: The query embedding
             namespace: The namespace to query from (default is "__default__")
             top_k: Number of top similar chunks to retrieve
-        
+            filter: Optional Pinecone metadata filter dict (e.g. {"user_id": {"$eq": "..."}})
+
         Returns:
             list: List of top_k similar chunks with their metadata
         """
-        
+
         try:
             query_embedding = query_embedding.tolist()
-            response = self.index.query(vector=query_embedding, top_k=top_k, include_metadata=True, namespace=namespace)
+            query_kwargs = dict(vector=query_embedding, top_k=top_k, include_metadata=True, namespace=namespace)
+            if filter:
+                query_kwargs["filter"] = filter
+            response = self.index.query(**query_kwargs)
 
             logger.info(f"Queried top {top_k} chunks from index {self.index_name} with namespace {namespace}")
             return response['matches']
