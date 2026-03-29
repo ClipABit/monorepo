@@ -85,7 +85,7 @@ class TestGetOrCreateUser:
         assert result["user_id"] == "auth0|new456"
         assert result["namespace"] == "ns_00"
         assert result["vector_count"] == 0
-        assert result["vector_quota"] == 10_000
+        assert result["vector_quota"] == 1_000
         mock_doc_ref.set.assert_called_once()
         connector._assign_namespace.assert_called_once()
 
@@ -121,7 +121,7 @@ class TestGetOrCreateUser:
 
         assert result["namespace"] == "ns_00"
         assert result["vector_count"] == 0
-        assert result["vector_quota"] == 10_000
+        assert result["vector_quota"] == 1_000
         mock_doc_ref.update.assert_called_once()
 
     def test_uses_correct_collection_and_document_id(self, connector, mock_firestore):

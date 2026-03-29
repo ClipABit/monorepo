@@ -175,7 +175,7 @@ class TestGetOrCreateUserQuotaFields:
 
         result = connector.get_or_create_user("auth0|new3")
 
-        assert result["vector_quota"] == 10_000
+        assert result["vector_quota"] == 1_000
 
     def test_existing_user_returns_existing_data(self, connector, mock_firestore):
         """Existing user with pool namespace is returned as-is."""

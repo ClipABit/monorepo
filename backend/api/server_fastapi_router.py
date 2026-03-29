@@ -2,15 +2,11 @@ __all__ = ["ServerFastAPIRouter"]
 
 import asyncio
 import logging
-import math
 
 import modal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 logger = logging.getLogger(__name__)
-
-# Rough estimate: 1 vector per second of video, ~500KB per second of video
-BYTES_PER_VECTOR_ESTIMATE = 500_000
 
 
 class ServerFastAPIRouter:
@@ -217,18 +213,10 @@ class ServerFastAPIRouter:
         # Use user's assigned namespace, not client-provided
         result = await self.upload_handler.handle_upload(files, user_namespace, user_id, hashed_identifier, project_id)
 
-        # Estimate new vectors from total file size (~1 vector per second, ~500KB/s bitrate)
-        total_size = result.get("size_bytes", 0)
-        if not total_size and "total_submitted" in result:
-            # Batch uploads don't have a single size_bytes; estimate will be 0
-            total_size = 0
-        estimated_new_vectors = max(1, math.ceil(total_size / BYTES_PER_VECTOR_ESTIMATE)) if total_size else 0
-
         # Add namespace and quota info to response for plugin local storage
         result["namespace"] = user_namespace
         result["vector_count"] = current_count
         result["vector_quota"] = vector_quota
-        result["estimated_new_vectors"] = estimated_new_vectors
 
         return result
 
