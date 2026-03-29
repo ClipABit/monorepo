@@ -91,6 +91,7 @@ class ProcessingService:
         )
 
         upserted_chunk_ids = []
+        quota_reserved = False
 
         try:
             # Stage 1: Process video through preprocessing pipeline
@@ -115,22 +116,19 @@ class ProcessingService:
                 f"{total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}"
             )
 
-            # Hard quota check before upserting any vectors
-            # The upload endpoint does a soft pre-check, but concurrent uploads
-            # could pass that check simultaneously. This is the hard gate.
+            # Transactional quota reservation — atomically check + increment
+            # so concurrent uploads cannot both pass the gate on stale counts.
             if user_id:
-                is_ok, current_count, vector_quota = self.user_store.check_quota(user_id)
                 total_new = len(processed_chunks)
-                if not is_ok:
+                reserved, current_count, vector_quota = self.user_store.reserve_quota(
+                    user_id, total_new, namespace
+                )
+                if not reserved:
                     raise Exception(
-                        f"Quota exceeded before upsert: {current_count}/{vector_quota} vectors. "
-                        f"Aborting {total_new} chunks."
-                    )
-                if current_count + total_new > vector_quota:
-                    raise Exception(
-                        f"Upload would exceed quota: {current_count} + {total_new} = {current_count + total_new} > {vector_quota}. "
+                        f"Upload would exceed quota: {current_count} + {total_new} > {vector_quota}. "
                         f"Aborting."
                     )
+                quota_reserved = True
 
             # Stage 2: Embed frames and store in Pinecone
             logger.info(f"[{self.__class__.__name__}][Job {job_id}] Embedding and upserting {len(processed_chunks)} chunks")
@@ -183,19 +181,17 @@ class ProcessingService:
                     "memory_mb": chunk['memory_mb'],
                 })
 
-            # Stage 3: Update vector quota tracking
+            # Stage 3: Register video metadata (quota already reserved)
             if user_id:
-                chunk_count = len(upserted_chunk_ids)
                 try:
-                    self.user_store.increment_vector_count(user_id, chunk_count, namespace)
-                    self.user_store.register_video(user_id, hashed_identifier, chunk_count, filename)
+                    self.user_store.register_video(user_id, hashed_identifier, len(upserted_chunk_ids), filename)
                     logger.info(
-                        f"[{self.__class__.__name__}][Job {job_id}] Updated quota: +{chunk_count} vectors for user {user_id}"
+                        f"[{self.__class__.__name__}][Job {job_id}] Registered video: {len(upserted_chunk_ids)} chunks for user {user_id}"
                     )
-                except Exception as quota_exc:
+                except Exception as reg_exc:
                     logger.critical(
-                        f"[{self.__class__.__name__}][Job {job_id}] CRITICAL: Failed to update vector quota for user {user_id}: {quota_exc}. "
-                        f"Vectors are in Pinecone but quota may be out of sync."
+                        f"[{self.__class__.__name__}][Job {job_id}] CRITICAL: Failed to register video for user {user_id}: {reg_exc}. "
+                        f"Vectors are in Pinecone and quota reserved but video metadata missing."
                     )
 
             result = {
@@ -238,6 +234,17 @@ class ProcessingService:
             if upserted_chunk_ids:
                 logger.info(f"[{self.__class__.__name__}][Job {job_id}] Rolling back: Deleting chunks from Pinecone")
                 self.pinecone_connector.delete_chunks(upserted_chunk_ids, namespace=namespace)
+
+            # Release quota reservation if it was acquired
+            if quota_reserved and user_id:
+                try:
+                    self.user_store.decrement_vector_count(user_id, len(processed_chunks), namespace)
+                    logger.info(f"[{self.__class__.__name__}][Job {job_id}] Released quota reservation of {len(processed_chunks)} vectors")
+                except Exception as release_exc:
+                    logger.critical(
+                        f"[{self.__class__.__name__}][Job {job_id}] CRITICAL: Failed to release quota reservation: {release_exc}. "
+                        f"User {user_id} quota may be inflated by {len(processed_chunks)} vectors."
+                    )
 
             import traceback
             traceback.print_exc()

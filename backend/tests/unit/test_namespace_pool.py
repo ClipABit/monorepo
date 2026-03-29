@@ -394,6 +394,7 @@ class TestProcessingMetadataInjection:
         service.video_embedder._generate_clip_embedding.return_value = mock_embedding
         service.pinecone_connector.upsert_chunk.return_value = True
         service.user_store.check_quota.return_value = (True, 0, 10_000)
+        service.user_store.reserve_quota.return_value = (True, 0, 10_000)
 
         return service
 
@@ -434,7 +435,7 @@ class TestProcessingMetadataInjection:
         assert metadata["project_id"] == "proj_abc"
 
     def test_namespace_level_increment(self):
-        """increment_vector_count is called with namespace for dual-level tracking."""
+        """reserve_quota is called with namespace for dual-level tracking."""
         service = self._create_service_with_mocks()
 
         service.process_video_background(
@@ -446,4 +447,4 @@ class TestProcessingMetadataInjection:
             hashed_identifier="hash123",
         )
 
-        service.user_store.increment_vector_count.assert_called_once_with("auth0|user1", 1, "ns_05")
+        service.user_store.reserve_quota.assert_called_once_with("auth0|user1", 1, "ns_05")
