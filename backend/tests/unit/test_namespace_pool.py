@@ -103,7 +103,7 @@ def _make_app(server, fake_fn):
 
 
 class TestQuotaExceeded:
-    """Upload should return 429 when user is at or over their 10,000 vector quota."""
+    """Upload should return 429 when user is at or over their vector quota."""
 
     def _make_client(self, vector_count, vector_quota=10_000):
         class UserStore:
@@ -129,7 +129,7 @@ class TestQuotaExceeded:
         return TestClient(app), fake_fn
 
     def test_rejects_at_limit(self):
-        """User at exactly 10,000 gets 429."""
+        """User at exactly their quota gets 429."""
         client, _ = self._make_client(10_000)
         files = [("files", ("clip.mp4", io.BytesIO(b"fake"), "video/mp4"))]
         resp = client.post("/upload", files=files, data={"namespace": "x", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
@@ -137,7 +137,7 @@ class TestQuotaExceeded:
         assert "quota" in resp.json()["detail"].lower()
 
     def test_rejects_over_limit(self):
-        """User over 10,000 gets 429."""
+        """User over their quota gets 429."""
         client, _ = self._make_client(12_000)
         files = [("files", ("clip.mp4", io.BytesIO(b"fake"), "video/mp4"))]
         resp = client.post("/upload", files=files, data={"namespace": "x", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
@@ -394,6 +394,7 @@ class TestProcessingMetadataInjection:
         service.video_embedder._generate_clip_embedding.return_value = mock_embedding
         service.pinecone_connector.upsert_chunk.return_value = True
         service.user_store.check_quota.return_value = (True, 0, 10_000)
+        service.user_store.reserve_quota.return_value = (True, 0, 10_000)
 
         return service
 
@@ -434,7 +435,7 @@ class TestProcessingMetadataInjection:
         assert metadata["project_id"] == "proj_abc"
 
     def test_namespace_level_increment(self):
-        """increment_vector_count is called with namespace for dual-level tracking."""
+        """reserve_quota is called with namespace for dual-level tracking."""
         service = self._create_service_with_mocks()
 
         service.process_video_background(
@@ -446,4 +447,4 @@ class TestProcessingMetadataInjection:
             hashed_identifier="hash123",
         )
 
-        service.user_store.increment_vector_count.assert_called_once_with("auth0|user1", 1, "ns_05")
+        service.user_store.reserve_quota.assert_called_once_with("auth0|user1", 1, "ns_05")

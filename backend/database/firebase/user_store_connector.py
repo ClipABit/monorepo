@@ -167,6 +167,40 @@ class UserStoreConnector(FirebaseConnector):
         quota = user_data.get("vector_quota", self.DEFAULT_VECTOR_QUOTA)
         return (current_count < quota, current_count, quota)
 
+    def reserve_quota(self, user_id: str, count: int, namespace: str = "") -> Tuple[bool, int, int]:
+        """
+        Atomically check quota and reserve capacity inside a Firestore transaction.
+
+        Returns:
+            (reserved, current_count_before, quota)
+        """
+        if count <= 0:
+            user_data = self.get_or_create_user(user_id)
+            current = user_data.get("vector_count", 0)
+            quota = user_data.get("vector_quota", self.DEFAULT_VECTOR_QUOTA)
+            return (True, current, quota)
+
+        user_ref = self.db.collection(self.collection).document(user_id)
+
+        @firestore.transactional
+        def _reserve(transaction):
+            snapshot = user_ref.get(transaction=transaction)
+            data = snapshot.to_dict() if snapshot.exists else {}
+            current = data.get("vector_count", 0)
+            quota = data.get("vector_quota", self.DEFAULT_VECTOR_QUOTA)
+
+            if current + count > quota:
+                return (False, current, quota)
+
+            transaction.update(user_ref, {"vector_count": Increment(count)})
+            if namespace:
+                ns_ref = self.db.collection(self.NAMESPACES_COLLECTION).document(namespace)
+                transaction.update(ns_ref, {"vector_count": Increment(count)})
+            return (True, current, quota)
+
+        transaction = self.db.transaction()
+        return _reserve(transaction)
+
     def increment_vector_count(self, user_id: str, count: int, namespace: str = "") -> None:
         """
         Atomically increment vector count at both user and namespace level.
