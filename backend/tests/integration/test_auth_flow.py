@@ -472,7 +472,7 @@ class TestSearchEndpointE2E:
         client = _make_search_app(connector)
         resp = client.get(
             "/search",
-            params={"query": "test query"},
+            params={"query": "test query", "project_id": "proj-1"},
             headers={"Authorization": f"Bearer {valid_token}"},
         )
         assert resp.status_code == 200
@@ -484,7 +484,7 @@ class TestSearchEndpointE2E:
         client = _make_search_app(connector)
         resp = client.get(
             "/search",
-            params={"query": "test"},
+            params={"query": "test", "project_id": "proj-1"},
             headers={"Authorization": f"Bearer {expired_token}"},
         )
         assert resp.status_code == 401
@@ -492,7 +492,7 @@ class TestSearchEndpointE2E:
     def test_search_rejects_missing_auth(self, connector):
         """GET /search returns 401 with no auth header."""
         client = _make_search_app(connector)
-        resp = client.get("/search", params={"query": "test"})
+        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"})
         assert resp.status_code == 401
 
 

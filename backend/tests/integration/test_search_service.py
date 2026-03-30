@@ -317,7 +317,7 @@ class TestSearchServiceHTTPEndpoints:
         """Verify /search endpoint returns results (plugin path, no R2 filtering)."""
         client, service = search_test_client
 
-        resp = client.get("/search", params={"query": "test query"}, headers={"Authorization": "Bearer test-token"})
+        resp = client.get("/search", params={"query": "test query", "project_id": "proj-1"}, headers={"Authorization": "Bearer test-token"})
 
         assert resp.status_code == 200
         data = resp.json()
@@ -329,7 +329,7 @@ class TestSearchServiceHTTPEndpoints:
         """Verify user namespace from Firestore is used (client namespace ignored)."""
         client, service = search_test_client
 
-        client.get("/search", params={"query": "test"}, headers={"Authorization": "Bearer test-token"})
+        client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers={"Authorization": "Bearer test-token"})
 
         # Namespace comes from user_store, not client params
         assert service.pinecone_connector.last_namespace == "user_test_ns"
@@ -338,7 +338,7 @@ class TestSearchServiceHTTPEndpoints:
         """Verify top_k is passed through."""
         client, service = search_test_client
 
-        client.get("/search", params={"query": "test", "top_k": 25}, headers={"Authorization": "Bearer test-token"})
+        client.get("/search", params={"query": "test", "project_id": "proj-1", "top_k": 25}, headers={"Authorization": "Bearer test-token"})
 
         assert service.pinecone_connector.last_top_k == 25
 

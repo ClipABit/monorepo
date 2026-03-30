@@ -63,26 +63,29 @@ class TestSearchUsesUserNamespace:
         """Authenticated search resolves namespace from user doc and filters by user_id."""
         request = _make_mock_request()
 
-        await router.search(request, query="cat on a table", top_k=5)
+        await router.search(request, query="cat on a table", project_id="proj-1", top_k=5)
 
         # Verify auth was called
         mock_auth_connector.assert_called_once_with(request)
 
-        # Verify search used user's namespace with user_id metadata filter
+        # Verify search used user's namespace with user_id and project_id metadata filter
         mock_search_service._search_plugin.assert_called_once()
         call_args = mock_search_service._search_plugin.call_args[0]
         call_kwargs = mock_search_service._search_plugin.call_args[1]
         assert call_args[0] == "cat on a table"  # query
         assert call_args[1] == "user_abc123"  # namespace from user doc
         assert call_args[2] == 5  # top_k
-        assert call_kwargs["metadata_filter"] == {"user_id": {"$eq": "auth0|user1"}}
+        assert call_kwargs["metadata_filter"] == {
+            "user_id": {"$eq": "auth0|user1"},
+            "project_id": {"$eq": "proj-1"},
+        }
 
     @pytest.mark.asyncio
     async def test_search_response_structure(self, router, mock_search_service):
         """Search response includes query, results, and timing."""
         request = _make_mock_request()
 
-        result = await router.search(request, query="dog", top_k=3)
+        result = await router.search(request, query="dog", project_id="proj-1", top_k=3)
 
         assert "query" in result
         assert "results" in result
@@ -94,7 +97,7 @@ class TestSearchUsesUserNamespace:
         """Search calls get_or_create_user to resolve namespace."""
         request = _make_mock_request()
 
-        await router.search(request, query="test")
+        await router.search(request, query="test", project_id="proj-1")
 
         mock_search_service.user_store.get_or_create_user.assert_called_once_with("auth0|user1")
 
