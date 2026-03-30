@@ -23,7 +23,10 @@ def _make_mock_request(auth_header="Bearer test_token"):
 def mock_search_service():
     """Mock SearchService instance."""
     service = MagicMock()
-    service._search_internal.return_value = [
+    service._search_plugin.return_value = [
+        {"id": "chunk1", "score": 0.9, "metadata": {"file_filename": "test.mp4"}}
+    ]
+    service._search_demo.return_value = [
         {"id": "chunk1", "score": 0.9, "metadata": {"file_filename": "test.mp4"}}
     ]
     service.user_store = MagicMock()
@@ -66,9 +69,9 @@ class TestSearchUsesUserNamespace:
         mock_auth_connector.assert_called_once_with(request)
 
         # Verify search used user's namespace with user_id metadata filter
-        mock_search_service._search_internal.assert_called_once()
-        call_args = mock_search_service._search_internal.call_args[0]
-        call_kwargs = mock_search_service._search_internal.call_args[1]
+        mock_search_service._search_plugin.assert_called_once()
+        call_args = mock_search_service._search_plugin.call_args[0]
+        call_kwargs = mock_search_service._search_plugin.call_args[1]
         assert call_args[0] == "cat on a table"  # query
         assert call_args[1] == "user_abc123"  # namespace from user doc
         assert call_args[2] == 5  # top_k
@@ -106,10 +109,10 @@ class TestDemoSearchUnchanged:
 
         await router.demo_search(request, query="sunset", top_k=5)
 
-        call_args = mock_search_service._search_internal.call_args[0]
+        call_args = mock_search_service._search_demo.call_args[0]
         assert call_args[1] == "web-demo"  # namespace
         # Demo search should NOT pass metadata_filter
-        call_kwargs = mock_search_service._search_internal.call_args[1] or {}
+        call_kwargs = mock_search_service._search_demo.call_args[1] or {}
         assert "metadata_filter" not in call_kwargs
 
     @pytest.mark.asyncio

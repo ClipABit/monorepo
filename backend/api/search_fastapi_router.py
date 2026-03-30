@@ -71,7 +71,7 @@ class SearchFastAPIRouter:
             )
 
             # Call search directly on the service instance (no RPC, no cross-app call)
-            results = self.search_service._search_internal(query, namespace, top_k)
+            results = self.search_service._search_demo(query, namespace, top_k)
 
             t_done = time.perf_counter()
             logger.info(
@@ -125,7 +125,11 @@ class SearchFastAPIRouter:
 
             # Filter results to this user only (shared namespace isolation)
             metadata_filter = {"user_id": {"$eq": user_id}}
-            results = self.search_service._search_internal(query, namespace, top_k, metadata_filter=metadata_filter)
+
+            try:
+                results = self.search_service._search_plugin(query, namespace, top_k, metadata_filter=metadata_filter)
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e))
 
             t_done = time.perf_counter()
             logger.info(

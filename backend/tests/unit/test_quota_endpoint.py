@@ -168,7 +168,7 @@ class TestUploadQuotaCheck:
             await router.upload(request, files=[mock_file], hashed_identifier="testhash123")
 
         assert exc_info.value.status_code == 429
-        assert "quota exceeded" in exc_info.value.detail.lower()
+        assert "storage limit" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
     async def test_upload_response_includes_namespace(self):

@@ -39,8 +39,8 @@ class FakeSearchService:
         self.should_raise: Exception | None = None
         self.user_store = FakeUserStore(namespace=namespace)
 
-    def _search_internal(self, query: str, namespace: str = "", top_k: int = 10, metadata_filter: dict = None) -> List[Dict[str, Any]]:
-        """Mock search implementation."""
+    def _search_demo(self, query: str, namespace: str = "", top_k: int = 10, metadata_filter: dict = None) -> List[Dict[str, Any]]:
+        """Mock demo search implementation (R2 presigned URLs)."""
         self.last_query = query
         self.last_namespace = namespace
         self.last_top_k = top_k
@@ -48,6 +48,21 @@ class FakeSearchService:
 
         if self.should_raise:
             raise self.should_raise
+
+        return self.results
+
+    def _search_plugin(self, query: str, namespace: str = "", top_k: int = 10, metadata_filter: dict = None) -> List[Dict[str, Any]]:
+        """Mock plugin search implementation (no R2)."""
+        self.last_query = query
+        self.last_namespace = namespace
+        self.last_top_k = top_k
+        self.last_metadata_filter = metadata_filter
+
+        if self.should_raise:
+            raise self.should_raise
+
+        if not self.results:
+            raise ValueError("No results found. Please upload content before searching.")
 
         return self.results
 
@@ -206,16 +221,15 @@ class TestSearchEndpoint:
 
         assert resp.status_code == 422  # FastAPI validation error
 
-    def test_search_empty_results(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify empty results are handled correctly."""
+    def test_search_empty_results_returns_404(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify empty results return 404 (user has no uploaded content)."""
         client, service = test_client
         service.results = []
 
         resp = client.get("/search", params={"query": "nonexistent"}, headers=AUTH_HEADERS)
 
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["results"] == []
+        assert resp.status_code == 404
+        assert "upload content" in resp.json()["detail"].lower()
 
     def test_search_service_error_returns_500(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
         """Verify service errors return 500."""

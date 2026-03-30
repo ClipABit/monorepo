@@ -134,7 +134,7 @@ class TestQuotaExceeded:
         files = [("files", ("clip.mp4", io.BytesIO(b"fake"), "video/mp4"))]
         resp = client.post("/upload", files=files, data={"namespace": "x", "hashed_identifier": "testhash123"}, headers=AUTH_HEADERS)
         assert resp.status_code == 429
-        assert "quota" in resp.json()["detail"].lower()
+        assert "storage limit" in resp.json()["detail"].lower()
 
     def test_rejects_over_limit(self):
         """User over their quota gets 429."""
@@ -291,7 +291,9 @@ class TestTwoUsersSameNamespace:
         from api.search_fastapi_router import SearchFastAPIRouter
 
         mock_search_service = MagicMock()
-        mock_search_service._search_internal.return_value = []
+        mock_search_service._search_plugin.return_value = [
+            {"id": "chunk1", "score": 0.9, "metadata": {}}
+        ]
         mock_search_service.user_store = MagicMock()
         mock_search_service.user_store.get_or_create_user.return_value = {
             "user_id": "user-x",
@@ -314,7 +316,7 @@ class TestTwoUsersSameNamespace:
         resp = client.get("/search", params={"query": "sunset"}, headers=AUTH_HEADERS)
         assert resp.status_code == 200
 
-        call_kwargs = mock_search_service._search_internal.call_args[1]
+        call_kwargs = mock_search_service._search_plugin.call_args[1]
         assert call_kwargs["metadata_filter"] == {"user_id": {"$eq": "user-x"}}
 
     def test_search_different_users_get_different_filters(self):
@@ -322,7 +324,9 @@ class TestTwoUsersSameNamespace:
         from api.search_fastapi_router import SearchFastAPIRouter
 
         mock_search_service = MagicMock()
-        mock_search_service._search_internal.return_value = []
+        mock_search_service._search_plugin.return_value = [
+            {"id": "chunk1", "score": 0.9, "metadata": {}}
+        ]
 
         current_user = {"id": "user-x"}
 
@@ -348,15 +352,15 @@ class TestTwoUsersSameNamespace:
         # User X searches
         current_user["id"] = "user-x"
         client.get("/search", params={"query": "cat"}, headers=AUTH_HEADERS)
-        filter_x = mock_search_service._search_internal.call_args[1]["metadata_filter"]
+        filter_x = mock_search_service._search_plugin.call_args[1]["metadata_filter"]
         assert filter_x == {"user_id": {"$eq": "user-x"}}
 
-        mock_search_service._search_internal.reset_mock()
+        mock_search_service._search_plugin.reset_mock()
 
         # User Y searches
         current_user["id"] = "user-y"
         client.get("/search", params={"query": "cat"}, headers=AUTH_HEADERS)
-        filter_y = mock_search_service._search_internal.call_args[1]["metadata_filter"]
+        filter_y = mock_search_service._search_plugin.call_args[1]["metadata_filter"]
         assert filter_y == {"user_id": {"$eq": "user-y"}}
 
 
