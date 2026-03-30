@@ -171,3 +171,36 @@ class SearchService:
 
         logger.info(f"[{self.__class__.__name__}] Found {len(results)} results")
         return results
+
+    def _search_plugin(self, query: str, namespace: str = "", top_k: int = 10, metadata_filter: dict = None) -> list:
+        """
+        Search for the plugin endpoint. Returns Pinecone results with metadata directly.
+        No R2 presigned URLs — the plugin resolves files locally.
+
+        Raises ValueError when Pinecone returns no matches (user has no uploaded content).
+        """
+        logger.info(f"[{self.__class__.__name__}] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
+
+        query_embedding = self.embedder.embed_text(query)
+
+        matches = self.pinecone_connector.query_chunks(
+            query_embedding=query_embedding,
+            namespace=namespace,
+            top_k=top_k,
+            filter=metadata_filter
+        )
+
+        if not matches:
+            raise ValueError("No results found. Please upload content before searching.")
+
+        results = []
+        for match in matches:
+            metadata = match.get('metadata', {})
+            results.append({
+                'id': match.get('id'),
+                'score': match.get('score', 0.0),
+                'metadata': metadata
+            })
+
+        logger.info(f"[{self.__class__.__name__}] Found {len(results)} results")
+        return results
