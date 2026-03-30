@@ -151,7 +151,7 @@ class TestSearchEndpoint:
     def test_search_with_query_returns_results(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
         """Verify search returns results for a query."""
         client, service = test_client
-        resp = client.get("/search", params={"query": "woman on a train"}, headers=AUTH_HEADERS)
+        resp = client.get("/search", params={"query": "woman on a train", "project_id": "proj-1"}, headers=AUTH_HEADERS)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -166,14 +166,14 @@ class TestSearchEndpoint:
     def test_search_passes_query_to_service(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
         """Verify query is passed correctly to service."""
         client, service = test_client
-        client.get("/search", params={"query": "test query"}, headers=AUTH_HEADERS)
+        client.get("/search", params={"query": "test query", "project_id": "proj-1"}, headers=AUTH_HEADERS)
 
         assert service.last_query == "test query"
 
     def test_search_uses_user_namespace(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
         """Verify user's namespace from Firestore is used, not client-provided."""
         client, service = test_client
-        client.get("/search", params={"query": "test"}, headers=AUTH_HEADERS)
+        client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers=AUTH_HEADERS)
 
         # Namespace should come from user_store, not client params
         assert service.last_namespace == "user_test_ns"
@@ -182,7 +182,7 @@ class TestSearchEndpoint:
         """Verify client-provided namespace param is ignored."""
         client, service = test_client
         # Even if client sends a namespace param, the user's assigned namespace is used
-        client.get("/search", params={"query": "test", "namespace": "client-ns"}, headers=AUTH_HEADERS)
+        client.get("/search", params={"query": "test", "project_id": "proj-1", "namespace": "client-ns"}, headers=AUTH_HEADERS)
 
         # Should still be user's namespace, not "client-ns"
         assert service.last_namespace == "user_test_ns"
@@ -190,14 +190,14 @@ class TestSearchEndpoint:
     def test_search_with_top_k(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
         """Verify top_k parameter is passed to service."""
         client, service = test_client
-        client.get("/search", params={"query": "test", "top_k": 20}, headers=AUTH_HEADERS)
+        client.get("/search", params={"query": "test", "project_id": "proj-1", "top_k": 20}, headers=AUTH_HEADERS)
 
         assert service.last_top_k == 20
 
     def test_search_with_default_top_k(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
         """Verify default top_k is 10."""
         client, service = test_client
-        client.get("/search", params={"query": "test"}, headers=AUTH_HEADERS)
+        client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers=AUTH_HEADERS)
 
         assert service.last_top_k == 10
 
@@ -209,7 +209,7 @@ class TestSearchEndpoint:
         app.include_router(router.router)
         client = TestClient(app)
 
-        client.get("/search", params={"query": "my search"}, headers=AUTH_HEADERS)
+        client.get("/search", params={"query": "my search", "project_id": "proj-1"}, headers=AUTH_HEADERS)
 
         assert service.last_query == "my search"
         assert service.last_namespace == "custom-ns"
@@ -217,7 +217,14 @@ class TestSearchEndpoint:
     def test_search_missing_query_returns_error(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
         """Verify missing query parameter returns 422."""
         client, _ = test_client
-        resp = client.get("/search", headers=AUTH_HEADERS)
+        resp = client.get("/search", params={"project_id": "proj-1"}, headers=AUTH_HEADERS)
+
+        assert resp.status_code == 422  # FastAPI validation error
+
+    def test_search_missing_project_id_returns_422(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify missing project_id parameter returns 422."""
+        client, _ = test_client
+        resp = client.get("/search", params={"query": "test"}, headers=AUTH_HEADERS)
 
         assert resp.status_code == 422  # FastAPI validation error
 
@@ -226,17 +233,40 @@ class TestSearchEndpoint:
         client, service = test_client
         service.results = []
 
-        resp = client.get("/search", params={"query": "nonexistent"}, headers=AUTH_HEADERS)
+        resp = client.get("/search", params={"query": "nonexistent", "project_id": "proj-1"}, headers=AUTH_HEADERS)
 
         assert resp.status_code == 404
         assert "upload content" in resp.json()["detail"].lower()
+
+    def test_search_filters_by_project_id(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify project_id is always included in metadata filter."""
+        client, service = test_client
+        client.get("/search", params={"query": "test", "project_id": "proj-abc"}, headers=AUTH_HEADERS)
+
+        assert service.last_metadata_filter == {
+            "user_id": {"$eq": "test-user-id"},
+            "project_id": {"$eq": "proj-abc"},
+        }
+
+    def test_search_rejects_empty_namespace(self) -> None:
+        """Verify 500 when user's namespace is missing from Firestore."""
+        service = FakeSearchService(results=list(SAMPLE_RESULTS), namespace="")
+        app = FastAPI()
+        router = SearchFastAPIRouter(search_service_instance=service, auth_connector=FakeAuthConnector())
+        app.include_router(router.router)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers=AUTH_HEADERS)
+
+        assert resp.status_code == 500
+        assert "malformed" in resp.json()["detail"].lower()
 
     def test_search_service_error_returns_500(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
         """Verify service errors return 500."""
         client, service = test_client
         service.should_raise = Exception("Database connection failed")
 
-        resp = client.get("/search", params={"query": "test"}, headers=AUTH_HEADERS)
+        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers=AUTH_HEADERS)
 
         assert resp.status_code == 500
         assert "Database connection failed" in resp.json()["detail"]
@@ -244,7 +274,7 @@ class TestSearchEndpoint:
     def test_search_timing_is_positive(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
         """Verify timing is a positive number."""
         client, _ = test_client
-        resp = client.get("/search", params={"query": "test"}, headers=AUTH_HEADERS)
+        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers=AUTH_HEADERS)
 
         data = resp.json()
         assert data["timing"]["total_s"] >= 0
@@ -361,7 +391,7 @@ class TestSearchAuth:
         app.include_router(router.router)
         client = TestClient(app, raise_server_exceptions=False)
 
-        resp = client.get("/search", params={"query": "test"})
+        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"})
         assert resp.status_code == 401
 
     def test_search_rejects_invalid_auth_scheme(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
@@ -374,7 +404,7 @@ class TestSearchAuth:
         app.include_router(router.router)
         client = TestClient(app, raise_server_exceptions=False)
 
-        resp = client.get("/search", params={"query": "test"}, headers={"Authorization": "Basic abc123"})
+        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers={"Authorization": "Basic abc123"})
         assert resp.status_code == 401
 
 

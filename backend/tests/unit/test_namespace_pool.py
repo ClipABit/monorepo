@@ -313,11 +313,14 @@ class TestTwoUsersSameNamespace:
         app.include_router(router.router)
         client = TestClient(app)
 
-        resp = client.get("/search", params={"query": "sunset"}, headers=AUTH_HEADERS)
+        resp = client.get("/search", params={"query": "sunset", "project_id": "proj-1"}, headers=AUTH_HEADERS)
         assert resp.status_code == 200
 
         call_kwargs = mock_search_service._search_plugin.call_args[1]
-        assert call_kwargs["metadata_filter"] == {"user_id": {"$eq": "user-x"}}
+        assert call_kwargs["metadata_filter"] == {
+            "user_id": {"$eq": "user-x"},
+            "project_id": {"$eq": "proj-1"},
+        }
 
     def test_search_different_users_get_different_filters(self):
         """Two users searching same namespace get different user_id filters."""
@@ -351,17 +354,17 @@ class TestTwoUsersSameNamespace:
 
         # User X searches
         current_user["id"] = "user-x"
-        client.get("/search", params={"query": "cat"}, headers=AUTH_HEADERS)
+        client.get("/search", params={"query": "cat", "project_id": "proj-1"}, headers=AUTH_HEADERS)
         filter_x = mock_search_service._search_plugin.call_args[1]["metadata_filter"]
-        assert filter_x == {"user_id": {"$eq": "user-x"}}
+        assert filter_x == {"user_id": {"$eq": "user-x"}, "project_id": {"$eq": "proj-1"}}
 
         mock_search_service._search_plugin.reset_mock()
 
         # User Y searches
         current_user["id"] = "user-y"
-        client.get("/search", params={"query": "cat"}, headers=AUTH_HEADERS)
+        client.get("/search", params={"query": "cat", "project_id": "proj-1"}, headers=AUTH_HEADERS)
         filter_y = mock_search_service._search_plugin.call_args[1]["metadata_filter"]
-        assert filter_y == {"user_id": {"$eq": "user-y"}}
+        assert filter_y == {"user_id": {"$eq": "user-y"}, "project_id": {"$eq": "proj-1"}}
 
 
 # ── Test: Processing injects user_id and project_id into metadata ────

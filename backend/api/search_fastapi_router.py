@@ -90,7 +90,7 @@ class SearchFastAPIRouter:
                 detail="An internal error occurred while processing the demo search request.",
             )
 
-    async def search(self, request: Request, query: str, top_k: int = 10):
+    async def search(self, request: Request, query: str, project_id: str, top_k: int = 10):
         """
         Search endpoint - accepts a text query and returns semantic search results.
         Authenticates user and searches their assigned namespace.
@@ -117,14 +117,22 @@ class SearchFastAPIRouter:
                 None, self.search_service.user_store.get_or_create_user, user_id
             )
             namespace = user_data.get("namespace", "")
+            if not namespace:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Your account data appears to be malformed — namespace is missing. Please contact support."
+                )
 
             t_start = time.perf_counter()
             logger.info(
                 f"[Search] Query: '{query}' | namespace='{namespace}' | user={user_id} | top_k={top_k}"
             )
 
-            # Filter results to this user only (shared namespace isolation)
-            metadata_filter = {"user_id": {"$eq": user_id}}
+            # Filter results to this user's project
+            metadata_filter = {
+                "user_id": {"$eq": user_id},
+                "project_id": {"$eq": project_id},
+            }
 
             try:
                 results = self.search_service._search_plugin(query, namespace, top_k, metadata_filter=metadata_filter)
