@@ -209,7 +209,7 @@ class ServerFastAPIRouter:
         if not is_ok:
             raise HTTPException(
                 status_code=429,
-                detail=f"Vector quota exceeded ({current_count}/{vector_quota}). Delete some videos to free up space."
+                detail="Upload failed: you've reached your storage limit. Please delete some files and try again."
             )
 
         # Use user's assigned namespace, not client-provided
