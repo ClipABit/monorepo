@@ -115,7 +115,7 @@ class SearchService:
         """Expose FastAPI app as ASGI endpoint."""
         return self.fastapi_app
 
-    def _search_internal(self, query: str, namespace: str = "", top_k: int = 10, metadata_filter: dict = None) -> list:
+    def _search_demo(self, query: str, namespace: str = "", top_k: int = 10, metadata_filter: dict = None) -> list:
         """
         Internal search implementation.
 

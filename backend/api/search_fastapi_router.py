@@ -71,7 +71,7 @@ class SearchFastAPIRouter:
             )
 
             # Call search directly on the service instance (no RPC, no cross-app call)
-            results = self.search_service._search_internal(query, namespace, top_k)
+            results = self.search_service._search_demo(query, namespace, top_k)
 
             t_done = time.perf_counter()
             logger.info(
