@@ -18,7 +18,7 @@ from pathlib import Path
 import tempfile
 import shutil
 import subprocess
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 import sys
 import importlib
 
@@ -29,11 +29,83 @@ from preprocessing.preprocessor import Preprocessor
 from models.metadata import VideoChunk
 from database.pinecone_connector import PineconeConnector
 from database.r2_connector import R2Connector
+from database.firebase.user_store_connector import UserStoreConnector
 
 
 # ==============================================================================
 # PATH FIXTURES
 # ==============================================================================
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--default-vector-quota",
+        action="store",
+        default=str(UserStoreConnector.DEFAULT_VECTOR_QUOTA),
+        help=(
+            "Default per-user vector quota used by tests that validate default behavior. "
+            "Defaults to UserStoreConnector.DEFAULT_VECTOR_QUOTA."
+        ),
+    )
+    parser.addoption(
+        "--test-upload-bytes",
+        action="store",
+        default="1000",
+        help="Default number of bytes returned by mocked UploadFile.read() in tests.",
+    )
+
+
+@pytest.fixture
+def default_vector_quota(request) -> int:
+    """Shared default quota for tests; override via --default-vector-quota."""
+    return int(request.config.getoption("--default-vector-quota"))
+
+
+@pytest.fixture
+def test_upload_bytes(request) -> int:
+    """Default byte size for mocked UploadFile bodies; override via --test-upload-bytes."""
+    return int(request.config.getoption("--test-upload-bytes"))
+
+
+@pytest.fixture
+def make_upload_file(test_upload_bytes):
+    """Factory for a mock FastAPI UploadFile with an async .read()."""
+
+    try:
+        from fastapi import UploadFile  # type: ignore
+    except Exception:
+        UploadFile = object  # pragma: no cover
+
+    def _make(
+        filename: str = "test.mp4",
+        content_type: str = "video/mp4",
+        content: bytes | None = None,
+    ):
+        file = MagicMock(spec=UploadFile)
+        file.filename = filename
+        file.content_type = content_type
+        file.read = AsyncMock(
+            return_value=(
+                content if content is not None else (b"x" * test_upload_bytes)
+            )
+        )
+        return file
+
+    return _make
+
+
+@pytest.fixture
+def mock_doc():
+    """Factory for a mock Firestore document snapshot with .exists and .to_dict()."""
+
+    def _make(exists: bool, data: dict | None = None):
+        doc = MagicMock()
+        doc.exists = exists
+        doc.to_dict.return_value = data
+        return doc
+
+    return _make
+
 
 @pytest.fixture
 def temp_dir():
@@ -47,6 +119,7 @@ def temp_dir():
 # VIDEO FIXTURES (Auto-generated with OpenCV)
 # ==============================================================================
 
+
 @pytest.fixture(scope="session")
 def sample_video_5s(tmp_path_factory) -> Path:
     """5-second test video with mixed motion patterns."""
@@ -54,12 +127,12 @@ def sample_video_5s(tmp_path_factory) -> Path:
 
     video_dir = tmp_path_factory.mktemp("test_videos")
     video_path = video_dir / "sample_5s.mp4"
-    
+
     # Create a simple video using OpenCV
     fps, duration = 30, 5
     width, height = 640, 480
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(video_path), fourcc, fps, (width, height))
 
     for frame_num in range(fps * duration):
@@ -69,7 +142,9 @@ def sample_video_5s(tmp_path_factory) -> Path:
         frame[:, :] = (color_shift, 100 + color_shift // 2, 150)
 
         cv2.circle(frame, (320 + frame_num * 2, 240), 50, (255, 255, 255), -1)
-        cv2.rectangle(frame, (100, 100 + frame_num), (200, 200 + frame_num), (0, 255, 0), 2)
+        cv2.rectangle(
+            frame, (100, 100 + frame_num), (200, 200 + frame_num), (0, 255, 0), 2
+        )
 
         writer.write(frame)
 
@@ -82,22 +157,28 @@ def sample_video_h264(tmp_path_factory) -> Path:
     """1-second H.264 test video generated with ffmpeg."""
     video_dir = tmp_path_factory.mktemp("test_videos_h264")
     video_path = video_dir / "sample_h264.mp4"
-    
+
     cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        str(video_path)
+        "ffmpeg",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=duration=1:size=320x240:rate=30",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        str(video_path),
     ]
-    
+
     try:
         subprocess.run(cmd, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         pytest.skip(f"Failed to generate H.264 video: {e.stderr.decode()}")
     except FileNotFoundError:
         pytest.skip("ffmpeg not found, skipping H.264 test")
-        
+
     return video_path
 
 
@@ -106,22 +187,30 @@ def sample_video_vp9(tmp_path_factory) -> Path:
     """1-second VP9 test video generated with ffmpeg."""
     video_dir = tmp_path_factory.mktemp("test_videos_vp9")
     video_path = video_dir / "sample_vp9.mp4"
-    
+
     cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
-        "-c:v", "libvpx-vp9",
-        "-b:v", "0", "-crf", "30",
-        str(video_path)
+        "ffmpeg",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=duration=1:size=320x240:rate=30",
+        "-c:v",
+        "libvpx-vp9",
+        "-b:v",
+        "0",
+        "-crf",
+        "30",
+        str(video_path),
     ]
-    
+
     try:
         subprocess.run(cmd, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         pytest.skip(f"Failed to generate VP9 video: {e.stderr.decode()}")
     except FileNotFoundError:
         pytest.skip("ffmpeg not found, skipping VP9 test")
-        
+
     return video_path
 
 
@@ -130,26 +219,35 @@ def sample_video_av1(tmp_path_factory) -> Path:
     """1-second AV1 test video generated with ffmpeg."""
     video_dir = tmp_path_factory.mktemp("test_videos_av1")
     video_path = video_dir / "sample_av1.mp4"
-    
+
     # Generate AV1 video using ffmpeg
     # -f lavfi -i testsrc=duration=1:size=320x240:rate=30
     # -c:v libsvtav1 -preset 8 -crf 50
     cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
-        "-c:v", "libsvtav1",
-        "-preset", "8",
-        "-crf", "50",
-        str(video_path)
+        "ffmpeg",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=duration=1:size=320x240:rate=30",
+        "-c:v",
+        "libsvtav1",
+        "-preset",
+        "8",
+        "-crf",
+        "50",
+        str(video_path),
     ]
-    
+
     try:
         subprocess.run(cmd, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
-        pytest.skip(f"Failed to generate AV1 video (ffmpeg might not support libsvtav1): {e.stderr.decode()}")
+        pytest.skip(
+            f"Failed to generate AV1 video (ffmpeg might not support libsvtav1): {e.stderr.decode()}"
+        )
     except FileNotFoundError:
         pytest.skip("ffmpeg not found, skipping AV1 test")
-        
+
     return video_path
 
 
@@ -164,7 +262,7 @@ def sample_video_static(tmp_path_factory) -> Path:
     fps, duration = 30, 10
     width, height = 640, 480
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(video_path), fourcc, fps, (width, height))
 
     for frame_num in range(fps * duration):
@@ -187,6 +285,7 @@ def sample_video_bytes(sample_video_5s) -> bytes:
 # DATA FIXTURES
 # ==============================================================================
 
+
 @pytest.fixture
 def sample_frame() -> np.ndarray:
     """Single 640x480 BGR frame. Shape: (480, 640, 3)"""
@@ -202,11 +301,7 @@ def sample_frames() -> np.ndarray:
 @pytest.fixture
 def sample_video_chunk() -> VideoChunk:
     """Basic VideoChunk for testing."""
-    return VideoChunk(
-        chunk_id="test_video_chunk_0000",
-        start_time=0.0,
-        end_time=5.0
-    )
+    return VideoChunk(chunk_id="test_video_chunk_0000", start_time=0.0, end_time=5.0)
 
 
 @pytest.fixture
@@ -219,33 +314,23 @@ def sample_embedding() -> np.ndarray:
 # COMPONENT FIXTURES
 # ==============================================================================
 
+
 @pytest.fixture
 def chunker() -> Chunker:
     """Chunker with test configuration."""
-    return Chunker(
-        min_duration=1.0,
-        max_duration=10.0,
-        scene_threshold=13.0
-    )
+    return Chunker(min_duration=1.0, max_duration=10.0, scene_threshold=13.0)
 
 
 @pytest.fixture
 def frame_extractor() -> FrameExtractor:
     """FrameExtractor with test configuration."""
-    return FrameExtractor(
-        min_fps=0.5,
-        max_fps=2.0,
-        motion_threshold=25.0
-    )
+    return FrameExtractor(min_fps=0.5, max_fps=2.0, motion_threshold=25.0)
 
 
 @pytest.fixture
 def compressor() -> Compressor:
     """Compressor with test configuration."""
-    return Compressor(
-        target_width=640,
-        target_height=480
-    )
+    return Compressor(target_width=640, target_height=480)
 
 
 @pytest.fixture
@@ -259,13 +344,14 @@ def preprocessor() -> Preprocessor:
         max_sampling_fps=2.0,
         motion_threshold=25.0,
         target_width=640,
-        target_height=480
+        target_height=480,
     )
 
 
 # ==============================================================================
 # MOCKS
 # ==============================================================================
+
 
 @pytest.fixture
 def mock_modal_dict(mocker):
@@ -295,39 +381,39 @@ def mock_modal_dict(mocker):
     mock_dict.get = get
     mock_dict.keys.side_effect = fake_dict.keys
 
-    mocker.patch('modal.Dict.from_name', return_value=mock_dict)
+    mocker.patch("modal.Dict.from_name", return_value=mock_dict)
     return fake_dict
 
 
 @pytest.fixture
 def mock_pinecone_connector(mocker):
     """Mock PineconeConnector with all necessary mocks set up"""
-    
-    mock_pinecone = mocker.patch('database.pinecone_connector.Pinecone')
+
+    mock_pinecone = mocker.patch("database.pinecone_connector.Pinecone")
     mock_client = mocker.MagicMock()
     mock_index = mocker.MagicMock()
     mock_pinecone.return_value = mock_client
     mock_client.Index.return_value = mock_index
-    
+
     connector = PineconeConnector(api_key="test-key", index_name="test-index")
-    
+
     return connector, mock_index, mock_client, mock_pinecone
 
 
 @pytest.fixture
 def mock_r2_connector(mocker, mock_modal_dict):
     """Mock R2Connector with all necessary mocks set up"""
-    mock_boto3 = mocker.patch('database.r2_connector.boto3')
+    mock_boto3 = mocker.patch("database.r2_connector.boto3")
     mock_client = mocker.MagicMock()
     mock_boto3.client.return_value = mock_client
-    
+
     connector = R2Connector(
         account_id="test-account",
         access_key_id="test-key",
-        secret_access_key="test-secret",
-        environment="test"
+        secret_access_key="test-secret",  # pragma: allowlist secret
+        environment="test",
     )
-    
+
     return connector, mock_client, mock_boto3
 
 
@@ -340,44 +426,48 @@ def processing_service(mocker):
     """
     # Create a mock for the modal module
     mock_modal = MagicMock()
-    
+
     # Configure the mock decorators to just return the original class/function
     def identity_decorator(*args, **kwargs):
         def wrapper(obj):
             return obj
+
         return wrapper
-    
+
     # Handle @app.cls() -> returns decorator -> returns class
     mock_modal.App.return_value.cls.side_effect = identity_decorator
-    
+
     # Handle @modal.method() -> returns decorator -> returns function
     mock_modal.method.side_effect = identity_decorator
-    
+
     # Handle @modal.method_background() -> returns decorator -> returns function
     mock_modal.method_background.side_effect = identity_decorator
-    
+
     # Handle @modal.enter() -> returns decorator -> returns function
     mock_modal.enter.side_effect = identity_decorator
 
     # Patch sys.modules to use our mock_modal
-    with patch.dict(sys.modules, {'modal': mock_modal}):
+    with patch.dict(sys.modules, {"modal": mock_modal}):
         # Import the processing app module
-        if 'apps.processing_app' in sys.modules:
+        if "apps.processing_app" in sys.modules:
             import apps.processing_app as processing_app
+
             importlib.reload(processing_app)
         else:
             import apps.processing_app as processing_app
-        
+
         # Now ProcessingService is a regular Python class
         service = processing_app.ProcessingService()
-        
+
         # Mock all the components that would be set in startup()
-        service.r2_connector = mocker.MagicMock()
+        # Note: No r2_connector — processing pipeline doesn't use R2
         service.pinecone_connector = mocker.MagicMock()
         service.preprocessor = mocker.MagicMock()
         service.video_embedder = mocker.MagicMock()
         service.job_store = mocker.MagicMock()
-        
+        service.user_store = mocker.MagicMock()
+        service.user_store.check_quota.return_value = (True, 0, 10_000)
+
         yield service
 
 
@@ -390,47 +480,50 @@ def server_instance(mocker):
     """
     # Create a mock for the modal module
     mock_modal = MagicMock()
-    
+
     # Configure the mock decorators to just return the original class/function
     def identity_decorator(*args, **kwargs):
         def wrapper(obj):
             return obj
+
         return wrapper
-    
+
     # Handle @app.cls() -> returns decorator -> returns class
     mock_modal.App.return_value.cls.side_effect = identity_decorator
-    
+
     # Handle @modal.method() -> returns decorator -> returns function
     mock_modal.method.side_effect = identity_decorator
-    
+
     # Handle @modal.enter() -> returns decorator -> returns function
     mock_modal.enter.side_effect = identity_decorator
-    
+
     # Handle @modal.asgi_app() -> returns decorator -> returns function
     mock_modal.asgi_app.side_effect = identity_decorator
 
     # Patch sys.modules to use our mock_modal
-    with patch.dict(sys.modules, {'modal': mock_modal}):
+    with patch.dict(sys.modules, {"modal": mock_modal}):
         # Import the server service module
-        if 'services.http_server' in sys.modules:
+        if "services.http_server" in sys.modules:
             import services.http_server as server_module
+
             importlib.reload(server_module)
         else:
             import services.http_server as server_module
-        
+
         server = server_module.ServerService()
-        
+
         # Mock all the components that would be set in startup()
         server.r2_connector = mocker.MagicMock()
         server.pinecone_connector = mocker.MagicMock()
         server.job_store = mocker.MagicMock()
-        
+
         yield server
 
 
 # ==============================================================================
 # PYTEST CONFIG
 # ==============================================================================
+
 
 def pytest_configure(config):
     """Register custom markers."""
@@ -441,7 +534,11 @@ def pytest_configure(config):
 
 def pytest_collection_modifyitems(session, config, items):
     """Ensure API endpoint tests execute after the rest for isolation."""
-    api_items = [item for item in items if "tests/integration/test_api_endpoints.py" in item.nodeid]
+    api_items = [
+        item
+        for item in items
+        if "tests/integration/test_api_endpoints.py" in item.nodeid
+    ]
     if not api_items:
         return
     remaining = [item for item in items if item not in api_items]

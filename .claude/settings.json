@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/unit/test_quota_endpoint.py -v --tb=short)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(python -m pytest tests/integration/test_auth_flow.py::TestSearchEndpointE2E -v --tb=short)",
+      "Bash(python -m pytest tests/integration/test_auth_flow.py -v --tb=short)",
+      "Bash(python -m pytest tests/ --tb=short)",
+      "Bash(python -m pytest tests/ --tb=line)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(uv run:*)",
+      "Bash(uv tool:*)"
+    ]
+  }
+}

@@ -5,6 +5,7 @@ Exposes its own ASGI app for direct HTTP access (no server gateway hop).
 """
 
 import logging
+from typing import Any
 import modal
 
 from shared.config import get_environment, get_env_var, get_pinecone_index
@@ -36,6 +37,7 @@ class SearchService:
         import firebase_admin
         import json
         from firebase_admin import credentials, firestore
+
         firebase_credentials = json.loads(get_env_var("FIREBASE_ADMIN_KEY"))
         cred = credentials.Certificate(firebase_credentials)
         try:
@@ -51,23 +53,26 @@ class SearchService:
         R2_SECRET_ACCESS_KEY = get_env_var("R2_SECRET_ACCESS_KEY")
 
         pinecone_index = get_pinecone_index()
-        logger.info(f"[{self.__class__.__name__}] Using Pinecone index: {pinecone_index}")
+        logger.info(
+            f"[{self.__class__.__name__}] Using Pinecone index: {pinecone_index}"
+        )
 
         # Initialize text embedder (loads CLIP text encoder)
         self.embedder = TextEmbedder()
         self.embedder._load_model()
-        logger.info(f"[{self.__class__.__name__}] CLIP text encoder (ONNX) loaded on CPU")
+        logger.info(
+            f"[{self.__class__.__name__}] CLIP text encoder (ONNX) loaded on CPU"
+        )
 
         # Initialize connectors
         self.pinecone_connector = PineconeConnector(
-            api_key=PINECONE_API_KEY,
-            index_name=pinecone_index
+            api_key=PINECONE_API_KEY, index_name=pinecone_index
         )
         self.r2_connector = R2Connector(
             account_id=R2_ACCOUNT_ID,
             access_key_id=R2_ACCESS_KEY_ID,
             secret_access_key=R2_SECRET_ACCESS_KEY,
-            environment=env
+            environment=env,
         )
 
         self.user_store = UserStoreConnector(firestore_client=firestore_client)
@@ -105,7 +110,9 @@ class SearchService:
         )
 
         # Add search routes
-        router = SearchFastAPIRouter(search_service_instance=self, auth_connector=self.auth_connector)
+        router = SearchFastAPIRouter(
+            search_service_instance=self, auth_connector=self.auth_connector
+        )
         app.include_router(router.router)
 
         return app
@@ -115,13 +122,28 @@ class SearchService:
         """Expose FastAPI app as ASGI endpoint."""
         return self.fastapi_app
 
-    def _search_internal(self, query: str, namespace: str = "", top_k: int = 10) -> list:
+    def _search_demo(
+        self,
+        query: str,
+        namespace: str = "",
+        top_k: int = 10,
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> list:
         """
-        Internal search implementation.
+        Internal search implementation for demo endpoint.
 
-        Called directly by the FastAPI router (no RPC overhead).
+        Args:
+            query: The search query string
+            namespace: Pinecone namespace to search in (optional)
+            top_k: Number of top results to return (default 10)
+            metadata_filter: Optional metadata filter for Pinecone (user isolation)
+
+        Returns:
+            list: Search results with metadata and presigned R2 URLs
         """
-        logger.info(f"[{self.__class__.__name__}] Query: '{query}' | namespace='{namespace}' | top_k={top_k}")
+        logger.info(
+            f"[{self.__class__.__name__}] Query: '{query}' | namespace='{namespace}' | top_k={top_k}"
+        )
 
         # Generate query embedding
         query_embedding = self.embedder.embed_text(query)
@@ -130,42 +152,97 @@ class SearchService:
         matches = self.pinecone_connector.query_chunks(
             query_embedding=query_embedding,
             namespace=namespace,
-            top_k=top_k
+            top_k=top_k,
+            filter=metadata_filter,
         )
 
         # Format results with presigned URLs
         results = []
         for match in matches:
-            metadata = match.get('metadata', {})
+            metadata = match.get("metadata", {})
 
-            if 'file_hashed_identifier' not in metadata:
+            if "file_hashed_identifier" not in metadata:
                 logger.warning(
                     "Skipping result %s: missing file_hashed_identifier",
-                    match.get('id'),
+                    match.get("id"),
                 )
                 continue
 
             presigned_url = None
             if self.r2_connector:
                 presigned_url = self.r2_connector.generate_presigned_url(
-                    identifier=metadata['file_hashed_identifier'],
+                    identifier=metadata["file_hashed_identifier"],
                 )
 
             if not presigned_url:
                 logger.warning(
                     "Skipping result %s: unable to generate presigned URL",
-                    match.get('id'),
+                    match.get("id"),
                 )
                 continue
 
-            metadata['presigned_url'] = presigned_url
+            metadata["presigned_url"] = presigned_url
 
             result = {
-                'id': match.get('id'),
-                'score': match.get('score', 0.0),
-                'metadata': metadata
+                "id": match.get("id"),
+                "score": match.get("score", 0.0),
+                "metadata": metadata,
             }
             results.append(result)
+
+        logger.info(f"[{self.__class__.__name__}] Found {len(results)} results")
+        return results
+
+    def _search_plugin(
+        self,
+        query: str,
+        namespace: str = "",
+        top_k: int = 10,
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> list:
+        """
+        Search for the plugin endpoint. Returns Pinecone results with metadata directly.
+
+        Args:
+            query: The search query string
+            namespace: Pinecone namespace to search in (optional)
+            top_k: Number of top results to return (default 10)
+            metadata_filter: Optional metadata filter for Pinecone (user isolation)
+
+        Returns:
+            list: Raw Pinecone results. Plugin resolves files locally (no presigned URLs)
+
+        Raises:
+            ValueError: When Pinecone returns no matches (user has no uploaded content)
+        """
+        logger.info(
+            f"[{self.__class__.__name__}] Query: '{query}' | namespace='{namespace}' | top_k={top_k}"
+        )
+
+        query_embedding = self.embedder.embed_text(query)
+
+        matches = self.pinecone_connector.query_chunks(
+            query_embedding=query_embedding,
+            namespace=namespace,
+            top_k=top_k,
+            filter=metadata_filter,
+        )
+
+        if not matches:
+            raise ValueError(
+                "No results found. Please upload content before searching."
+            )
+
+        results = []
+        for match in matches:
+            metadata = match.get("metadata", {})
+            results.append(
+                {
+                    "id": match.get("id"),
+                    "score": match.get("score", 0.0),
+                    "metadata": metadata,
+                }
+            )
 
         logger.info(f"[{self.__class__.__name__}] Found {len(results)} results")
         return results

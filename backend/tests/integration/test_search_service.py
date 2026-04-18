@@ -28,11 +28,13 @@ class FakePineconeConnector:
         self,
         query_embedding: np.ndarray,
         namespace: str = "",
-        top_k: int = 5
+        top_k: int = 5,
+        filter: dict = None,
     ) -> List[Dict[str, Any]]:
         self.last_query_embedding = query_embedding
         self.last_namespace = namespace
         self.last_top_k = top_k
+        self.last_filter = filter
         return self.matches
 
 
@@ -158,6 +160,16 @@ def search_service_instance(mocker):
 
         service.auth_connector = FakeAuthConnector()
 
+        # Mock user store for namespace resolution
+        mock_user_store = MagicMock()
+        mock_user_store.get_or_create_user.return_value = {
+            "user_id": "test-user-id",
+            "namespace": "user_test_ns",
+            "vector_count": 0,
+            "vector_quota": 10_000,
+        }
+        service.user_store = mock_user_store
+
         yield service
 
 
@@ -172,13 +184,13 @@ def search_test_client(search_service_instance):
 
 
 class TestSearchServiceInternal:
-    """Test _search_internal method."""
+    """Test _search_demo method (R2 presigned URL flow for demo endpoint)."""
 
     def test_search_returns_results(self, search_service_instance):
         """Verify search returns formatted results."""
         service = search_service_instance
 
-        results = service._search_internal("woman on a train", namespace="test-ns", top_k=10)
+        results = service._search_demo("woman on a train", namespace="test-ns", top_k=10)
 
         # Should return 2 results (chunk-3 skipped due to missing identifier)
         assert len(results) == 2
@@ -190,7 +202,7 @@ class TestSearchServiceInternal:
         """Verify embedder is called with query text."""
         service = search_service_instance
 
-        service._search_internal("my search query")
+        service._search_demo("my search query")
 
         assert len(service.embedder.embed_calls) == 1
         assert service.embedder.embed_calls[0] == "my search query"
@@ -199,7 +211,7 @@ class TestSearchServiceInternal:
         """Verify Pinecone is queried with correct parameters."""
         service = search_service_instance
 
-        service._search_internal("test", namespace="my-namespace", top_k=20)
+        service._search_demo("test", namespace="my-namespace", top_k=20)
 
         assert service.pinecone_connector.last_namespace == "my-namespace"
         assert service.pinecone_connector.last_top_k == 20
@@ -209,7 +221,7 @@ class TestSearchServiceInternal:
         """Verify presigned URLs are added to results."""
         service = search_service_instance
 
-        results = service._search_internal("test")
+        results = service._search_demo("test")
 
         assert results[0]['metadata']['presigned_url'] == 'https://r2.example.com/hash-abc/video1.mp4'
         assert results[1]['metadata']['presigned_url'] == 'https://r2.example.com/hash-def/video2.mp4'
@@ -219,7 +231,7 @@ class TestSearchServiceInternal:
         service = search_service_instance
 
         # chunk-3 has no file_hashed_identifier
-        results = service._search_internal("test")
+        results = service._search_demo("test")
 
         ids = [r['id'] for r in results]
         assert 'chunk-3' not in ids
@@ -238,7 +250,7 @@ class TestSearchServiceInternal:
             }
         })
 
-        results = service._search_internal("test")
+        results = service._search_demo("test")
 
         ids = [r['id'] for r in results]
         assert 'chunk-4' not in ids
@@ -248,7 +260,7 @@ class TestSearchServiceInternal:
         service = search_service_instance
         service.pinecone_connector.matches = []
 
-        results = service._search_internal("nonexistent query")
+        results = service._search_demo("nonexistent query")
 
         assert results == []
 
@@ -256,7 +268,7 @@ class TestSearchServiceInternal:
         """Verify default namespace and top_k."""
         service = search_service_instance
 
-        service._search_internal("test")
+        service._search_demo("test")
 
         # Default namespace should be ""
         assert service.pinecone_connector.last_namespace == ""
@@ -302,30 +314,31 @@ class TestSearchServiceHTTPEndpoints:
         assert resp.json()["service"] == "search"
 
     def test_search_endpoint(self, search_test_client):
-        """Verify /search endpoint returns results."""
+        """Verify /search endpoint returns results (plugin path, no R2 filtering)."""
         client, service = search_test_client
 
-        resp = client.get("/search", params={"query": "test query"})
+        resp = client.get("/search", params={"query": "test query", "project_id": "proj-1"}, headers={"Authorization": "Bearer test-token"})
 
         assert resp.status_code == 200
         data = resp.json()
         assert data["query"] == "test query"
-        assert len(data["results"]) == 2
+        assert len(data["results"]) == 3  # _search_plugin returns all matches, no R2 filtering
         assert "timing" in data
 
     def test_search_with_namespace(self, search_test_client):
-        """Verify namespace is passed through."""
+        """Verify user namespace from Firestore is used (client namespace ignored)."""
         client, service = search_test_client
 
-        client.get("/search", params={"query": "test", "namespace": "custom-ns"})
+        client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers={"Authorization": "Bearer test-token"})
 
-        assert service.pinecone_connector.last_namespace == "custom-ns"
+        # Namespace comes from user_store, not client params
+        assert service.pinecone_connector.last_namespace == "user_test_ns"
 
     def test_search_with_top_k(self, search_test_client):
         """Verify top_k is passed through."""
         client, service = search_test_client
 
-        client.get("/search", params={"query": "test", "top_k": 25})
+        client.get("/search", params={"query": "test", "project_id": "proj-1", "top_k": 25}, headers={"Authorization": "Bearer test-token"})
 
         assert service.pinecone_connector.last_top_k == 25
 
@@ -333,7 +346,7 @@ class TestSearchServiceHTTPEndpoints:
         """Verify missing query returns 422."""
         client, _ = search_test_client
 
-        resp = client.get("/search")
+        resp = client.get("/search", headers={"Authorization": "Bearer test-token"})
 
         assert resp.status_code == 422
 
@@ -345,7 +358,7 @@ class TestSearchServiceResultFormatting:
         """Verify result dictionary structure."""
         service = search_service_instance
 
-        results = service._search_internal("test")
+        results = service._search_demo("test")
 
         result = results[0]
         assert 'id' in result
@@ -357,7 +370,7 @@ class TestSearchServiceResultFormatting:
         """Verify original metadata is preserved."""
         service = search_service_instance
 
-        results = service._search_internal("test")
+        results = service._search_demo("test")
 
         metadata = results[0]['metadata']
         assert metadata['file_name'] == 'video1.mp4'
@@ -369,7 +382,7 @@ class TestSearchServiceResultFormatting:
         """Verify score is a float."""
         service = search_service_instance
 
-        results = service._search_internal("test")
+        results = service._search_demo("test")
 
         assert isinstance(results[0]['score'], float)
 
@@ -382,7 +395,7 @@ class TestSearchServiceWithNoR2Connector:
         service = search_service_instance
         service.r2_connector = None
 
-        results = service._search_internal("test")
+        results = service._search_demo("test")
 
         # All results should be skipped since no presigned URLs can be generated
         assert results == []

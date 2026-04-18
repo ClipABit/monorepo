@@ -350,8 +350,23 @@ def _make_server_app(auth_connector):
 
 def _make_search_app(auth_connector):
     """Create a full FastAPI app with SearchFastAPIRouter and real auth."""
+    class FakeUserStore:
+        def get_or_create_user(self, user_id):
+            return {
+                "user_id": user_id,
+                "namespace": "user_test_ns",
+                "vector_count": 0,
+                "vector_quota": 10_000,
+            }
+
     class FakeSearchService:
-        def _search_internal(self, query, namespace="", top_k=10):
+        def __init__(self):
+            self.user_store = FakeUserStore()
+
+        def _search_plugin(self, query, namespace="", top_k=10, metadata_filter=None):
+            return [{"id": "result-1", "score": 0.9, "metadata": {}}]
+
+        def _search_demo(self, query, namespace="", top_k=10, metadata_filter=None):
             return [{"id": "result-1", "score": 0.9, "metadata": {}}]
 
     app = FastAPI()
@@ -457,7 +472,7 @@ class TestSearchEndpointE2E:
         client = _make_search_app(connector)
         resp = client.get(
             "/search",
-            params={"query": "test query"},
+            params={"query": "test query", "project_id": "proj-1"},
             headers={"Authorization": f"Bearer {valid_token}"},
         )
         assert resp.status_code == 200
@@ -469,7 +484,7 @@ class TestSearchEndpointE2E:
         client = _make_search_app(connector)
         resp = client.get(
             "/search",
-            params={"query": "test"},
+            params={"query": "test", "project_id": "proj-1"},
             headers={"Authorization": f"Bearer {expired_token}"},
         )
         assert resp.status_code == 401
@@ -477,7 +492,7 @@ class TestSearchEndpointE2E:
     def test_search_rejects_missing_auth(self, connector):
         """GET /search returns 401 with no auth header."""
         client = _make_search_app(connector)
-        resp = client.get("/search", params={"query": "test"})
+        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"})
         assert resp.status_code == 401
 
 
