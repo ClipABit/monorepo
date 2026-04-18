@@ -134,6 +134,11 @@ class ProcessingService:
                 f"{total_frames} frames, {total_memory:.2f} MB, avg_complexity={avg_complexity:.3f}"
             )
 
+            if user_id and not hashed_identifier.strip():
+                raise ValueError(
+                    f"[{self.__class__.__name__}][Job {job_id}] Missing hashed_identifier for user-scoped upload"
+                )
+
             # Transactional quota reservation — atomically check + increment
             # so concurrent uploads cannot both pass the gate on stale counts.
             if user_id:
@@ -207,7 +212,7 @@ class ProcessingService:
                 )
 
             # Stage 3: Register video metadata (quota already reserved)
-            if user_id:
+            if user_id and hashed_identifier.strip():
                 try:
                     self.user_store.register_video(
                         user_id, hashed_identifier, len(upserted_chunk_ids), filename
