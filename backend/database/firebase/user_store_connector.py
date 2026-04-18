@@ -243,10 +243,9 @@ class UserStoreConnector(FirebaseConnector):
             current = data.get("vector_count", 0)
             quota = data.get("vector_quota", self.DEFAULT_VECTOR_QUOTA)
 
-            if current + count > quota:
-                return (False, current, quota)
-
-            transaction.update(user_ref, {"vector_count": Increment(count)})
+            # If we're tracking namespace usage, read it before any writes.
+            # Firestore does not allow reads after writes in the same transaction.
+            ns_ref = None
             if namespace:
                 ns_ref = self.db.collection(self.NAMESPACES_COLLECTION).document(
                     namespace
@@ -259,6 +258,12 @@ class UserStoreConnector(FirebaseConnector):
                         "Ensure get_or_create_user()/_ensure_namespace_docs() has run and "
                         "that the namespace is a valid pool id (ns_00..ns_19)."
                     )
+
+            if current + count > quota:
+                return (False, current, quota)
+
+            transaction.update(user_ref, {"vector_count": Increment(count)})
+            if ns_ref is not None:
                 transaction.update(ns_ref, {"vector_count": Increment(count)})
             return (True, current, quota)
 

@@ -557,6 +557,55 @@ class TestReserveQuota:
         assert ok2 is False
         assert count2 == q - step
 
+    def test_reserve_quota_reads_namespace_before_writing(
+        self, connector, mock_firestore, default_vector_quota
+    ):
+        """
+        Firestore forbids reads after writes in a transaction.
+        reserve_quota() must read the namespace doc (if provided) before calling transaction.update().
+        """
+        q = default_vector_quota
+        user_doc_ref = MagicMock()
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True,
+            data={
+                "user_id": "u1",
+                "vector_count": 0,
+                "vector_quota": q,
+                "namespace": "ns_00",
+            },
+        )
+        ns_doc_ref = MagicMock()
+        ns_doc_ref.get.return_value = _mock_doc(
+            exists=True, data={"vector_count": 0, "user_count": 1}
+        )
+
+        def collection_router(name):
+            col = MagicMock()
+            if name == "users":
+                col.document.return_value = user_doc_ref
+            elif name == "namespaces":
+                col.document.return_value = ns_doc_ref
+            return col
+
+        mock_firestore.collection.side_effect = collection_router
+
+        tx = MagicMock()
+        mock_firestore.transaction.return_value = tx
+
+        call_index = {"i": 0}
+
+        def update_side_effect(doc_ref, updates):
+            call_index["i"] += 1
+            # On the first write (user update), namespace must already have been read.
+            if call_index["i"] == 1:
+                assert ns_doc_ref.get.call_count == 1
+
+        tx.update.side_effect = update_side_effect
+
+        ok, count, quota = connector.reserve_quota("u1", 1, "ns_00")
+        assert ok is True
+
 
 # =============================================================================
 # Increment Vector Count Tests
