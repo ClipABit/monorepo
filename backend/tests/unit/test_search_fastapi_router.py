@@ -378,6 +378,104 @@ class TestDemoSearchEndpoint:
         assert data["timing"]["total_s"] >= 0
 
 
+class TestDemoSearchEndpoint:
+    """Test /demo-search endpoint."""
+
+    @pytest.fixture(autouse=True)
+    def _disable_limiter(self) -> None:
+        """Disable rate limiting for unit tests."""
+        limiter.enabled = False
+        yield
+        limiter.enabled = True
+
+    def test_demo_search_returns_results(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify demo search returns results for a query."""
+        client, service = test_client
+        resp = client.get("/demo-search", params={"query": "woman on a train"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["query"] == "woman on a train"
+        assert len(data["results"]) == 2
+        assert data["results"][0]["id"] == "chunk-1"
+        assert data["results"][0]["score"] == 0.95
+        assert "timing" in data
+        assert "total_s" in data["timing"]
+
+    def test_demo_search_requires_no_auth(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify demo search is public (no auth required)."""
+        client, _ = test_client
+        resp = client.get("/demo-search", params={"query": "test"})
+
+        assert resp.status_code == 200
+
+    def test_demo_search_passes_query_to_service(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify query is passed correctly to service."""
+        client, service = test_client
+        client.get("/demo-search", params={"query": "test query"})
+
+        assert service.last_query == "test query"
+
+    def test_demo_search_uses_web_demo_namespace(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify demo search always uses 'web-demo' namespace."""
+        client, service = test_client
+        client.get("/demo-search", params={"query": "test"})
+
+        assert service.last_namespace == "web-demo"
+
+    def test_demo_search_with_top_k(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify top_k parameter is passed to service."""
+        client, service = test_client
+        client.get("/demo-search", params={"query": "test", "top_k": 20})
+
+        assert service.last_top_k == 20
+
+    def test_demo_search_with_default_top_k(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify default top_k is 10."""
+        client, service = test_client
+        client.get("/demo-search", params={"query": "test"})
+
+        assert service.last_top_k == 10
+
+    def test_demo_search_missing_query_returns_error(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify missing query parameter returns 422."""
+        client, _ = test_client
+        resp = client.get("/demo-search")
+
+        assert resp.status_code == 422
+
+    def test_demo_search_empty_results(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify empty results are handled correctly."""
+        client, service = test_client
+        service.results = []
+
+        resp = client.get("/demo-search", params={"query": "nonexistent"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["results"] == []
+
+    def test_demo_search_service_error_returns_500(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify service errors return 500 with generic message."""
+        client, service = test_client
+        service.should_raise = Exception("Database connection failed")
+
+        resp = client.get("/demo-search", params={"query": "test"})
+
+        assert resp.status_code == 500
+        assert "internal error" in resp.json()["detail"].lower()
+        assert "Database connection failed" not in resp.json()["detail"]
+
+    def test_demo_search_timing_is_positive(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+        """Verify timing is a positive number."""
+        client, _ = test_client
+        resp = client.get("/demo-search", params={"query": "test"})
+
+        data = resp.json()
+        assert data["timing"]["total_s"] >= 0
+
+
 class TestSearchAuth:
     """Test auth protection on /search endpoint."""
 
