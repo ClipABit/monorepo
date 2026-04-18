@@ -190,6 +190,8 @@ class UploadHandler:
             ValueError: If files list is empty
             HTTPException: 400 if all files fail validation, 500 if all fail processing
         """
+        raise HTTPException(status_code=400, detail="Batch uploads are not supported")
+
         if not files:
             raise ValueError("Cannot create batch with zero files")
 
