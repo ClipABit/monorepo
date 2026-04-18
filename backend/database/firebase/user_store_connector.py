@@ -25,7 +25,7 @@ class UserStoreConnector(FirebaseConnector):
     """
 
     DEFAULT_COLLECTION = "users"
-    DEFAULT_VECTOR_QUOTA = 1000
+    DEFAULT_VECTOR_QUOTA = 2_000
 
     NAMESPACE_POOL_SIZE = 20
     MAX_VECTORS_PER_NAMESPACE = 100_000
@@ -52,11 +52,13 @@ class UserStoreConnector(FirebaseConnector):
             ns_id = self._namespace_id(i)
             doc = ns_col.document(ns_id).get()
             if not doc.exists:
-                ns_col.document(ns_id).set({
-                    "namespace_id": ns_id,
-                    "vector_count": 0,
-                    "user_count": 0,
-                })
+                ns_col.document(ns_id).set(
+                    {
+                        "namespace_id": ns_id,
+                        "vector_count": 0,
+                        "user_count": 0,
+                    }
+                )
         self._namespace_docs_initialized = True
 
     def _assign_namespace(self) -> str:
@@ -80,7 +82,11 @@ class UserStoreConnector(FirebaseConnector):
             for i in range(self.NAMESPACE_POOL_SIZE):
                 ns_id = self._namespace_id(i)
                 doc = ns_col.document(ns_id).get(transaction=transaction)
-                data = doc.to_dict() if doc.exists else {"vector_count": 0, "user_count": 0}
+                data = (
+                    doc.to_dict()
+                    if doc.exists
+                    else {"vector_count": 0, "user_count": 0}
+                )
 
                 if data.get("user_count", 0) >= self.MAX_USERS_PER_NAMESPACE:
                     continue
@@ -94,14 +100,18 @@ class UserStoreConnector(FirebaseConnector):
                     best_ns = ns_id
 
             if best_ns is None:
-                raise RuntimeError("All namespaces are full — no capacity for new users")
+                raise RuntimeError(
+                    "All namespaces are full — no capacity for new users"
+                )
 
             transaction.update(ns_col.document(best_ns), {"user_count": Increment(1)})
             return best_ns, best_remaining
 
         transaction = self.db.transaction()
         best_ns, best_remaining = _pick_and_claim(transaction)
-        logger.info(f"Assigned namespace {best_ns} (remaining capacity ~{best_remaining} vectors)")
+        logger.info(
+            f"Assigned namespace {best_ns} (remaining capacity ~{best_remaining} vectors)"
+        )
         return best_ns
 
     # ── User CRUD ───────────────────────────────────────────────────
@@ -117,8 +127,10 @@ class UserStoreConnector(FirebaseConnector):
 
         if doc.exists:
             user_data = doc.to_dict()
-            updates = {}
-            if not user_data.get("namespace") or not user_data["namespace"].startswith("ns_"):
+            updates: Dict[str, Any] = {}
+            if not user_data.get("namespace") or not user_data["namespace"].startswith(
+                "ns_"
+            ):
                 updates["namespace"] = self._assign_namespace()
             if "vector_count" not in user_data:
                 updates["vector_count"] = 0
@@ -127,7 +139,9 @@ class UserStoreConnector(FirebaseConnector):
             if updates:
                 doc_ref.update(updates)
                 user_data.update(updates)
-                logger.info(f"Backfilled fields {list(updates.keys())} for user {user_id}")
+                logger.info(
+                    f"Backfilled fields {list(updates.keys())} for user {user_id}"
+                )
             return user_data
 
         namespace = self._assign_namespace()
@@ -167,12 +181,19 @@ class UserStoreConnector(FirebaseConnector):
         quota = user_data.get("vector_quota", self.DEFAULT_VECTOR_QUOTA)
         return (current_count < quota, current_count, quota)
 
-    def reserve_quota(self, user_id: str, count: int, namespace: str = "") -> Tuple[bool, int, int]:
+    def reserve_quota(
+        self, user_id: str, count: int, namespace: str = ""
+    ) -> Tuple[bool, int, int]:
         """
         Atomically check quota and reserve capacity inside a Firestore transaction.
 
+        Args:
+            user_id: User ID to reserve quota for
+            count: Number of vectors to reserve
+            namespace: Optional namespace for namespace-level tracking
+
         Returns:
-            (reserved, current_count_before, quota)
+            Tuple[bool, int, int]: (reserved success, current count before, quota limit)
         """
         if count <= 0:
             user_data = self.get_or_create_user(user_id)
@@ -194,16 +215,28 @@ class UserStoreConnector(FirebaseConnector):
 
             transaction.update(user_ref, {"vector_count": Increment(count)})
             if namespace:
-                ns_ref = self.db.collection(self.NAMESPACES_COLLECTION).document(namespace)
+                ns_ref = self.db.collection(self.NAMESPACES_COLLECTION).document(
+                    namespace
+                )
                 transaction.update(ns_ref, {"vector_count": Increment(count)})
             return (True, current, quota)
 
         transaction = self.db.transaction()
         return _reserve(transaction)
 
-    def increment_vector_count(self, user_id: str, count: int, namespace: str = "") -> None:
+    def increment_vector_count(
+        self, user_id: str, count: int, namespace: str = ""
+    ) -> None:
         """
         Atomically increment vector count at both user and namespace level.
+
+        Args:
+            user_id: User ID to increment count for
+            count: Number of vectors to add
+            namespace: Optional namespace for namespace-level tracking
+
+        Returns:
+            None
         """
         if count <= 0:
             return
@@ -214,11 +247,23 @@ class UserStoreConnector(FirebaseConnector):
             self.db.collection(self.NAMESPACES_COLLECTION).document(namespace).update(
                 {"vector_count": Increment(count)}
             )
-        logger.info(f"Incremented vector count by {count} for user {user_id} (namespace={namespace})")
+        logger.info(
+            f"Incremented vector count by {count} for user {user_id} (namespace={namespace})"
+        )
 
-    def decrement_vector_count(self, user_id: str, count: int, namespace: str = "") -> None:
+    def decrement_vector_count(
+        self, user_id: str, count: int, namespace: str = ""
+    ) -> None:
         """
         Atomically decrement vector count at both user and namespace level, flooring at 0.
+
+        Args:
+            user_id: User ID to decrement count for
+            count: Number of vectors to remove
+            namespace: Optional namespace for namespace-level tracking
+
+        Returns:
+            None
         """
         if count <= 0:
             return
@@ -238,30 +283,60 @@ class UserStoreConnector(FirebaseConnector):
             ns_doc = ns_ref.get()
             if ns_doc.exists and ns_doc.to_dict().get("vector_count", 0) < 0:
                 ns_ref.update({"vector_count": 0})
-                logger.warning(f"Floored negative vector count to 0 for namespace {namespace}")
+                logger.warning(
+                    f"Floored negative vector count to 0 for namespace {namespace}"
+                )
 
-        logger.info(f"Decremented vector count by {count} for user {user_id} (namespace={namespace})")
+        logger.info(
+            f"Decremented vector count by {count} for user {user_id} (namespace={namespace})"
+        )
 
     # ── Video registration ──────────────────────────────────────────
 
-    def register_video(self, user_id: str, hashed_identifier: str, chunk_count: int, filename: str) -> None:
-        """Register a processed video in the user's videos subcollection."""
+    def register_video(
+        self, user_id: str, hashed_identifier: str, chunk_count: int, filename: str
+    ) -> None:
+        """
+        Register a processed video in the user's videos subcollection.
+
+        Args:
+            user_id: User ID who owns the video
+            hashed_identifier: Client-generated hash of the video file
+            chunk_count: Number of chunks created for this video
+            filename: Original filename for tracking
+
+        Returns:
+            None
+        """
         doc_ref = (
             self.db.collection(self.collection)
             .document(user_id)
             .collection("videos")
             .document(hashed_identifier)
         )
-        doc_ref.set({
-            "hashed_identifier": hashed_identifier,
-            "chunk_count": chunk_count,
-            "filename": filename,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-        logger.info(f"Registered video {hashed_identifier} ({chunk_count} chunks) for user {user_id}")
+        doc_ref.set(
+            {
+                "hashed_identifier": hashed_identifier,
+                "chunk_count": chunk_count,
+                "filename": filename,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        logger.info(
+            f"Registered video {hashed_identifier} ({chunk_count} chunks) for user {user_id}"
+        )
 
     def get_video_chunk_count(self, user_id: str, hashed_identifier: str) -> int:
-        """Get the chunk count for a registered video. Returns 0 if not found."""
+        """
+        Get the chunk count for a registered video. Returns 0 if not found.
+
+        Args:
+            user_id: User ID who owns the video
+            hashed_identifier: Client-generated hash of the video file
+
+        Returns:
+            int: Number of chunks, or 0 if video not found
+        """
         doc = (
             self.db.collection(self.collection)
             .document(user_id)
@@ -274,7 +349,16 @@ class UserStoreConnector(FirebaseConnector):
         return 0
 
     def deregister_video(self, user_id: str, hashed_identifier: str) -> None:
-        """Remove a video from the user's videos subcollection."""
+        """
+        Remove a video from the user's videos subcollection.
+
+        Args:
+            user_id: User ID who owns the video
+            hashed_identifier: Client-generated hash of the video file
+
+        Returns:
+            None
+        """
         doc_ref = (
             self.db.collection(self.collection)
             .document(user_id)

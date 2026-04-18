@@ -72,12 +72,14 @@ class TestQuotaEndpoint:
     @pytest.mark.asyncio
     async def test_new_user_returns_defaults(self):
         """Fresh user sees zero usage with full quota remaining."""
-        router, _ = _create_router_with_mocks(user_data={
-            "user_id": "auth0|new_user",
-            "namespace": "user_newns",
-            "vector_count": 0,
-            "vector_quota": 10_000,
-        })
+        router, _ = _create_router_with_mocks(
+            user_data={
+                "user_id": "auth0|new_user",
+                "namespace": "user_newns",
+                "vector_count": 0,
+                "vector_quota": 10_000,
+            }
+        )
         request = _make_mock_request()
 
         result = await router.quota(request)
@@ -89,12 +91,14 @@ class TestQuotaEndpoint:
     @pytest.mark.asyncio
     async def test_full_quota_shows_zero_remaining(self):
         """User at quota shows 0 remaining."""
-        router, _ = _create_router_with_mocks(user_data={
-            "user_id": "auth0|full_user",
-            "namespace": "user_fullns",
-            "vector_count": 10_000,
-            "vector_quota": 10_000,
-        })
+        router, _ = _create_router_with_mocks(
+            user_data={
+                "user_id": "auth0|full_user",
+                "namespace": "user_fullns",
+                "vector_count": 10_000,
+                "vector_quota": 10_000,
+            }
+        )
         request = _make_mock_request()
 
         result = await router.quota(request)
@@ -104,12 +108,14 @@ class TestQuotaEndpoint:
     @pytest.mark.asyncio
     async def test_over_quota_shows_zero_remaining(self):
         """User over quota shows 0 remaining (not negative)."""
-        router, _ = _create_router_with_mocks(user_data={
-            "user_id": "auth0|over_user",
-            "namespace": "user_overns",
-            "vector_count": 11_000,
-            "vector_quota": 10_000,
-        })
+        router, _ = _create_router_with_mocks(
+            user_data={
+                "user_id": "auth0|over_user",
+                "namespace": "user_overns",
+                "vector_count": 11_000,
+                "vector_quota": 10_000,
+            }
+        )
         request = _make_mock_request()
 
         result = await router.quota(request)
@@ -129,12 +135,14 @@ class TestQuotaEndpoint:
     @pytest.mark.asyncio
     async def test_premium_user_higher_quota(self):
         """Premium user with custom quota is handled correctly."""
-        router, _ = _create_router_with_mocks(user_data={
-            "user_id": "auth0|premium",
-            "namespace": "user_premns",
-            "vector_count": 25_000,
-            "vector_quota": 50_000,
-        })
+        router, _ = _create_router_with_mocks(
+            user_data={
+                "user_id": "auth0|premium",
+                "namespace": "user_premns",
+                "vector_count": 25_000,
+                "vector_quota": 50_000,
+            }
+        )
         request = _make_mock_request()
 
         result = await router.quota(request)
@@ -147,60 +155,58 @@ class TestUploadQuotaCheck:
     """Tests for upload endpoint quota checking."""
 
     @pytest.mark.asyncio
-    async def test_upload_rejects_when_over_quota(self):
+    async def test_upload_rejects_when_over_quota(self, make_upload_file):
         """Returns 429 when user exceeds quota."""
-        router, server_instance = _create_router_with_mocks(user_data={
-            "user_id": "auth0|over",
-            "namespace": "user_over",
-            "vector_count": 10_000,
-            "vector_quota": 10_000,
-        })
+        router, server_instance = _create_router_with_mocks(
+            user_data={
+                "user_id": "auth0|over",
+                "namespace": "user_over",
+                "vector_count": 10_000,
+                "vector_quota": 10_000,
+            }
+        )
         server_instance.user_store.check_quota.return_value = (False, 10_000, 10_000)
         request = _make_mock_request()
 
-        from fastapi import UploadFile, HTTPException
-        mock_file = MagicMock(spec=UploadFile)
-        mock_file.filename = "test.mp4"
-        mock_file.content_type = "video/mp4"
-        mock_file.read = AsyncMock(return_value=b"x" * 1000)
+        from fastapi import HTTPException
+
+        mock_file = make_upload_file(filename="test.mp4", content_type="video/mp4")
 
         with pytest.raises(HTTPException) as exc_info:
-            await router.upload(request, files=[mock_file], hashed_identifier="testhash123")
+            await router.upload(
+                request, files=[mock_file], hashed_identifier="testhash123"
+            )
 
         assert exc_info.value.status_code == 429
         assert "storage limit" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
-    async def test_upload_response_includes_namespace(self):
+    async def test_upload_response_includes_namespace(self, make_upload_file):
         """Upload response includes namespace for plugin storage."""
         router, server_instance = _create_router_with_mocks()
         server_instance.user_store.check_quota.return_value = (True, 4821, 10_000)
         request = _make_mock_request()
 
-        from fastapi import UploadFile
-        mock_file = MagicMock(spec=UploadFile)
-        mock_file.filename = "test.mp4"
-        mock_file.content_type = "video/mp4"
-        mock_file.read = AsyncMock(return_value=b"x" * 1000)
+        mock_file = make_upload_file(filename="test.mp4", content_type="video/mp4")
 
-        result = await router.upload(request, files=[mock_file], hashed_identifier="testhash123")
+        result = await router.upload(
+            request, files=[mock_file], hashed_identifier="testhash123"
+        )
 
         assert result["namespace"] == "user_abc123"
 
     @pytest.mark.asyncio
-    async def test_upload_response_includes_quota_info(self):
+    async def test_upload_response_includes_quota_info(self, make_upload_file):
         """Upload response includes vector_count and vector_quota."""
         router, server_instance = _create_router_with_mocks()
         server_instance.user_store.check_quota.return_value = (True, 4821, 10_000)
         request = _make_mock_request()
 
-        from fastapi import UploadFile
-        mock_file = MagicMock(spec=UploadFile)
-        mock_file.filename = "test.mp4"
-        mock_file.content_type = "video/mp4"
-        mock_file.read = AsyncMock(return_value=b"x" * 1000)
+        mock_file = make_upload_file(filename="test.mp4", content_type="video/mp4")
 
-        result = await router.upload(request, files=[mock_file], hashed_identifier="testhash123")
+        result = await router.upload(
+            request, files=[mock_file], hashed_identifier="testhash123"
+        )
 
         assert "vector_count" in result
         assert "vector_quota" in result
@@ -208,20 +214,21 @@ class TestUploadQuotaCheck:
         assert result["vector_quota"] == 10_000
 
     @pytest.mark.asyncio
-    async def test_upload_uses_user_namespace_not_client(self):
+    async def test_upload_uses_user_namespace_not_client(self, make_upload_file):
         """Server overrides client-provided namespace with user's assigned one."""
         router, server_instance = _create_router_with_mocks()
         server_instance.user_store.check_quota.return_value = (True, 100, 10_000)
         request = _make_mock_request()
 
-        from fastapi import UploadFile
-        mock_file = MagicMock(spec=UploadFile)
-        mock_file.filename = "test.mp4"
-        mock_file.content_type = "video/mp4"
-        mock_file.read = AsyncMock(return_value=b"x" * 1000)
+        mock_file = make_upload_file(filename="test.mp4", content_type="video/mp4")
 
         # Client tries to send a different namespace — should be ignored
-        result = await router.upload(request, files=[mock_file], namespace="client_ns", hashed_identifier="testhash123")
+        result = await router.upload(
+            request,
+            files=[mock_file],
+            namespace="client_ns",
+            hashed_identifier="testhash123",
+        )
 
         # The result namespace should be the user's assigned namespace
         assert result["namespace"] == "user_abc123"

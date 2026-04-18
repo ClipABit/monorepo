@@ -32,6 +32,7 @@ class ServerService:
         import firebase_admin
         import json
         from firebase_admin import credentials, firestore
+
         firebase_credentials = json.loads(get_env_var("FIREBASE_ADMIN_KEY"))
         cred = credentials.Certificate(firebase_credentials)
         try:
@@ -48,19 +49,20 @@ class ServerService:
         IS_FILE_CHANGE_ENABLED = get_env_var("IS_FILE_CHANGE_ENABLED").lower() == "true"
 
         pinecone_index = get_pinecone_index()
-        logger.info(f"[{self.__class__.__name__}] Using Pinecone index: {pinecone_index}")
+        logger.info(
+            f"[{self.__class__.__name__}] Using Pinecone index: {pinecone_index}"
+        )
 
         # Initialize lightweight connectors
         self.pinecone_connector = PineconeConnector(
-            api_key=PINECONE_API_KEY,
-            index_name=pinecone_index
+            api_key=PINECONE_API_KEY, index_name=pinecone_index
         )
         self.job_store = JobStoreConnector(dict_name="clipabit-jobs")
         self.r2_connector = R2Connector(
             account_id=R2_ACCOUNT_ID,
             access_key_id=R2_ACCESS_KEY_ID,
             secret_access_key=R2_SECRET_ACCESS_KEY,
-            environment=env
+            environment=env,
         )
         self.user_store = UserStoreConnector(firestore_client=firestore_client)
         self.auth_connector = AuthConnector(
@@ -108,21 +110,39 @@ class ServerService:
             server_instance=self,
             is_file_change_enabled=self.is_file_change_enabled,
             environment=self.env,
-            processing_service_cls=processing_service_cls
+            processing_service_cls=processing_service_cls,
         )
         self.fastapi_app.include_router(api_router.router)
         return self.fastapi_app
 
     @modal.method()
-    def delete_video_background(self, job_id: str, hashed_identifier: str, namespace: str = "", user_id: str = ""):
-        """Background job that deletes a video and all associated chunks. Decrements vector quota."""
-        logger.info(f"[{self.__class__.__name__}][Job {job_id}] Deletion started: {hashed_identifier} | namespace='{namespace}' | user={user_id or 'None'}")
+    def delete_video_background(
+        self,
+        job_id: str,
+        hashed_identifier: str,
+        namespace: str = "",
+        user_id: str = "",
+    ):
+        """
+        Background job that deletes a video and all associated chunks. Decrements vector quota.
+
+        Args:
+            job_id: Unique identifier for this deletion job
+            hashed_identifier: Client-generated hash of the video file
+            namespace: Namespace where the video is stored (optional)
+            user_id: User ID for quota decrement (optional)
+
+        Returns:
+            None (updates job status via job store)
+        """
+        logger.info(
+            f"[{self.__class__.__name__}][Job {job_id}] Deletion started: {hashed_identifier} | namespace='{namespace}' | user={user_id or 'None'}"
+        )
 
         try:
             # Delete chunks from Pinecone
             pinecone_success = self.pinecone_connector.delete_by_identifier(
-                hashed_identifier=hashed_identifier,
-                namespace=namespace
+                hashed_identifier=hashed_identifier, namespace=namespace
             )
 
             if not pinecone_success:
@@ -134,15 +154,21 @@ class ServerService:
                 logger.critical(
                     f"[{self.__class__.__name__}][Job {job_id}] INCONSISTENCY: Chunks deleted but R2 deletion failed"
                 )
-                raise Exception("Failed to delete video from R2 after deleting chunks. System may be inconsistent.")
+                raise Exception(
+                    "Failed to delete video from R2 after deleting chunks. System may be inconsistent."
+                )
 
             # Decrement vector count for the user
             chunk_count = 0
             if user_id:
                 try:
-                    chunk_count = self.user_store.get_video_chunk_count(user_id, hashed_identifier)
+                    chunk_count = self.user_store.get_video_chunk_count(
+                        user_id, hashed_identifier
+                    )
                     if chunk_count > 0:
-                        self.user_store.decrement_vector_count(user_id, chunk_count, namespace=namespace)
+                        self.user_store.decrement_vector_count(
+                            user_id, chunk_count, namespace=namespace
+                        )
                     self.user_store.deregister_video(user_id, hashed_identifier)
                     logger.info(
                         f"[{self.__class__.__name__}][Job {job_id}] Decremented vector count by {chunk_count} for user {user_id}"
@@ -170,15 +196,20 @@ class ServerService:
             try:
                 self.r2_connector.clear_cache(namespace or "__default__")
             except Exception as cache_exc:
-                logger.error(f"[{self.__class__.__name__}][Job {job_id}] Failed to clear cache: {cache_exc}")
+                logger.error(
+                    f"[{self.__class__.__name__}][Job {job_id}] Failed to clear cache: {cache_exc}"
+                )
 
             return result
 
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"[{self.__class__.__name__}][Job {job_id}] Deletion failed: {error_msg}")
+            logger.error(
+                f"[{self.__class__.__name__}][Job {job_id}] Deletion failed: {error_msg}"
+            )
 
             import traceback
+
             traceback.print_exc()
 
             self.job_store.set_job_failed(job_id, error_msg)

@@ -32,10 +32,7 @@ class FrameExtractor:
     CANNY_HIGH = 150
 
     def __init__(
-        self,
-        min_fps: float = 0.5,
-        max_fps: float = 2.0,
-        motion_threshold: float = 25.0
+        self, min_fps: float = 0.5, max_fps: float = 2.0, motion_threshold: float = 25.0
     ):
         self.min_fps = min_fps
         self.max_fps = max_fps
@@ -43,15 +40,23 @@ class FrameExtractor:
 
         logger.debug(
             "Initialized adaptive extractor: fps=%.1f-%.1f, motion_threshold=%.1f",
-            min_fps, max_fps, motion_threshold
+            min_fps,
+            max_fps,
+            motion_threshold,
         )
 
-    def extract_frames(self, video_path: str, chunk: VideoChunk) -> Tuple[np.ndarray, float, float]:
+    def extract_frames(
+        self, video_path: str, chunk: VideoChunk
+    ) -> Tuple[np.ndarray, float, float]:
         """
         Extract frames adaptively with complexity calculation.
 
-        Single-pass streaming with motion-based interval adjustment.
-        Returns frames, actual fps, and complexity score (0-1).
+        Args:
+            video_path: Path to the video file
+            chunk: VideoChunk with start/end time boundaries
+
+        Returns:
+            Tuple[np.ndarray, float, float]: (frames array, actual fps, complexity score 0-1)
         """
         cap = cv2.VideoCapture(video_path)
         video_fps = cap.get(cv2.CAP_PROP_FPS)
@@ -65,7 +70,7 @@ class FrameExtractor:
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
         frames = []
-        motion_scores = []
+        motion_scores: list[float] = []
         edge_densities = []
         color_variances = []
 
@@ -93,7 +98,11 @@ class FrameExtractor:
                     motion_score = float(np.mean(cv2.absdiff(prev_gray, current_gray)))
                     motion_scores.append(motion_score)
 
-                    interval = min_interval if motion_score > self.motion_threshold else max_interval
+                    interval = (
+                        min_interval
+                        if motion_score > self.motion_threshold
+                        else max_interval
+                    )
                     next_capture_idx += interval
                 else:
                     next_capture_idx += min_interval
@@ -112,10 +121,16 @@ class FrameExtractor:
 
         logger.info(
             "Extracted %d frames at %.2f fps, complexity=%.3f",
-            len(frames), actual_fps, complexity_score
+            len(frames),
+            actual_fps,
+            complexity_score,
         )
 
-        return np.array(frames) if frames else np.array([]), actual_fps, complexity_score
+        return (
+            np.array(frames) if frames else np.array([]),
+            actual_fps,
+            complexity_score,
+        )
 
     def _calculate_edge_density(self, gray_frame: np.ndarray) -> float:
         """Calculate edge density using Canny detection. Higher = more detail."""
@@ -123,15 +138,18 @@ class FrameExtractor:
         return float(np.sum(edges > 0) / edges.size)
 
     def _calculate_complexity_score(
-        self,
-        motion_scores: list,
-        edge_densities: list,
-        color_variances: list
+        self, motion_scores: list, edge_densities: list, color_variances: list
     ) -> float:
         """
         Calculate normalized complexity score (0-1).
 
-        Combines motion (30%), edge density (40%), and color variance (30%).
+        Args:
+            motion_scores: List of motion values from frame differences
+            edge_densities: List of edge density values from Canny detection
+            color_variances: List of color variance values per frame
+
+        Returns:
+            float: Complexity score combining motion (30%), edge density (40%), and color variance (30%)
         """
         if not edge_densities:
             return 0.0
@@ -146,15 +164,26 @@ class FrameExtractor:
         color_norm = min(avg_color_variance / self.COLOR_VARIANCE_RANGE, 1.0)
 
         complexity = (
-            self.MOTION_WEIGHT * motion_norm +
-            self.EDGE_WEIGHT * edge_norm +
-            self.COLOR_WEIGHT * color_norm
+            self.MOTION_WEIGHT * motion_norm
+            + self.EDGE_WEIGHT * edge_norm
+            + self.COLOR_WEIGHT * color_norm
         )
 
         return float(complexity)
 
-    def extract_single_frame(self, video_path: str, timestamp: float) -> Optional[np.ndarray]:
-        """Extract single frame at timestamp. Useful for thumbnails."""
+    def extract_single_frame(
+        self, video_path: str, timestamp: float
+    ) -> Optional[np.ndarray]:
+        """
+        Extract single frame at timestamp. Useful for thumbnails.
+
+        Args:
+            video_path: Path to the video file
+            timestamp: Time in seconds to extract frame from
+
+        Returns:
+            Optional[np.ndarray]: Frame as numpy array, or None if extraction fails
+        """
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
 

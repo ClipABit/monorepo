@@ -25,7 +25,7 @@ class Chunker:
         self,
         min_duration: float = DEFAULT_MIN_DURATION,
         max_duration: float = DEFAULT_MAX_DURATION,
-        scene_threshold: float = DEFAULT_SCENE_THRESHOLD
+        scene_threshold: float = DEFAULT_SCENE_THRESHOLD,
     ):
         self.min_duration = min_duration
         self.max_duration = max_duration
@@ -33,19 +33,36 @@ class Chunker:
 
         logger.debug(
             "Initialized chunker: duration=%.1f-%.1fs, scene_threshold=%.1f",
-            min_duration, max_duration, scene_threshold
+            min_duration,
+            max_duration,
+            scene_threshold,
         )
-    
+
     def chunk_video(self, video_path: str, video_id: str) -> List[VideoChunk]:
-        """Detect scenes, apply duration constraints, and create VideoChunk objects."""
-        logger.info("Chunking video: path=%s, video_id=%s, threshold=%.1f",
-                    video_path, video_id, self.scene_threshold)
+        """
+        Detect scenes, apply duration constraints, and create VideoChunk objects.
+
+        Args:
+            video_path: Path to video file to chunk
+            video_id: Unique identifier for this video
+
+        Returns:
+            List[VideoChunk]: List of chunks with start/end times
+        """
+        logger.info(
+            "Chunking video: path=%s, video_id=%s, threshold=%.1f",
+            video_path,
+            video_id,
+            self.scene_threshold,
+        )
 
         try:
             scenes = detect(video_path, ContentDetector(threshold=self.scene_threshold))
             logger.info("Detected %d raw scene boundaries", len(scenes))
         except Exception as e:
-            logger.error("Scene detection failed: %s, falling back to fixed chunking", e)
+            logger.error(
+                "Scene detection failed: %s, falling back to fixed chunking", e
+            )
             return self._fallback_chunking(video_path, video_id)
 
         if not scenes:
@@ -53,26 +70,32 @@ class Chunker:
             return self._fallback_chunking(video_path, video_id)
 
         constrained_scenes = self._apply_duration_constraints(scenes)
-        logger.info("After constraints: %d chunks (min=%.1fs, max=%.1fs)",
-                    len(constrained_scenes), self.min_duration, self.max_duration)
+        logger.info(
+            "After constraints: %d chunks (min=%.1fs, max=%.1fs)",
+            len(constrained_scenes),
+            self.min_duration,
+            self.max_duration,
+        )
 
         chunks = []
         for idx, (start_time, end_time) in enumerate(constrained_scenes):
             chunk_id = f"{video_id}_chunk_{idx:04d}"
             chunk = VideoChunk(
-                chunk_id=chunk_id,
-                start_time=start_time,
-                end_time=end_time
+                chunk_id=chunk_id, start_time=start_time, end_time=end_time
             )
             chunks.append(chunk)
-            logger.debug("Created chunk: %s (%.1fs-%.1fs, duration=%.1fs)",
-                        chunk_id, start_time, end_time, chunk.duration)
+            logger.debug(
+                "Created chunk: %s (%.1fs-%.1fs, duration=%.1fs)",
+                chunk_id,
+                start_time,
+                end_time,
+                chunk.duration,
+            )
 
         return chunks
-    
+
     def _apply_duration_constraints(
-        self,
-        scenes: List[Tuple]
+        self, scenes: List[Tuple]
     ) -> List[Tuple[float, float]]:
         """Merge scenes shorter than min_duration, split scenes longer than max_duration."""
         result = []
@@ -86,7 +109,9 @@ class Chunker:
 
             # Merge short scenes with next
             while duration < self.min_duration and i + 1 < len(scenes):
-                logger.debug("Merging short scene at index %d (%.1fs) with next", i, duration)
+                logger.debug(
+                    "Merging short scene at index %d (%.1fs) with next", i, duration
+                )
                 i += 1
                 end_tc = scenes[i][1]
                 end_time = end_tc.get_seconds()
@@ -96,8 +121,12 @@ class Chunker:
             if duration > self.max_duration:
                 n_parts = int(duration / self.max_duration) + 1
                 part_duration = duration / n_parts
-                logger.debug("Splitting long scene (%.1fs) into %d parts of ~%.1fs each",
-                            duration, n_parts, part_duration)
+                logger.debug(
+                    "Splitting long scene (%.1fs) into %d parts of ~%.1fs each",
+                    duration,
+                    n_parts,
+                    part_duration,
+                )
 
                 for j in range(n_parts):
                     part_start = start_time + j * part_duration
@@ -109,9 +138,18 @@ class Chunker:
             i += 1
 
         return result
-    
+
     def _fallback_chunking(self, video_path: str, video_id: str) -> List[VideoChunk]:
-        """Create fixed-duration chunks when scene detection fails."""
+        """
+        Create fixed-duration chunks when scene detection fails.
+
+        Args:
+            video_path: Path to video file
+            video_id: Unique identifier for this video
+
+        Returns:
+            List[VideoChunk]: List of fixed-duration chunks
+        """
         logger.warning("Using fallback fixed-duration chunking")
 
         chunk_duration = (self.min_duration + self.max_duration) / 2
@@ -122,8 +160,11 @@ class Chunker:
         duration = frame_count / fps if fps > 0 else 0
         cap.release()
 
-        logger.info("Fallback: video_duration=%.1fs, chunk_duration=%.1fs",
-                    duration, chunk_duration)
+        logger.info(
+            "Fallback: video_duration=%.1fs, chunk_duration=%.1fs",
+            duration,
+            chunk_duration,
+        )
 
         chunks = []
         chunk_start = 0.0
@@ -134,17 +175,16 @@ class Chunker:
 
             chunk_id = f"{video_id}_chunk_{chunk_idx:04d}"
             chunk = VideoChunk(
-                chunk_id=chunk_id,
-                start_time=chunk_start,
-                end_time=chunk_end
+                chunk_id=chunk_id, start_time=chunk_start, end_time=chunk_end
             )
             chunks.append(chunk)
 
-            logger.debug("Created chunk: %s (%.1fs-%.1fs)", chunk_id, chunk_start, chunk_end)
+            logger.debug(
+                "Created chunk: %s (%.1fs-%.1fs)", chunk_id, chunk_start, chunk_end
+            )
 
             chunk_start = chunk_end
             chunk_idx += 1
 
         logger.info("Fallback created %d chunks", len(chunks))
         return chunks
-

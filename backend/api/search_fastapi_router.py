@@ -44,9 +44,7 @@ class SearchFastAPIRouter:
         """Register all search routes."""
         self.router.add_api_route("/health", self.health, methods=["GET"])
         # Search handles auth manually to extract user_id and resolve namespace
-        self.router.add_api_route(
-            "/search", self.search, methods=["GET"]
-        )
+        self.router.add_api_route("/search", self.search, methods=["GET"])
 
         # Apply the limiter to the bound method at registration time.
         # This ensures 'request' is at index 0, which avoids the slowapi IndexError for bound class methods.
@@ -62,6 +60,14 @@ class SearchFastAPIRouter:
         """
         Public demo search endpoint - accepts a text query and returns semantic search results for the demo namespace.
         Rate limited.
+
+        Args:
+            request: FastAPI Request object for context
+            query: The search query string
+            top_k: Number of top results to return (default 10)
+
+        Returns:
+            dict: Query, results list, and timing information
         """
         try:
             t_start = time.perf_counter()
@@ -90,7 +96,9 @@ class SearchFastAPIRouter:
                 detail="An internal error occurred while processing the demo search request.",
             )
 
-    async def search(self, request: Request, query: str, project_id: str, top_k: int = 10):
+    async def search(
+        self, request: Request, query: str, project_id: str, top_k: int = 10
+    ):
         """
         Search endpoint - accepts a text query and returns semantic search results.
         Authenticates user and searches their assigned namespace.
@@ -98,6 +106,7 @@ class SearchFastAPIRouter:
         Args:
             request: FastAPI Request object for auth extraction
             query (str): The search query string (required)
+            project_id (str): The project ID to filter search results (required)
             top_k (int, optional): Number of top results to return (default: 10)
 
         Returns:
@@ -109,9 +118,12 @@ class SearchFastAPIRouter:
         try:
             # Authenticate and resolve user namespace
             if not self.auth_connector:
-                raise HTTPException(status_code=401, detail="Authentication is not configured")
+                raise HTTPException(
+                    status_code=401, detail="Authentication is not configured"
+                )
             user_id = await self.auth_connector(request)
             import asyncio
+
             loop = asyncio.get_running_loop()
             user_data = await loop.run_in_executor(
                 None, self.search_service.user_store.get_or_create_user, user_id
@@ -120,7 +132,7 @@ class SearchFastAPIRouter:
             if not namespace:
                 raise HTTPException(
                     status_code=500,
-                    detail="Your account data appears to be malformed — namespace is missing. Please contact support."
+                    detail="Your account data appears to be malformed — namespace is missing. Please contact support.",
                 )
 
             t_start = time.perf_counter()
@@ -135,7 +147,9 @@ class SearchFastAPIRouter:
             }
 
             try:
-                results = self.search_service._search_plugin(query, namespace, top_k, metadata_filter=metadata_filter)
+                results = self.search_service._search_plugin(
+                    query, namespace, top_k, metadata_filter=metadata_filter
+                )
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e))
 

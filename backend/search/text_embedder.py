@@ -36,7 +36,7 @@ class TextEmbedder:
     def __init__(
         self,
         model_path: str = DEFAULT_ONNX_MODEL_PATH,
-        tokenizer_path: str = DEFAULT_TOKENIZER_PATH
+        tokenizer_path: str = DEFAULT_TOKENIZER_PATH,
     ):
         """
         Initialize the ONNX text embedder.
@@ -52,6 +52,11 @@ class TextEmbedder:
 
         logger.info(f"TextEmbedder initialized (model: {model_path})")
 
+    @property
+    def device(self) -> str:
+        """Get the compute device (always CPU for ONNX Runtime)."""
+        return "cpu"
+
     def _load_model(self):
         """Lazy load the ONNX model and tokenizer on first use."""
         if self.session is None:
@@ -62,12 +67,12 @@ class TextEmbedder:
 
             # Configure ONNX Runtime for CPU (no CUDA dependency)
             sess_options = ort.SessionOptions()
-            sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            sess_options.graph_optimization_level = (
+                ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            )
 
             self.session = ort.InferenceSession(
-                self.model_path,
-                sess_options,
-                providers=['CPUExecutionProvider']
+                self.model_path, sess_options, providers=["CPUExecutionProvider"]
             )
 
             # Load tokenizer directly from tokenizers library (no transformers import)
@@ -95,17 +100,18 @@ class TextEmbedder:
 
         # Handle single string
         single_input = isinstance(text, str)
-        if single_input:
-            text = [text]
+        text_list = [text] if single_input else text
 
         # Tokenize inputs using raw tokenizers library
-        encoded = self.tokenizer.encode_batch(text)
+        assert self.tokenizer is not None, "Tokenizer should be loaded"
+        encoded = self.tokenizer.encode_batch(text_list)
 
         # Extract input_ids and attention_mask
         input_ids = np.array([e.ids for e in encoded], dtype=np.int64)
         attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
 
         # Run ONNX inference
+        assert self.session is not None, "ONNX session should be loaded"
         onnx_inputs = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -123,7 +129,9 @@ class TextEmbedder:
 
         if text_embeds is None:
             # Fallback: take first output if none match expected shape
-            logger.warning(f"Could not find 512-d output, using first output with shape {outputs[0].shape}")
+            logger.warning(
+                f"Could not find 512-d output, using first output with shape {outputs[0].shape}"
+            )
             text_embeds = outputs[0]
 
         # L2 normalize (essential for cosine similarity search)

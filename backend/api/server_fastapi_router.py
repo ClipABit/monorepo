@@ -24,7 +24,7 @@ class ServerFastAPIRouter:
         server_instance,
         is_file_change_enabled: bool,
         environment: str = "dev",
-        processing_service_cls=None
+        processing_service_cls=None,
     ):
         """
         Initializes the API routes, giving them access to the server instance
@@ -44,9 +44,10 @@ class ServerFastAPIRouter:
 
         # Initialize UploadHandler with process_video spawn function
         from services.upload_handler import UploadHandler
+
         self.upload_handler = UploadHandler(
             job_store=server_instance.job_store,
-            process_video_spawn_fn=self._get_process_video_spawn_fn()
+            process_video_spawn_fn=self._get_process_video_spawn_fn(),
         )
 
         self._register_routes()
@@ -58,27 +59,56 @@ class ServerFastAPIRouter:
         Returns:
             Callable that spawns process_video_background
         """
-        def spawn_process_video(video_bytes: bytes, filename: str, job_id: str, namespace: str, parent_batch_id: str, user_id: str = None, hashed_identifier: str = "", project_id: str = ""):
+
+        def spawn_process_video(
+            video_bytes: bytes,
+            filename: str,
+            job_id: str,
+            namespace: str,
+            parent_batch_id: str,
+            user_id: str | None = None,
+            hashed_identifier: str = "",
+            project_id: str = "",
+        ):
             try:
                 if self.processing_service_cls:
                     # Dev combined mode - direct access
                     self.processing_service_cls().process_video_background.spawn(
-                        video_bytes, filename, job_id, namespace, parent_batch_id, user_id, hashed_identifier, project_id
+                        video_bytes,
+                        filename,
+                        job_id,
+                        namespace,
+                        parent_batch_id,
+                        user_id,
+                        hashed_identifier,
+                        project_id,
                     )
-                    logger.info(f"[Upload] Spawned processing job {job_id} (dev combined mode)")
+                    logger.info(
+                        f"[Upload] Spawned processing job {job_id} (dev combined mode)"
+                    )
                 else:
                     # Production mode - cross-app call
                     from shared.config import get_modal_environment
+
                     processing_app_name = f"{self.environment}-processing"
                     ProcessingService = modal.Cls.from_name(
                         processing_app_name,
                         "ProcessingService",
-                        environment_name=get_modal_environment()
+                        environment_name=get_modal_environment(),
                     )
                     ProcessingService().process_video_background.spawn(
-                        video_bytes, filename, job_id, namespace, parent_batch_id, user_id, hashed_identifier, project_id
+                        video_bytes,
+                        filename,
+                        job_id,
+                        namespace,
+                        parent_batch_id,
+                        user_id,
+                        hashed_identifier,
+                        project_id,
                     )
-                    logger.info(f"[Upload] Spawned processing job {job_id} to {processing_app_name}")
+                    logger.info(
+                        f"[Upload] Spawned processing job {job_id} to {processing_app_name}"
+                    )
             except Exception as e:
                 logger.error(f"[Upload] Failed to spawn processing job {job_id}: {e}")
                 raise
@@ -90,7 +120,9 @@ class ServerFastAPIRouter:
         auth = [Depends(self.server_instance.auth_connector)]
 
         self.router.add_api_route("/health", self.health, methods=["GET"])
-        self.router.add_api_route("/status", self.status, methods=["GET"], dependencies=auth)
+        self.router.add_api_route(
+            "/status", self.status, methods=["GET"], dependencies=auth
+        )
         self.router.add_api_route("/quota", self.quota, methods=["GET"])
         # Upload, list_videos, clear_cache handle auth manually to get user_id
         self.router.add_api_route("/upload", self.upload, methods=["POST"])
@@ -144,7 +176,7 @@ class ServerFastAPIRouter:
             return {
                 "job_id": job_id,
                 "status": "processing",
-                "message": "Job is still processing or not found"
+                "message": "Job is still processing or not found",
             }
         return job_data
 
@@ -157,7 +189,9 @@ class ServerFastAPIRouter:
         """
         user_id, user_data = await self._get_user_data(request)
         vector_count = user_data.get("vector_count", 0)
-        vector_quota = user_data.get("vector_quota", UserStoreConnector.DEFAULT_VECTOR_QUOTA)
+        vector_quota = user_data.get(
+            "vector_quota", UserStoreConnector.DEFAULT_VECTOR_QUOTA
+        )
         return {
             "user_id": user_id,
             "namespace": user_data.get("namespace", ""),
@@ -166,7 +200,14 @@ class ServerFastAPIRouter:
             "vectors_remaining": max(0, vector_quota - vector_count),
         }
 
-    async def upload(self, request: Request, files: list[UploadFile] = File(default=[]), namespace: str = Form(""), hashed_identifier: str = Form(""), project_id: str = Form("")):
+    async def upload(
+        self,
+        request: Request,
+        files: list[UploadFile] = File(default=[]),
+        namespace: str = Form(""),
+        hashed_identifier: str = Form(""),
+        project_id: str = Form(""),
+    ):
         """
         Handle video file upload and start background processing.
         Supports both single and batch uploads.
@@ -195,11 +236,16 @@ class ServerFastAPIRouter:
 
         # Validate required fields (after auth so unauthenticated requests get 401)
         if not hashed_identifier or not hashed_identifier.strip():
-            raise HTTPException(status_code=400, detail="hashed_identifier is required — the plugin must generate a hash of the video file")
+            raise HTTPException(
+                status_code=400,
+                detail="hashed_identifier is required — the plugin must generate a hash of the video file",
+            )
 
         if not user_namespace:
             logger.error(f"[Upload] No namespace resolved for user {user_id}")
-            raise HTTPException(status_code=500, detail="Failed to resolve user namespace")
+            raise HTTPException(
+                status_code=500, detail="Failed to resolve user namespace"
+            )
 
         # Check vector quota
         loop = asyncio.get_running_loop()
@@ -209,11 +255,13 @@ class ServerFastAPIRouter:
         if not is_ok:
             raise HTTPException(
                 status_code=429,
-                detail="Upload failed: you've reached your storage limit. Please delete some files and try again."
+                detail="Upload failed: you've reached your storage limit. Please delete some files and try again.",
             )
 
         # Use user's assigned namespace, not client-provided
-        result = await self.upload_handler.handle_upload(files, user_namespace, user_id, hashed_identifier, project_id)
+        result = await self.upload_handler.handle_upload(
+            files, user_namespace, user_id, hashed_identifier, project_id
+        )
 
         # Add namespace and quota info to response for plugin local storage
         result["namespace"] = user_namespace
@@ -231,11 +279,16 @@ class ServerFastAPIRouter:
         """
         List all videos stored in R2 for the authenticated user's namespace.
 
+        Args:
+            request: FastAPI Request object for authentication
+            page_size: Number of videos per page (default 20), must be positive
+            page_token: Continuation token from previous response for pagination
+
         Returns:
-            json: dict with 'status', 'namespace', and 'videos' list
+            dict: Status, namespace, videos list, next token, total counts
 
         Raises:
-            HTTPException: If fetching videos fails (500 Internal Server Error)
+            HTTPException: If pagination fails (500 Internal Server Error)
         """
         user_id, user_data = await self._get_user_data(request)
         namespace = user_data.get("namespace", "__default__")
@@ -284,16 +337,21 @@ class ServerFastAPIRouter:
 
         logger.info(f"[Clear Cache] Request to clear cache for namespace: {namespace}")
         if not self.is_file_change_enabled:
-            raise HTTPException(status_code=403, detail="Cache clearing is not allowed in the current environment.")
+            raise HTTPException(
+                status_code=403,
+                detail="Cache clearing is not allowed in the current environment.",
+            )
 
         try:
             cleared_count = self.server_instance.r2_connector.clear_cache(namespace)
-            logger.info(f"[Clear Cache] Cleared {cleared_count} cache entries for namespace: {namespace}")
+            logger.info(
+                f"[Clear Cache] Cleared {cleared_count} cache entries for namespace: {namespace}"
+            )
             return {
                 "status": "success",
                 "namespace": namespace,
                 "cleared_entries": cleared_count,
-                "message": f"Successfully cleared {cleared_count} cache entries"
+                "message": f"Successfully cleared {cleared_count} cache entries",
             }
         except Exception as e:
             logger.error(f"[Clear Cache] Error clearing cache: {e}")

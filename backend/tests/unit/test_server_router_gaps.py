@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi import Request, HTTPException, UploadFile
 
 from api.server_fastapi_router import ServerFastAPIRouter
+from database.firebase.user_store_connector import UserStoreConnector
 
 
 def _make_mock_request():
@@ -16,14 +17,19 @@ def _make_mock_request():
     return request
 
 
-def _create_router(user_data=None, is_file_change_enabled=True):
+def _create_router(
+    user_data=None, is_file_change_enabled=True, default_vector_quota=None
+):
     """Create router with mocked internals."""
+    if default_vector_quota is None:
+        default_vector_quota = UserStoreConnector.DEFAULT_VECTOR_QUOTA
+
     if user_data is None:
         user_data = {
             "user_id": "auth0|user1",
             "namespace": "ns_03",
             "vector_count": 500,
-            "vector_quota": 1_000,
+            "vector_quota": default_vector_quota,
         }
 
     server = MagicMock()
@@ -31,9 +37,10 @@ def _create_router(user_data=None, is_file_change_enabled=True):
     server.user_store = MagicMock()
     server.user_store.get_or_create_user.return_value = user_data
     server.user_store.check_quota.return_value = (
-        user_data.get("vector_count", 0) < user_data.get("vector_quota", 1_000),
+        user_data.get("vector_count", 0)
+        < user_data.get("vector_quota", default_vector_quota),
         user_data.get("vector_count", 0),
-        user_data.get("vector_quota", 1_000),
+        user_data.get("vector_quota", default_vector_quota),
     )
     server.job_store = MagicMock()
     server.r2_connector = MagicMock()
@@ -57,41 +64,49 @@ class TestQuotaEndpointDefaults:
     """Tests for quota endpoint when user data is missing fields."""
 
     @pytest.mark.asyncio
-    async def test_missing_vector_count_defaults_to_zero(self):
+    async def test_missing_vector_count_defaults_to_zero(self, default_vector_quota):
         """User data without vector_count → defaults to 0."""
-        router, _ = _create_router(user_data={
-            "user_id": "auth0|user1",
-            "namespace": "ns_03",
-            "vector_quota": 1_000,
-        })
+        router, _ = _create_router(
+            user_data={
+                "user_id": "auth0|user1",
+                "namespace": "ns_03",
+                "vector_quota": default_vector_quota,
+            },
+            default_vector_quota=default_vector_quota,
+        )
 
         result = await router.quota(_make_mock_request())
 
         assert result["vector_count"] == 0
-        assert result["vectors_remaining"] == 1_000
+        assert result["vectors_remaining"] == default_vector_quota
 
     @pytest.mark.asyncio
-    async def test_missing_vector_quota_defaults(self):
+    async def test_missing_vector_quota_defaults(self, default_vector_quota):
         """User data without vector_quota → falls back to DEFAULT_VECTOR_QUOTA."""
-        router, _ = _create_router(user_data={
-            "user_id": "auth0|user1",
-            "namespace": "ns_03",
-            "vector_count": 500,
-        })
+        router, _ = _create_router(
+            user_data={
+                "user_id": "auth0|user1",
+                "namespace": "ns_03",
+                "vector_count": 500,
+            },
+            default_vector_quota=default_vector_quota,
+        )
 
         result = await router.quota(_make_mock_request())
 
-        from database.firebase.user_store_connector import UserStoreConnector
-        assert result["vector_quota"] == UserStoreConnector.DEFAULT_VECTOR_QUOTA
+        assert result["vector_quota"] == default_vector_quota
 
     @pytest.mark.asyncio
-    async def test_missing_namespace_defaults_to_empty(self):
+    async def test_missing_namespace_defaults_to_empty(self, default_vector_quota):
         """User data without namespace → defaults to empty string."""
-        router, _ = _create_router(user_data={
-            "user_id": "auth0|user1",
-            "vector_count": 500,
-            "vector_quota": 1_000,
-        })
+        router, _ = _create_router(
+            user_data={
+                "user_id": "auth0|user1",
+                "vector_count": 500,
+                "vector_quota": default_vector_quota,
+            },
+            default_vector_quota=default_vector_quota,
+        )
 
         result = await router.quota(_make_mock_request())
 
@@ -176,7 +191,9 @@ class TestUploadValidation:
         mock_file.read = AsyncMock(return_value=b"x" * 100)
 
         with pytest.raises(HTTPException) as exc_info:
-            await router.upload(_make_mock_request(), files=[mock_file], hashed_identifier="   ")
+            await router.upload(
+                _make_mock_request(), files=[mock_file], hashed_identifier="   "
+            )
 
         assert exc_info.value.status_code == 400
         assert "hashed_identifier" in exc_info.value.detail.lower()
@@ -189,24 +206,31 @@ class TestUploadValidation:
         mock_file.filename = "test.mp4"
 
         with pytest.raises(HTTPException) as exc_info:
-            await router.upload(_make_mock_request(), files=[mock_file], hashed_identifier="")
+            await router.upload(
+                _make_mock_request(), files=[mock_file], hashed_identifier=""
+            )
 
         assert exc_info.value.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_no_namespace_resolved_returns_500(self):
+    async def test_no_namespace_resolved_returns_500(self, default_vector_quota):
         """User with empty namespace → 500."""
-        router, _ = _create_router(user_data={
-            "user_id": "auth0|user1",
-            "namespace": "",
-            "vector_count": 0,
-            "vector_quota": 1_000,
-        })
+        router, _ = _create_router(
+            user_data={
+                "user_id": "auth0|user1",
+                "namespace": "",
+                "vector_count": 0,
+                "vector_quota": default_vector_quota,
+            },
+            default_vector_quota=default_vector_quota,
+        )
         mock_file = MagicMock(spec=UploadFile)
         mock_file.filename = "test.mp4"
 
         with pytest.raises(HTTPException) as exc_info:
-            await router.upload(_make_mock_request(), files=[mock_file], hashed_identifier="valid_hash")
+            await router.upload(
+                _make_mock_request(), files=[mock_file], hashed_identifier="valid_hash"
+            )
 
         assert exc_info.value.status_code == 500
         assert "namespace" in exc_info.value.detail.lower()

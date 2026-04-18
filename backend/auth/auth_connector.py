@@ -31,7 +31,7 @@ class AuthConnector:
         self._jwks_cache: Optional[Dict[str, Any]] = None
         self._jwks_cache_time: float = 0
 
-    def _get_jwks(self) -> Dict[str, Any]:
+    def _get_jwks(self) -> Dict[str, Any] | None:
         """Fetch and cache Auth0 JWKS (JSON Web Key Set)."""
         now = time.time()
         if self._jwks_cache and (now - self._jwks_cache_time) < self.JWKS_CACHE_TTL:
@@ -43,9 +43,15 @@ class AuthConnector:
         self._jwks_cache_time = now
         return self._jwks_cache
 
-    def _get_signing_key(self, token: str):
+    def _get_signing_key(self, token: str) -> Any:
         """Find the matching public key from JWKS for the given token."""
         jwks = self._get_jwks()
+
+        if jwks is None:
+            raise HTTPException(
+                status_code=503, detail="Auth provider JWKS unavailable"
+            )
+
         unverified_header = jwt.get_unverified_header(token)
         kid = unverified_header.get("kid")
         for key in jwks.get("keys", []):
@@ -95,10 +101,14 @@ class AuthConnector:
         """
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+            raise HTTPException(
+                status_code=401, detail="Missing or invalid Authorization header"
+            )
         token = auth_header.split(" ", 1)[1]
         loop = asyncio.get_event_loop()
         user_id = await loop.run_in_executor(None, self.verify_token, token)
         if self.user_store:
-            await loop.run_in_executor(None, self.user_store.get_or_create_user, user_id)
+            await loop.run_in_executor(
+                None, self.user_store.get_or_create_user, user_id
+            )
         return user_id

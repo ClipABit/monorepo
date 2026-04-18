@@ -80,7 +80,9 @@ class TestAssignNamespace:
             elif i == 1:
                 docs.append(_mock_doc(True, {"vector_count": 30_000, "user_count": 3}))
             else:
-                docs.append(_mock_doc(True, {"vector_count": 100_000, "user_count": 10}))
+                docs.append(
+                    _mock_doc(True, {"vector_count": 100_000, "user_count": 10})
+                )
 
         # Each call to ns_col.document(ns_id).get() needs its own mock chain
         doc_mocks = {}
@@ -91,7 +93,9 @@ class TestAssignNamespace:
             doc_mocks[ns_id] = dm
 
         ns_col.document.side_effect = lambda ns_id: doc_mocks[ns_id]
-        mock_firestore.collection.side_effect = lambda name: ns_col if name == "namespaces" else MagicMock()
+        mock_firestore.collection.side_effect = (
+            lambda name: ns_col if name == "namespaces" else MagicMock()
+        )
 
         result = conn._assign_namespace()
 
@@ -113,7 +117,9 @@ class TestAssignNamespace:
             doc_mocks[ns_id] = dm
 
         ns_col.document.side_effect = lambda ns_id: doc_mocks[ns_id]
-        mock_firestore.collection.side_effect = lambda name: ns_col if name == "namespaces" else MagicMock()
+        mock_firestore.collection.side_effect = (
+            lambda name: ns_col if name == "namespaces" else MagicMock()
+        )
 
         with pytest.raises(RuntimeError, match="All namespaces are full"):
             conn._assign_namespace()
@@ -167,7 +173,9 @@ class TestGetOrCreateUserQuotaFields:
 
         assert result["vector_count"] == 0
 
-    def test_new_user_has_vector_quota(self, connector, mock_firestore):
+    def test_new_user_has_vector_quota(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """New user gets DEFAULT_VECTOR_QUOTA."""
         mock_doc_ref = MagicMock()
         mock_doc_ref.get.return_value = _mock_doc(exists=False)
@@ -175,7 +183,7 @@ class TestGetOrCreateUserQuotaFields:
 
         result = connector.get_or_create_user("auth0|new3")
 
-        assert result["vector_quota"] == 1_000
+        assert result["vector_quota"] == default_vector_quota
 
     def test_existing_user_returns_existing_data(self, connector, mock_firestore):
         """Existing user with pool namespace is returned as-is."""
@@ -327,12 +335,24 @@ class TestCheckQuota:
 class TestReserveQuota:
     """Tests for the transactional reserve_quota method."""
 
-    def test_reserve_succeeds_under_quota(self, connector, mock_firestore):
+    def test_reserve_succeeds_under_quota(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """Reserves capacity when user is under quota."""
+        q = default_vector_quota
+        reserve = max(1, q // 4)
+        current = q // 2
+
         user_doc_ref = MagicMock()
-        user_doc_ref.get.return_value = _mock_doc(exists=True, data={
-            "user_id": "u1", "vector_count": 100, "vector_quota": 1_000, "namespace": "ns_00",
-        })
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True,
+            data={
+                "user_id": "u1",
+                "vector_count": current,
+                "vector_quota": q,
+                "namespace": "ns_00",
+            },
+        )
         ns_doc_ref = MagicMock()
 
         def collection_router(name):
@@ -345,33 +365,54 @@ class TestReserveQuota:
 
         mock_firestore.collection.side_effect = collection_router
 
-        ok, count, quota = connector.reserve_quota("u1", 50, "ns_00")
+        ok, count, quota = connector.reserve_quota("u1", reserve, "ns_00")
 
         assert ok is True
-        assert count == 100
-        assert quota == 1_000
+        assert count == current
+        assert quota == q
 
-    def test_reserve_fails_over_quota(self, connector, mock_firestore):
+    def test_reserve_fails_over_quota(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """Rejects reservation when it would exceed quota."""
+        q = default_vector_quota
         user_doc_ref = MagicMock()
-        user_doc_ref.get.return_value = _mock_doc(exists=True, data={
-            "user_id": "u1", "vector_count": 950, "vector_quota": 1_000, "namespace": "ns_00",
-        })
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True,
+            data={
+                "user_id": "u1",
+                "vector_count": max(0, q - 1),
+                "vector_quota": q,
+                "namespace": "ns_00",
+            },
+        )
 
         mock_firestore.collection.return_value.document.return_value = user_doc_ref
 
-        ok, count, quota = connector.reserve_quota("u1", 100, "ns_00")
+        ok, count, quota = connector.reserve_quota("u1", 2, "ns_00")
 
         assert ok is False
-        assert count == 950
-        assert quota == 1_000
+        assert count == max(0, q - 1)
+        assert quota == q
 
-    def test_reserve_exactly_at_limit(self, connector, mock_firestore):
+    def test_reserve_exactly_at_limit(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """Reserves when count + request == quota (boundary)."""
+        q = default_vector_quota
+        reserve = max(1, q // 5)
+        current = q - reserve
+
         user_doc_ref = MagicMock()
-        user_doc_ref.get.return_value = _mock_doc(exists=True, data={
-            "user_id": "u1", "vector_count": 990, "vector_quota": 1_000, "namespace": "ns_00",
-        })
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True,
+            data={
+                "user_id": "u1",
+                "vector_count": current,
+                "vector_quota": q,
+                "namespace": "ns_00",
+            },
+        )
         ns_doc_ref = MagicMock()
 
         def collection_router(name):
@@ -384,31 +425,49 @@ class TestReserveQuota:
 
         mock_firestore.collection.side_effect = collection_router
 
-        ok, count, quota = connector.reserve_quota("u1", 10, "ns_00")
+        ok, count, quota = connector.reserve_quota("u1", reserve, "ns_00")
 
         assert ok is True
-        assert count == 990
+        assert count == current
 
-    def test_reserve_already_at_quota(self, connector, mock_firestore):
+    def test_reserve_already_at_quota(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """Rejects when user is already at quota."""
+        q = default_vector_quota
         user_doc_ref = MagicMock()
-        user_doc_ref.get.return_value = _mock_doc(exists=True, data={
-            "user_id": "u1", "vector_count": 1_000, "vector_quota": 1_000, "namespace": "ns_00",
-        })
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True,
+            data={
+                "user_id": "u1",
+                "vector_count": q,
+                "vector_quota": q,
+                "namespace": "ns_00",
+            },
+        )
 
         mock_firestore.collection.return_value.document.return_value = user_doc_ref
 
         ok, count, quota = connector.reserve_quota("u1", 1, "ns_00")
 
         assert ok is False
-        assert count == 1_000
+        assert count == q
 
-    def test_reserve_skips_namespace_when_empty(self, connector, mock_firestore):
+    def test_reserve_skips_namespace_when_empty(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """Only user doc is written when namespace is empty string."""
+        q = default_vector_quota
         user_doc_ref = MagicMock()
-        user_doc_ref.get.return_value = _mock_doc(exists=True, data={
-            "user_id": "u1", "vector_count": 100, "vector_quota": 1_000, "namespace": "ns_00",
-        })
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True,
+            data={
+                "user_id": "u1",
+                "vector_count": 100,
+                "vector_quota": q,
+                "namespace": "ns_00",
+            },
+        )
 
         mock_firestore.collection.return_value.document.return_value = user_doc_ref
 
@@ -418,38 +477,61 @@ class TestReserveQuota:
         # Only users collection should be accessed, not namespaces
         mock_firestore.collection.assert_called_with("users")
 
-    def test_reserve_zero_is_noop(self, connector, mock_firestore):
+    def test_reserve_zero_is_noop(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """Reserving zero returns success without creating a transaction."""
+        q = default_vector_quota
         mock_doc_ref = MagicMock()
-        mock_doc_ref.get.return_value = _mock_doc(exists=True, data={
-            "user_id": "u1", "vector_count": 500, "vector_quota": 1_000, "namespace": "ns_00",
-        })
+        mock_doc_ref.get.return_value = _mock_doc(
+            exists=True,
+            data={
+                "user_id": "u1",
+                "vector_count": 500,
+                "vector_quota": q,
+                "namespace": "ns_00",
+            },
+        )
         mock_firestore.collection.return_value.document.return_value = mock_doc_ref
 
         ok, count, quota = connector.reserve_quota("u1", 0, "ns_00")
 
         assert ok is True
         assert count == 500
-        assert quota == 1_000
+        assert quota == q
         # No transaction should be created
         mock_firestore.transaction.assert_not_called()
 
-    def test_sequential_reservations_second_rejected(self, connector, mock_firestore):
+    def test_sequential_reservations_second_rejected(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """Simulates two uploads racing: first reserves, second sees updated count and is rejected."""
+        q = default_vector_quota
+        step = max(1, q // 20)
         call_count = 0
 
         def get_with_advancing_state(**kwargs):
-            """First call returns 900/1000 (pre-reservation), second returns 950/1000 (post-reservation)."""
+            """First call returns pre-reservation state; second call returns post-reservation state."""
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return _mock_doc(exists=True, data={
-                    "user_id": "u1", "vector_count": 900, "vector_quota": 1_000,
-                })
+                return _mock_doc(
+                    exists=True,
+                    data={
+                        "user_id": "u1",
+                        "vector_count": q - 2 * step,
+                        "vector_quota": q,
+                    },
+                )
             else:
-                return _mock_doc(exists=True, data={
-                    "user_id": "u1", "vector_count": 950, "vector_quota": 1_000,
-                })
+                return _mock_doc(
+                    exists=True,
+                    data={
+                        "user_id": "u1",
+                        "vector_count": q - step,
+                        "vector_quota": q,
+                    },
+                )
 
         user_doc_ref = MagicMock()
         user_doc_ref.get.side_effect = get_with_advancing_state
@@ -465,15 +547,15 @@ class TestReserveQuota:
 
         mock_firestore.collection.side_effect = collection_router
 
-        # First upload: 900 + 50 = 950 <= 1000 → succeeds
-        ok1, count1, quota1 = connector.reserve_quota("u1", 50, "ns_00")
+        # First upload succeeds
+        ok1, count1, quota1 = connector.reserve_quota("u1", step, "ns_00")
         assert ok1 is True
-        assert count1 == 900
+        assert count1 == q - 2 * step
 
-        # Second upload: 950 + 100 = 1050 > 1000 → rejected
-        ok2, count2, quota2 = connector.reserve_quota("u1", 100, "ns_00")
+        # Second upload is rejected
+        ok2, count2, quota2 = connector.reserve_quota("u1", 2 * step, "ns_00")
         assert ok2 is False
-        assert count2 == 950
+        assert count2 == q - step
 
 
 # =============================================================================
@@ -543,9 +625,13 @@ class TestDecrementVectorCount:
     def test_decrements_both_user_and_namespace(self, connector, mock_firestore):
         """Both user and namespace docs are decremented."""
         user_doc_ref = MagicMock()
-        user_doc_ref.get.return_value = _mock_doc(exists=True, data={"vector_count": 50})
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True, data={"vector_count": 50}
+        )
         ns_doc_ref = MagicMock()
-        ns_doc_ref.get.return_value = _mock_doc(exists=True, data={"vector_count": 5000})
+        ns_doc_ref.get.return_value = _mock_doc(
+            exists=True, data={"vector_count": 5000}
+        )
 
         def collection_router(name):
             col = MagicMock()
@@ -565,7 +651,9 @@ class TestDecrementVectorCount:
     def test_floors_user_at_zero(self, connector, mock_firestore):
         """Floors negative user vector count to 0."""
         user_doc_ref = MagicMock()
-        user_doc_ref.get.return_value = _mock_doc(exists=True, data={"vector_count": -5})
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True, data={"vector_count": -5}
+        )
 
         def collection_router(name):
             col = MagicMock()
@@ -573,7 +661,9 @@ class TestDecrementVectorCount:
                 col.document.return_value = user_doc_ref
             else:
                 ns_ref = MagicMock()
-                ns_ref.get.return_value = _mock_doc(exists=True, data={"vector_count": 50})
+                ns_ref.get.return_value = _mock_doc(
+                    exists=True, data={"vector_count": 50}
+                )
                 col.document.return_value = ns_ref
             return col
 
@@ -640,7 +730,9 @@ class TestEnsureNamespaceDocs:
         ns_col = MagicMock()
 
         mock_doc_ref = MagicMock()
-        mock_doc_ref.get.return_value = _mock_doc(exists=True, data={"vector_count": 100})
+        mock_doc_ref.get.return_value = _mock_doc(
+            exists=True, data={"vector_count": 100}
+        )
         ns_col.document.return_value = mock_doc_ref
         mock_firestore.collection.return_value = ns_col
 
@@ -705,12 +797,21 @@ class TestNamespaceId:
 class TestReserveQuotaEdgeCases:
     """Edge case tests for reserve_quota."""
 
-    def test_negative_count_is_noop(self, connector, mock_firestore):
+    def test_negative_count_is_noop(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """Negative count follows same path as zero — returns True, no transaction."""
+        q = default_vector_quota
         mock_doc_ref = MagicMock()
-        mock_doc_ref.get.return_value = _mock_doc(exists=True, data={
-            "user_id": "u1", "vector_count": 500, "vector_quota": 1_000, "namespace": "ns_00",
-        })
+        mock_doc_ref.get.return_value = _mock_doc(
+            exists=True,
+            data={
+                "user_id": "u1",
+                "vector_count": 500,
+                "vector_quota": q,
+                "namespace": "ns_00",
+            },
+        )
         mock_firestore.collection.return_value.document.return_value = mock_doc_ref
 
         ok, count, quota = connector.reserve_quota("u1", -5, "ns_00")
@@ -719,7 +820,9 @@ class TestReserveQuotaEdgeCases:
         assert count == 500
         mock_firestore.transaction.assert_not_called()
 
-    def test_user_doc_not_exists_in_transaction_uses_defaults(self, connector, mock_firestore):
+    def test_user_doc_not_exists_in_transaction_uses_defaults(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """If user doc doesn't exist in transaction, defaults to vector_count=0."""
         user_doc_ref = MagicMock()
         user_doc_ref.get.return_value = _mock_doc(exists=False)
@@ -730,14 +833,19 @@ class TestReserveQuotaEdgeCases:
 
         assert ok is True
         assert count == 0
-        assert quota == 1_000
+        assert quota == default_vector_quota
 
     def test_reserve_one_with_quota_one_and_count_zero(self, connector, mock_firestore):
         """Boundary: reserve 1 with quota=1, count=0 → 0+1=1 ≤ 1 → succeeds."""
         user_doc_ref = MagicMock()
-        user_doc_ref.get.return_value = _mock_doc(exists=True, data={
-            "user_id": "u1", "vector_count": 0, "vector_quota": 1,
-        })
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True,
+            data={
+                "user_id": "u1",
+                "vector_count": 0,
+                "vector_quota": 1,
+            },
+        )
 
         mock_firestore.collection.return_value.document.return_value = user_doc_ref
 
@@ -756,9 +864,15 @@ class TestReserveQuotaEdgeCases:
 class TestCheckQuotaDefaults:
     """Tests for check_quota field defaults when user data is incomplete."""
 
-    def test_missing_vector_count_defaults_to_zero(self, connector, mock_firestore):
+    def test_missing_vector_count_defaults_to_zero(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """User data missing vector_count field → defaults to 0."""
-        user_data = {"user_id": "u1", "namespace": "ns_00", "vector_quota": 1_000}
+        user_data = {
+            "user_id": "u1",
+            "namespace": "ns_00",
+            "vector_quota": default_vector_quota,
+        }
         mock_doc_ref = MagicMock()
         mock_doc_ref.get.return_value = _mock_doc(exists=True, data=user_data)
         mock_firestore.collection.return_value.document.return_value = mock_doc_ref
@@ -768,7 +882,9 @@ class TestCheckQuotaDefaults:
         assert ok is True
         assert count == 0
 
-    def test_missing_vector_quota_defaults_to_default(self, connector, mock_firestore):
+    def test_missing_vector_quota_defaults_to_default(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """User data missing vector_quota field → defaults to DEFAULT_VECTOR_QUOTA."""
         user_data = {"user_id": "u1", "namespace": "ns_00", "vector_count": 500}
         mock_doc_ref = MagicMock()
@@ -778,7 +894,7 @@ class TestCheckQuotaDefaults:
         ok, count, quota = connector.check_quota("u1")
 
         assert ok is True
-        assert quota == 1_000
+        assert quota == default_vector_quota
 
 
 # =============================================================================
@@ -792,7 +908,9 @@ class TestDecrementNamespaceFloor:
     def test_floors_namespace_at_zero(self, connector, mock_firestore):
         """Namespace vector count is floored to 0 when negative."""
         user_doc_ref = MagicMock()
-        user_doc_ref.get.return_value = _mock_doc(exists=True, data={"vector_count": 50})
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True, data={"vector_count": 50}
+        )
         ns_doc_ref = MagicMock()
         ns_doc_ref.get.return_value = _mock_doc(exists=True, data={"vector_count": -10})
 
@@ -816,7 +934,9 @@ class TestDecrementNamespaceFloor:
     def test_no_floor_when_namespace_still_positive(self, connector, mock_firestore):
         """No flooring when namespace count stays positive after decrement."""
         user_doc_ref = MagicMock()
-        user_doc_ref.get.return_value = _mock_doc(exists=True, data={"vector_count": 50})
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True, data={"vector_count": 50}
+        )
         ns_doc_ref = MagicMock()
         ns_doc_ref.get.return_value = _mock_doc(exists=True, data={"vector_count": 100})
 
@@ -844,13 +964,15 @@ class TestDecrementNamespaceFloor:
 class TestBackfillEdgeCases:
     """Edge cases in get_or_create_user backfill logic."""
 
-    def test_empty_string_namespace_triggers_backfill(self, connector, mock_firestore):
+    def test_empty_string_namespace_triggers_backfill(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """namespace="" is falsy → triggers _assign_namespace."""
         existing = {
             "user_id": "auth0|empty_ns",
             "namespace": "",
             "vector_count": 100,
-            "vector_quota": 1_000,
+            "vector_quota": default_vector_quota,
         }
         mock_doc_ref = MagicMock()
         mock_doc_ref.get.return_value = _mock_doc(exists=True, data=existing)
@@ -861,13 +983,15 @@ class TestBackfillEdgeCases:
         assert result["namespace"] == "ns_00"
         connector._assign_namespace.assert_called_once()
 
-    def test_ns_prefix_without_index_is_kept(self, connector, mock_firestore):
+    def test_ns_prefix_without_index_is_kept(
+        self, connector, mock_firestore, default_vector_quota
+    ):
         """namespace="ns_" has correct prefix → NOT reassigned (startswith passes)."""
         existing = {
             "user_id": "auth0|ns_only",
             "namespace": "ns_",
             "vector_count": 100,
-            "vector_quota": 1_000,
+            "vector_quota": default_vector_quota,
         }
         mock_doc_ref = MagicMock()
         mock_doc_ref.get.return_value = _mock_doc(exists=True, data=existing)
@@ -891,7 +1015,7 @@ class TestBackfillEdgeCases:
 
         result = connector.get_or_create_user("auth0|partial")
 
-        assert result["vector_quota"] == 1_000
+        assert result["vector_quota"] == UserStoreConnector.DEFAULT_VECTOR_QUOTA
         assert result["namespace"] == "ns_03"
         assert result["vector_count"] == 500
         # Only vector_quota should be in the update

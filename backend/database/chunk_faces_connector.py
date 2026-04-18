@@ -4,11 +4,12 @@ import modal
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class ChunkFacesConnector:
     """
     Modal dict connector for storing face_id appeared in each chunk and number of times it appears.
     """
-    
+
     DEFAULT_DICT_NAME = "chunk-faces-store"
 
     def __init__(self, dict_name: str = DEFAULT_DICT_NAME):
@@ -17,7 +18,16 @@ class ChunkFacesConnector:
         logger.info(f"Initialized ChunkFacesConnector with Dict: {dict_name}")
 
     def add_chunk_faces(self, chunk_id: str, face_counts: dict[str, int]) -> bool:
-        """Add or update face counts for a given chunk."""
+        """
+        Add or update face counts for a given chunk.
+
+        Args:
+            chunk_id: Unique identifier for the chunk
+            face_counts: Dictionary mapping face_id to count
+
+        Returns:
+            bool: True if successful, False on error
+        """
         try:
             if chunk_id in self.chunk_faces_store:
                 existing_counts = self.chunk_faces_store[chunk_id]
@@ -45,7 +55,7 @@ class ChunkFacesConnector:
         except Exception as e:
             logger.error(f"Error retrieving faces for chunk {chunk_id}: {e}")
             return {}
-        
+
     def delete_chunk_faces(self, chunk_id: str) -> bool:
         """Delete face counts for a given chunk."""
         try:

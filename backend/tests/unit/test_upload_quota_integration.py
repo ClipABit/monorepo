@@ -5,19 +5,9 @@ Verifies user_id threading, quota checking, namespace override, and response enr
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
-from fastapi import UploadFile
+from unittest.mock import MagicMock
 
 from services.upload_handler import UploadHandler
-
-
-def _make_upload_file(filename="test.mp4", content_type="video/mp4", content=b"x" * 1000):
-    """Create a mock UploadFile."""
-    file = MagicMock(spec=UploadFile)
-    file.filename = filename
-    file.content_type = content_type
-    file.read = AsyncMock(return_value=content)
-    return file
 
 
 @pytest.fixture
@@ -42,9 +32,11 @@ class TestUploadPassesUserId:
     """Test that user_id flows from handler to spawn."""
 
     @pytest.mark.asyncio
-    async def test_single_upload_passes_user_id_to_spawn(self, handler, mock_spawn):
+    async def test_single_upload_passes_user_id_to_spawn(
+        self, handler, mock_spawn, make_upload_file
+    ):
         """user_id flows from handle_single_upload through to spawn."""
-        file = _make_upload_file()
+        file = make_upload_file()
 
         await handler.handle_single_upload(file, "ns", "auth0|user1")
 
@@ -53,9 +45,11 @@ class TestUploadPassesUserId:
         assert call_args[5] == "auth0|user1"  # 6th positional arg is user_id
 
     @pytest.mark.asyncio
-    async def test_single_upload_stores_user_id_in_job(self, handler, mock_job_store):
+    async def test_single_upload_stores_user_id_in_job(
+        self, handler, mock_job_store, make_upload_file
+    ):
         """user_id is stored in the job metadata."""
-        file = _make_upload_file()
+        file = make_upload_file()
 
         await handler.handle_single_upload(file, "ns", "auth0|user1")
 
@@ -64,9 +58,11 @@ class TestUploadPassesUserId:
         assert job_data["user_id"] == "auth0|user1"
 
     @pytest.mark.asyncio
-    async def test_batch_upload_passes_user_id_to_spawn(self, handler, mock_spawn):
+    async def test_batch_upload_passes_user_id_to_spawn(
+        self, handler, mock_spawn, make_upload_file
+    ):
         """user_id flows through batch upload to each spawn call."""
-        files = [_make_upload_file("a.mp4"), _make_upload_file("b.mp4")]
+        files = [make_upload_file("a.mp4"), make_upload_file("b.mp4")]
 
         await handler.handle_batch_upload(files, "ns", "auth0|batch_user")
 
@@ -75,9 +71,11 @@ class TestUploadPassesUserId:
             assert call_obj[0][5] == "auth0|batch_user"
 
     @pytest.mark.asyncio
-    async def test_handle_upload_single_passes_user_id(self, handler, mock_spawn):
+    async def test_handle_upload_single_passes_user_id(
+        self, handler, mock_spawn, make_upload_file
+    ):
         """handle_upload with 1 file routes to single and passes user_id."""
-        file = _make_upload_file()
+        file = make_upload_file()
 
         await handler.handle_upload([file], "ns", "auth0|u1")
 
@@ -85,9 +83,11 @@ class TestUploadPassesUserId:
         assert mock_spawn.call_args[0][5] == "auth0|u1"
 
     @pytest.mark.asyncio
-    async def test_handle_upload_batch_passes_user_id(self, handler, mock_spawn):
+    async def test_handle_upload_batch_passes_user_id(
+        self, handler, mock_spawn, make_upload_file
+    ):
         """handle_upload with 2+ files routes to batch and passes user_id."""
-        files = [_make_upload_file("a.mp4"), _make_upload_file("b.mp4")]
+        files = [make_upload_file("a.mp4"), make_upload_file("b.mp4")]
 
         await handler.handle_upload(files, "ns", "auth0|u2")
 
@@ -100,9 +100,11 @@ class TestUploadNullUserId:
     """Test backward compatibility when user_id is None."""
 
     @pytest.mark.asyncio
-    async def test_single_upload_none_user_id(self, handler, mock_spawn):
+    async def test_single_upload_none_user_id(
+        self, handler, mock_spawn, make_upload_file
+    ):
         """Handles None user_id without error."""
-        file = _make_upload_file()
+        file = make_upload_file()
 
         await handler.handle_single_upload(file, "ns")
 
@@ -110,9 +112,11 @@ class TestUploadNullUserId:
         assert mock_spawn.call_args[0][5] is None
 
     @pytest.mark.asyncio
-    async def test_batch_upload_none_user_id(self, handler, mock_spawn):
+    async def test_batch_upload_none_user_id(
+        self, handler, mock_spawn, make_upload_file
+    ):
         """Handles None user_id in batch without error."""
-        files = [_make_upload_file("a.mp4"), _make_upload_file("b.mp4")]
+        files = [make_upload_file("a.mp4"), make_upload_file("b.mp4")]
 
         await handler.handle_batch_upload(files, "ns")
 
@@ -124,9 +128,11 @@ class TestUploadNamespaceFromJob:
     """Test that namespace is correctly stored in jobs."""
 
     @pytest.mark.asyncio
-    async def test_single_upload_stores_namespace_in_job(self, handler, mock_job_store):
+    async def test_single_upload_stores_namespace_in_job(
+        self, handler, mock_job_store, make_upload_file
+    ):
         """Namespace from parameter is stored in job metadata."""
-        file = _make_upload_file()
+        file = make_upload_file()
 
         await handler.handle_single_upload(file, "user_abc123", "auth0|u1")
 
@@ -134,9 +140,11 @@ class TestUploadNamespaceFromJob:
         assert job_data["namespace"] == "user_abc123"
 
     @pytest.mark.asyncio
-    async def test_single_upload_passes_namespace_to_spawn(self, handler, mock_spawn):
+    async def test_single_upload_passes_namespace_to_spawn(
+        self, handler, mock_spawn, make_upload_file
+    ):
         """Namespace is passed to the spawn function."""
-        file = _make_upload_file()
+        file = make_upload_file()
 
         await handler.handle_single_upload(file, "user_ns_xyz", "auth0|u1")
 

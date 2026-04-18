@@ -10,7 +10,7 @@ DEV_COMBINED_APP = "apps/dev_combined.py"
 
 # Individual apps for staging/prod deployment
 APPS = {
-    "server": ("services/http_server.py", "\033[36m"),      # Cyan
+    "server": ("services/http_server.py", "\033[36m"),  # Cyan
     "search": ("services/search_service.py", "\033[33m"),  # Yellow
     "processing": ("services/processing_service.py", "\033[35m"),  # Magenta
 }
@@ -18,7 +18,17 @@ RESET = "\033[0m"
 
 
 def _prefix_output(process, name, color):
-    """Read process output and prefix each line with the app name."""
+    """
+    Read process output and prefix each line with the app name.
+
+    Args:
+        process: Subprocess object with stdout stream
+        name: App name to display in prefix
+        color: ANSI color code for the prefix
+
+    Returns:
+        None
+    """
     prefix = f"{color}[{name:^10}]{RESET} "
     try:
         for line in iter(process.stdout.readline, ""):
@@ -88,7 +98,7 @@ def serve_all():
 def _serve_single_app(name: str):
     """Serve a single app with color-coded output."""
     path, color = APPS[name]
-    
+
     process = subprocess.Popen(
         ["modal", "serve", path],
         stdout=subprocess.PIPE,
@@ -98,15 +108,15 @@ def _serve_single_app(name: str):
         encoding="utf-8",
         errors="replace",
     )
-    
+
     # Handle graceful shutdown
     def signal_handler(sig, frame):
         process.terminate()
         sys.exit(0)
-    
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     # Stream output with color prefix
     _prefix_output(process, name, color)
     process.wait()

@@ -38,7 +38,7 @@ Users are assigned to a shared pool of **20 Pinecone namespaces** (`ns_00` throu
 | `NAMESPACE_POOL_SIZE` | 20 | Total namespaces in the pool |
 | `MAX_VECTORS_PER_NAMESPACE` | 100,000 | Max vectors per namespace |
 | `MAX_USERS_PER_NAMESPACE` | 10 | Max users sharing a namespace |
-| `DEFAULT_VECTOR_QUOTA` | 1,000 | Per-user vector limit |
+| `DEFAULT_VECTOR_QUOTA` | 2,000 | Per-user vector limit |
 
 **Assignment strategy:** New users are assigned to the namespace with the most remaining vector capacity (even-spread). Once assigned, the binding is permanent.
 
@@ -131,7 +131,7 @@ Form fields:
   "status": "processing",
   "namespace": "ns_03",
   "vector_count": 4821,
-  "vector_quota": 1000
+  "vector_quota": 2000
 }
 ```
 
@@ -148,7 +148,7 @@ Form fields:
   "failed_at_upload": 0,
   "namespace": "ns_03",
   "vector_count": 4821,
-  "vector_quota": 1000
+  "vector_quota": 2000
 }
 ```
 
@@ -164,7 +164,7 @@ Authorization: Bearer <token>
   "user_id": "auth0|abc123",
   "namespace": "ns_03",
   "vector_count": 4821,
-  "vector_quota": 1000,
+  "vector_quota": 2000,
   "vectors_remaining": 179
 }
 ```

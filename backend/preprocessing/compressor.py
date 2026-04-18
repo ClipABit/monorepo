@@ -23,7 +23,7 @@ class Compressor:
         self,
         target_width: int = DEFAULT_TARGET_WIDTH,
         target_height: int = DEFAULT_TARGET_HEIGHT,
-        quality: int = DEFAULT_QUALITY
+        quality: int = DEFAULT_QUALITY,
     ):
         self.target_width = target_width
         self.target_height = target_height
@@ -31,21 +31,25 @@ class Compressor:
 
         logger.debug(
             "Initialized compressor: resolution=%dx%d, quality=%d",
-            target_width, target_height, quality
+            target_width,
+            target_height,
+            quality,
         )
 
     def compress_frame(self, frame: np.ndarray) -> np.ndarray:
         """Resize single frame to target resolution."""
         return cv2.resize(
-            frame,
-            (self.target_width, self.target_height),
-            interpolation=cv2.INTER_AREA
+            frame, (self.target_width, self.target_height), interpolation=cv2.INTER_AREA
         )
 
     def compress_frames(self, frames: np.ndarray) -> np.ndarray:
         """Resize multiple frames efficiently with pre-allocated output array."""
-        logger.debug("Compressing %d frames to %dx%d",
-                     len(frames), self.target_width, self.target_height)
+        logger.debug(
+            "Compressing %d frames to %dx%d",
+            len(frames),
+            self.target_width,
+            self.target_height,
+        )
 
         n_frames = len(frames)
         if n_frames == 0:
@@ -54,22 +58,33 @@ class Compressor:
         # Pre-allocate output array to avoid list->array conversion overhead
         result = np.zeros(
             (n_frames, self.target_height, self.target_width, frames.shape[3]),
-            dtype=frames.dtype
+            dtype=frames.dtype,
         )
 
         for i, frame in enumerate(frames):
             result[i] = cv2.resize(
                 frame,
                 (self.target_width, self.target_height),
-                interpolation=cv2.INTER_AREA
+                interpolation=cv2.INTER_AREA,
             )
 
         logger.debug("Compression complete: output_shape=%s", result.shape)
 
         return result
 
-    def get_compression_ratio(self, original_shape: tuple, compressed_shape: tuple) -> float:
-        """Calculate compression ratio between original and compressed frame arrays."""
+    def get_compression_ratio(
+        self, original_shape: tuple, compressed_shape: tuple
+    ) -> float:
+        """
+        Calculate compression ratio between original and compressed frame arrays.
+
+        Args:
+            original_shape: Shape tuple of original frames (total elements)
+            compressed_shape: Shape tuple of compressed frames (total elements)
+
+        Returns:
+            float: Compression ratio (original_size / compressed_size)
+        """
         original_size = np.prod(original_shape)
         compressed_size = np.prod(compressed_shape)
 
