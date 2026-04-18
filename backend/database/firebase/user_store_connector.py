@@ -32,6 +32,23 @@ class UserStoreConnector(FirebaseConnector):
     MAX_USERS_PER_NAMESPACE = 10
     NAMESPACES_COLLECTION = "namespaces"
 
+    @classmethod
+    def _is_valid_pool_namespace(cls, namespace: str) -> bool:
+        """
+        Return True if namespace is a pool namespace id in the form ns_00..ns_{NAMESPACE_POOL_SIZE-1}.
+
+        We intentionally require exactly two digits to match _namespace_id() formatting.
+        """
+        if not isinstance(namespace, str):
+            return False
+        if not namespace.startswith("ns_"):
+            return False
+        suffix = namespace[3:]
+        if not suffix.isdigit():
+            return False
+        idx = int(suffix)
+        return 0 <= idx < cls.NAMESPACE_POOL_SIZE
+
     def __init__(self, firestore_client, collection: str = DEFAULT_COLLECTION):
         super().__init__(firestore_client)
         self.collection = collection
@@ -128,9 +145,7 @@ class UserStoreConnector(FirebaseConnector):
         if doc.exists:
             user_data = doc.to_dict()
             updates: Dict[str, Any] = {}
-            if not user_data.get("namespace") or not user_data["namespace"].startswith(
-                "ns_"
-            ):
+            if not self._is_valid_pool_namespace(user_data.get("namespace", "")):
                 updates["namespace"] = self._assign_namespace()
             if "vector_count" not in user_data:
                 updates["vector_count"] = 0
@@ -200,6 +215,12 @@ class UserStoreConnector(FirebaseConnector):
             current = user_data.get("vector_count", 0)
             quota = user_data.get("vector_quota", self.DEFAULT_VECTOR_QUOTA)
             return (True, current, quota)
+
+        if namespace and not self._is_valid_pool_namespace(namespace):
+            raise ValueError(
+                f"Invalid namespace '{namespace}'. Expected a pool ID in the form "
+                f"ns_00..ns_{self.NAMESPACE_POOL_SIZE - 1:02d}."
+            )
 
         user_ref = self.db.collection(self.collection).document(user_id)
 

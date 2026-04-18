@@ -855,6 +855,23 @@ class TestReserveQuotaEdgeCases:
         assert count == 0
         assert quota == 1
 
+    def test_invalid_namespace_raises_value_error(self, connector, mock_firestore):
+        """Namespace must be a valid pool id (ns_00..ns_19); invalid values should fail fast."""
+        user_doc_ref = MagicMock()
+        user_doc_ref.get.return_value = _mock_doc(
+            exists=True,
+            data={
+                "user_id": "u1",
+                "vector_count": 0,
+                "vector_quota": connector.DEFAULT_VECTOR_QUOTA,
+                "namespace": "ns_00",
+            },
+        )
+        mock_firestore.collection.return_value.document.return_value = user_doc_ref
+
+        with pytest.raises(ValueError, match="Invalid namespace"):
+            connector.reserve_quota("u1", 1, "not-a-pool-ns")
+
 
 # =============================================================================
 # Check Quota Defaults
@@ -983,10 +1000,10 @@ class TestBackfillEdgeCases:
         assert result["namespace"] == "ns_00"
         connector._assign_namespace.assert_called_once()
 
-    def test_ns_prefix_without_index_is_kept(
+    def test_ns_prefix_without_index_triggers_backfill(
         self, connector, mock_firestore, default_vector_quota
     ):
-        """namespace="ns_" has correct prefix → NOT reassigned (startswith passes)."""
+        """namespace="ns_" is not a valid pool id → should be reassigned."""
         existing = {
             "user_id": "auth0|ns_only",
             "namespace": "ns_",
@@ -999,8 +1016,8 @@ class TestBackfillEdgeCases:
 
         result = connector.get_or_create_user("auth0|ns_only")
 
-        assert result["namespace"] == "ns_"
-        connector._assign_namespace.assert_not_called()
+        assert result["namespace"] == "ns_00"
+        connector._assign_namespace.assert_called_once()
 
     def test_partial_backfill_only_missing_fields(self, connector, mock_firestore):
         """User with namespace and vector_count but missing vector_quota — only quota backfilled."""

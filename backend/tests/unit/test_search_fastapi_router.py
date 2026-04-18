@@ -31,7 +31,9 @@ class FakeUserStore:
 class FakeSearchService:
     """Fake SearchService for testing the router."""
 
-    def __init__(self, results: List[Dict[str, Any]] | None = None, namespace="user_test_ns"):
+    def __init__(
+        self, results: List[Dict[str, Any]] | None = None, namespace="user_test_ns"
+    ):
         self.results = results or []
         self.last_query: str | None = None
         self.last_namespace: str | None = None
@@ -39,7 +41,13 @@ class FakeSearchService:
         self.should_raise: Exception | None = None
         self.user_store = FakeUserStore(namespace=namespace)
 
-    def _search_demo(self, query: str, namespace: str = "", top_k: int = 10, metadata_filter: dict = None) -> List[Dict[str, Any]]:
+    def _search_demo(
+        self,
+        query: str,
+        namespace: str = "",
+        top_k: int = 10,
+        metadata_filter: dict = None,
+    ) -> List[Dict[str, Any]]:
         """Mock demo search implementation (R2 presigned URLs)."""
         self.last_query = query
         self.last_namespace = namespace
@@ -51,7 +59,13 @@ class FakeSearchService:
 
         return self.results
 
-    def _search_plugin(self, query: str, namespace: str = "", top_k: int = 10, metadata_filter: dict = None) -> List[Dict[str, Any]]:
+    def _search_plugin(
+        self,
+        query: str,
+        namespace: str = "",
+        top_k: int = 10,
+        metadata_filter: dict = None,
+    ) -> List[Dict[str, Any]]:
         """Mock plugin search implementation (no R2)."""
         self.last_query = query
         self.last_namespace = namespace
@@ -62,7 +76,9 @@ class FakeSearchService:
             raise self.should_raise
 
         if not self.results:
-            raise ValueError("No results found. Please upload content before searching.")
+            raise ValueError(
+                "No results found. Please upload content before searching."
+            )
 
         return self.results
 
@@ -85,8 +101,8 @@ SAMPLE_RESULTS = [
             "file_name": "video1.mp4",
             "start_time": 0.0,
             "end_time": 5.0,
-            "presigned_url": "https://example.com/video1.mp4"
-        }
+            "presigned_url": "https://example.com/video1.mp4",
+        },
     },
     {
         "id": "chunk-2",
@@ -96,9 +112,9 @@ SAMPLE_RESULTS = [
             "file_name": "video2.mp4",
             "start_time": 10.0,
             "end_time": 15.0,
-            "presigned_url": "https://example.com/video2.mp4"
-        }
-    }
+            "presigned_url": "https://example.com/video2.mp4",
+        },
+    },
 ]
 
 
@@ -115,11 +131,15 @@ def auth_connector() -> FakeAuthConnector:
 
 
 @pytest.fixture()
-def test_client(search_service: FakeSearchService, auth_connector: FakeAuthConnector) -> tuple[TestClient, FakeSearchService]:
+def test_client(
+    search_service: FakeSearchService, auth_connector: FakeAuthConnector
+) -> tuple[TestClient, FakeSearchService]:
     """Create FastAPI test client with search router and auth."""
     app = FastAPI()
     app.state.limiter = limiter
-    router = SearchFastAPIRouter(search_service_instance=search_service, auth_connector=auth_connector)
+    router = SearchFastAPIRouter(
+        search_service_instance=search_service, auth_connector=auth_connector
+    )
     app.include_router(router.router)
     return TestClient(app), search_service
 
@@ -127,7 +147,9 @@ def test_client(search_service: FakeSearchService, auth_connector: FakeAuthConne
 class TestHealthEndpoint:
     """Test /health endpoint."""
 
-    def test_health_returns_ok(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_health_returns_ok(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify health check returns ok status."""
         client, _ = test_client
         resp = client.get("/health")
@@ -137,7 +159,9 @@ class TestHealthEndpoint:
         assert data["status"] == "ok"
         assert data["service"] == "search"
 
-    def test_health_requires_no_auth(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_health_requires_no_auth(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify health endpoint is public (no auth required)."""
         client, _ = test_client
         resp = client.get("/health")
@@ -148,10 +172,16 @@ class TestHealthEndpoint:
 class TestSearchEndpoint:
     """Test /search endpoint."""
 
-    def test_search_with_query_returns_results(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_with_query_returns_results(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify search returns results for a query."""
         client, service = test_client
-        resp = client.get("/search", params={"query": "woman on a train", "project_id": "proj-1"}, headers=AUTH_HEADERS)
+        resp = client.get(
+            "/search",
+            params={"query": "woman on a train", "project_id": "proj-1"},
+            headers=AUTH_HEADERS,
+        )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -163,41 +193,71 @@ class TestSearchEndpoint:
         assert "timing" in data
         assert "total_s" in data["timing"]
 
-    def test_search_passes_query_to_service(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_passes_query_to_service(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify query is passed correctly to service."""
         client, service = test_client
-        client.get("/search", params={"query": "test query", "project_id": "proj-1"}, headers=AUTH_HEADERS)
+        client.get(
+            "/search",
+            params={"query": "test query", "project_id": "proj-1"},
+            headers=AUTH_HEADERS,
+        )
 
         assert service.last_query == "test query"
 
-    def test_search_uses_user_namespace(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_uses_user_namespace(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify user's namespace from Firestore is used, not client-provided."""
         client, service = test_client
-        client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers=AUTH_HEADERS)
+        client.get(
+            "/search",
+            params={"query": "test", "project_id": "proj-1"},
+            headers=AUTH_HEADERS,
+        )
 
         # Namespace should come from user_store, not client params
         assert service.last_namespace == "user_test_ns"
 
-    def test_search_ignores_client_namespace_param(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_ignores_client_namespace_param(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify client-provided namespace param is ignored."""
         client, service = test_client
         # Even if client sends a namespace param, the user's assigned namespace is used
-        client.get("/search", params={"query": "test", "project_id": "proj-1", "namespace": "client-ns"}, headers=AUTH_HEADERS)
+        client.get(
+            "/search",
+            params={"query": "test", "project_id": "proj-1", "namespace": "client-ns"},
+            headers=AUTH_HEADERS,
+        )
 
         # Should still be user's namespace, not "client-ns"
         assert service.last_namespace == "user_test_ns"
 
-    def test_search_with_top_k(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_with_top_k(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify top_k parameter is passed to service."""
         client, service = test_client
-        client.get("/search", params={"query": "test", "project_id": "proj-1", "top_k": 20}, headers=AUTH_HEADERS)
+        client.get(
+            "/search",
+            params={"query": "test", "project_id": "proj-1", "top_k": 20},
+            headers=AUTH_HEADERS,
+        )
 
         assert service.last_top_k == 20
 
-    def test_search_with_default_top_k(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_with_default_top_k(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify default top_k is 10."""
         client, service = test_client
-        client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers=AUTH_HEADERS)
+        client.get(
+            "/search",
+            params={"query": "test", "project_id": "proj-1"},
+            headers=AUTH_HEADERS,
+        )
 
         assert service.last_top_k == 10
 
@@ -205,43 +265,67 @@ class TestSearchEndpoint:
         """Verify search uses the namespace from the user's Firestore doc."""
         service = FakeSearchService(results=list(SAMPLE_RESULTS), namespace="custom-ns")
         app = FastAPI()
-        router = SearchFastAPIRouter(search_service_instance=service, auth_connector=FakeAuthConnector())
+        router = SearchFastAPIRouter(
+            search_service_instance=service, auth_connector=FakeAuthConnector()
+        )
         app.include_router(router.router)
         client = TestClient(app)
 
-        client.get("/search", params={"query": "my search", "project_id": "proj-1"}, headers=AUTH_HEADERS)
+        client.get(
+            "/search",
+            params={"query": "my search", "project_id": "proj-1"},
+            headers=AUTH_HEADERS,
+        )
 
         assert service.last_query == "my search"
         assert service.last_namespace == "custom-ns"
 
-    def test_search_missing_query_returns_error(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_missing_query_returns_error(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify missing query parameter returns 422."""
         client, _ = test_client
-        resp = client.get("/search", params={"project_id": "proj-1"}, headers=AUTH_HEADERS)
+        resp = client.get(
+            "/search", params={"project_id": "proj-1"}, headers=AUTH_HEADERS
+        )
 
         assert resp.status_code == 422  # FastAPI validation error
 
-    def test_search_missing_project_id_returns_422(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_missing_project_id_returns_422(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify missing project_id parameter returns 422."""
         client, _ = test_client
         resp = client.get("/search", params={"query": "test"}, headers=AUTH_HEADERS)
 
         assert resp.status_code == 422  # FastAPI validation error
 
-    def test_search_empty_results_returns_404(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_empty_results_returns_404(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify empty results return 404 (user has no uploaded content)."""
         client, service = test_client
         service.results = []
 
-        resp = client.get("/search", params={"query": "nonexistent", "project_id": "proj-1"}, headers=AUTH_HEADERS)
+        resp = client.get(
+            "/search",
+            params={"query": "nonexistent", "project_id": "proj-1"},
+            headers=AUTH_HEADERS,
+        )
 
         assert resp.status_code == 404
         assert "upload content" in resp.json()["detail"].lower()
 
-    def test_search_filters_by_project_id(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_filters_by_project_id(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify project_id is always included in metadata filter."""
         client, service = test_client
-        client.get("/search", params={"query": "test", "project_id": "proj-abc"}, headers=AUTH_HEADERS)
+        client.get(
+            "/search",
+            params={"query": "test", "project_id": "proj-abc"},
+            headers=AUTH_HEADERS,
+        )
 
         assert service.last_metadata_filter == {
             "user_id": {"$eq": "test-user-id"},
@@ -252,29 +336,47 @@ class TestSearchEndpoint:
         """Verify 500 when user's namespace is missing from Firestore."""
         service = FakeSearchService(results=list(SAMPLE_RESULTS), namespace="")
         app = FastAPI()
-        router = SearchFastAPIRouter(search_service_instance=service, auth_connector=FakeAuthConnector())
+        router = SearchFastAPIRouter(
+            search_service_instance=service, auth_connector=FakeAuthConnector()
+        )
         app.include_router(router.router)
         client = TestClient(app, raise_server_exceptions=False)
 
-        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers=AUTH_HEADERS)
+        resp = client.get(
+            "/search",
+            params={"query": "test", "project_id": "proj-1"},
+            headers=AUTH_HEADERS,
+        )
 
         assert resp.status_code == 500
         assert "malformed" in resp.json()["detail"].lower()
 
-    def test_search_service_error_returns_500(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_service_error_returns_500(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify service errors return 500."""
         client, service = test_client
         service.should_raise = Exception("Database connection failed")
 
-        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers=AUTH_HEADERS)
+        resp = client.get(
+            "/search",
+            params={"query": "test", "project_id": "proj-1"},
+            headers=AUTH_HEADERS,
+        )
 
         assert resp.status_code == 500
         assert "Database connection failed" in resp.json()["detail"]
 
-    def test_search_timing_is_positive(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_search_timing_is_positive(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify timing is a positive number."""
         client, _ = test_client
-        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers=AUTH_HEADERS)
+        resp = client.get(
+            "/search",
+            params={"query": "test", "project_id": "proj-1"},
+            headers=AUTH_HEADERS,
+        )
 
         data = resp.json()
         assert data["timing"]["total_s"] >= 0
@@ -290,7 +392,9 @@ class TestDemoSearchEndpoint:
         yield
         limiter.enabled = True
 
-    def test_demo_search_returns_results(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_demo_search_returns_results(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify demo search returns results for a query."""
         client, service = test_client
         resp = client.get("/demo-search", params={"query": "woman on a train"})
@@ -305,49 +409,63 @@ class TestDemoSearchEndpoint:
         assert "timing" in data
         assert "total_s" in data["timing"]
 
-    def test_demo_search_requires_no_auth(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_demo_search_requires_no_auth(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify demo search is public (no auth required)."""
         client, _ = test_client
         resp = client.get("/demo-search", params={"query": "test"})
 
         assert resp.status_code == 200
 
-    def test_demo_search_passes_query_to_service(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_demo_search_passes_query_to_service(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify query is passed correctly to service."""
         client, service = test_client
         client.get("/demo-search", params={"query": "test query"})
 
         assert service.last_query == "test query"
 
-    def test_demo_search_uses_web_demo_namespace(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_demo_search_uses_web_demo_namespace(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify demo search always uses 'web-demo' namespace."""
         client, service = test_client
         client.get("/demo-search", params={"query": "test"})
 
         assert service.last_namespace == "web-demo"
 
-    def test_demo_search_with_top_k(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_demo_search_with_top_k(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify top_k parameter is passed to service."""
         client, service = test_client
         client.get("/demo-search", params={"query": "test", "top_k": 20})
 
         assert service.last_top_k == 20
 
-    def test_demo_search_with_default_top_k(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_demo_search_with_default_top_k(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify default top_k is 10."""
         client, service = test_client
         client.get("/demo-search", params={"query": "test"})
 
         assert service.last_top_k == 10
 
-    def test_demo_search_missing_query_returns_error(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_demo_search_missing_query_returns_error(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify missing query parameter returns 422."""
         client, _ = test_client
         resp = client.get("/demo-search")
 
         assert resp.status_code == 422
 
-    def test_demo_search_empty_results(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_demo_search_empty_results(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify empty results are handled correctly."""
         client, service = test_client
         service.results = []
@@ -358,7 +476,9 @@ class TestDemoSearchEndpoint:
         data = resp.json()
         assert data["results"] == []
 
-    def test_demo_search_service_error_returns_500(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_demo_search_service_error_returns_500(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify service errors return 500 with generic message."""
         client, service = test_client
         service.should_raise = Exception("Database connection failed")
@@ -369,167 +489,12 @@ class TestDemoSearchEndpoint:
         assert "internal error" in resp.json()["detail"].lower()
         assert "Database connection failed" not in resp.json()["detail"]
 
-    def test_demo_search_timing_is_positive(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
+    def test_demo_search_timing_is_positive(
+        self, test_client: tuple[TestClient, FakeSearchService]
+    ) -> None:
         """Verify timing is a positive number."""
         client, _ = test_client
         resp = client.get("/demo-search", params={"query": "test"})
 
         data = resp.json()
         assert data["timing"]["total_s"] >= 0
-
-
-class TestDemoSearchEndpoint:
-    """Test /demo-search endpoint."""
-
-    @pytest.fixture(autouse=True)
-    def _disable_limiter(self) -> None:
-        """Disable rate limiting for unit tests."""
-        limiter.enabled = False
-        yield
-        limiter.enabled = True
-
-    def test_demo_search_returns_results(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify demo search returns results for a query."""
-        client, service = test_client
-        resp = client.get("/demo-search", params={"query": "woman on a train"})
-
-        assert resp.status_code == 200
-        data = resp.json()
-
-        assert data["query"] == "woman on a train"
-        assert len(data["results"]) == 2
-        assert data["results"][0]["id"] == "chunk-1"
-        assert data["results"][0]["score"] == 0.95
-        assert "timing" in data
-        assert "total_s" in data["timing"]
-
-    def test_demo_search_requires_no_auth(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify demo search is public (no auth required)."""
-        client, _ = test_client
-        resp = client.get("/demo-search", params={"query": "test"})
-
-        assert resp.status_code == 200
-
-    def test_demo_search_passes_query_to_service(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify query is passed correctly to service."""
-        client, service = test_client
-        client.get("/demo-search", params={"query": "test query"})
-
-        assert service.last_query == "test query"
-
-    def test_demo_search_uses_web_demo_namespace(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify demo search always uses 'web-demo' namespace."""
-        client, service = test_client
-        client.get("/demo-search", params={"query": "test"})
-
-        assert service.last_namespace == "web-demo"
-
-    def test_demo_search_with_top_k(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify top_k parameter is passed to service."""
-        client, service = test_client
-        client.get("/demo-search", params={"query": "test", "top_k": 20})
-
-        assert service.last_top_k == 20
-
-    def test_demo_search_with_default_top_k(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify default top_k is 10."""
-        client, service = test_client
-        client.get("/demo-search", params={"query": "test"})
-
-        assert service.last_top_k == 10
-
-    def test_demo_search_missing_query_returns_error(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify missing query parameter returns 422."""
-        client, _ = test_client
-        resp = client.get("/demo-search")
-
-        assert resp.status_code == 422
-
-    def test_demo_search_empty_results(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify empty results are handled correctly."""
-        client, service = test_client
-        service.results = []
-
-        resp = client.get("/demo-search", params={"query": "nonexistent"})
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["results"] == []
-
-    def test_demo_search_service_error_returns_500(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify service errors return 500 with generic message."""
-        client, service = test_client
-        service.should_raise = Exception("Database connection failed")
-
-        resp = client.get("/demo-search", params={"query": "test"})
-
-        assert resp.status_code == 500
-        assert "internal error" in resp.json()["detail"].lower()
-        assert "Database connection failed" not in resp.json()["detail"]
-
-    def test_demo_search_timing_is_positive(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify timing is a positive number."""
-        client, _ = test_client
-        resp = client.get("/demo-search", params={"query": "test"})
-
-        data = resp.json()
-        assert data["timing"]["total_s"] >= 0
-
-
-class TestSearchAuth:
-    """Test auth protection on /search endpoint."""
-
-    def test_search_rejects_missing_auth(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify search returns 401 without auth header."""
-        app = FastAPI()
-        from auth.auth_connector import AuthConnector
-        service = FakeSearchService()
-        auth = AuthConnector(domain="test.auth0.com", audience="https://test-api")
-        router = SearchFastAPIRouter(search_service_instance=service, auth_connector=auth)
-        app.include_router(router.router)
-        client = TestClient(app, raise_server_exceptions=False)
-
-        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"})
-        assert resp.status_code == 401
-
-    def test_search_rejects_invalid_auth_scheme(self, test_client: tuple[TestClient, FakeSearchService]) -> None:
-        """Verify search returns 401 with non-Bearer auth."""
-        app = FastAPI()
-        from auth.auth_connector import AuthConnector
-        service = FakeSearchService()
-        auth = AuthConnector(domain="test.auth0.com", audience="https://test-api")
-        router = SearchFastAPIRouter(search_service_instance=service, auth_connector=auth)
-        app.include_router(router.router)
-        client = TestClient(app, raise_server_exceptions=False)
-
-        resp = client.get("/search", params={"query": "test", "project_id": "proj-1"}, headers={"Authorization": "Basic abc123"})
-        assert resp.status_code == 401
-
-
-class TestRouterInitialization:
-    """Test SearchFastAPIRouter initialization."""
-
-    def test_router_stores_service_instance(self) -> None:
-        """Verify router stores the service instance."""
-        service = FakeSearchService()
-        router = SearchFastAPIRouter(search_service_instance=service)
-
-        assert router.search_service is service
-
-    def test_router_stores_auth_connector(self) -> None:
-        """Verify router stores the auth connector."""
-        service = FakeSearchService()
-        auth = FakeAuthConnector()
-        router = SearchFastAPIRouter(search_service_instance=service, auth_connector=auth)
-
-        assert router.auth_connector is auth
-
-    def test_router_registers_routes(self) -> None:
-        """Verify router registers expected routes."""
-        service = FakeSearchService()
-        router = SearchFastAPIRouter(search_service_instance=service)
-
-        routes = [route.path for route in router.router.routes]
-        assert "/health" in routes
-        assert "/search" in routes
-        assert "/demo-search" in routes
