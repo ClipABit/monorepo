@@ -206,6 +206,18 @@ class UserStoreConnector(FirebaseConnector):
         @firestore.transactional
         def _reserve(transaction):
             snapshot = user_ref.get(transaction=transaction)
+            # Invariant (intended flow): the caller has already ensured the user exists
+            # via get_or_create_user(), which creates the user doc and assigns a valid
+            # pool namespace (ns_00..ns_19) and initializes namespace docs.
+            #
+            # Firestore transaction.update() fails if the document doesn't exist, so
+            # we fail fast with a clearer error to avoid silent misuse in other call sites.
+            if not snapshot.exists:
+                raise RuntimeError(
+                    f"reserve_quota requires an existing user doc for '{user_id}'. "
+                    "Call get_or_create_user(user_id) before reserve_quota()."
+                )
+
             data = snapshot.to_dict() if snapshot.exists else {}
             current = data.get("vector_count", 0)
             quota = data.get("vector_quota", self.DEFAULT_VECTOR_QUOTA)
@@ -218,6 +230,14 @@ class UserStoreConnector(FirebaseConnector):
                 ns_ref = self.db.collection(self.NAMESPACES_COLLECTION).document(
                     namespace
                 )
+                # Same invariant as above: namespace docs are expected to exist already.
+                ns_snapshot = ns_ref.get(transaction=transaction)
+                if not ns_snapshot.exists:
+                    raise RuntimeError(
+                        f"reserve_quota expected namespace doc '{namespace}' to exist. "
+                        "Ensure get_or_create_user()/_ensure_namespace_docs() has run and "
+                        "that the namespace is a valid pool id (ns_00..ns_19)."
+                    )
                 transaction.update(ns_ref, {"vector_count": Increment(count)})
             return (True, current, quota)
 

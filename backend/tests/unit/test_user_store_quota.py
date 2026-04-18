@@ -820,20 +820,20 @@ class TestReserveQuotaEdgeCases:
         assert count == 500
         mock_firestore.transaction.assert_not_called()
 
-    def test_user_doc_not_exists_in_transaction_uses_defaults(
-        self, connector, mock_firestore, default_vector_quota
+    def test_user_doc_not_exists_in_transaction_raises_clear_error(
+        self, connector, mock_firestore
     ):
-        """If user doc doesn't exist in transaction, defaults to vector_count=0."""
+        """reserve_quota assumes get_or_create_user has already created the user doc."""
         user_doc_ref = MagicMock()
         user_doc_ref.get.return_value = _mock_doc(exists=False)
 
         mock_firestore.collection.return_value.document.return_value = user_doc_ref
 
-        ok, count, quota = connector.reserve_quota("u1", 50, "")
-
-        assert ok is True
-        assert count == 0
-        assert quota == default_vector_quota
+        with pytest.raises(
+            RuntimeError,
+            match="Call get_or_create_user\\(user_id\\) before reserve_quota",
+        ):
+            connector.reserve_quota("u1", 50, "")
 
     def test_reserve_one_with_quota_one_and_count_zero(self, connector, mock_firestore):
         """Boundary: reserve 1 with quota=1, count=0 → 0+1=1 ≤ 1 → succeeds."""
