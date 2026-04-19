@@ -17,17 +17,13 @@ logger = logging.getLogger(__name__)
 env = get_environment()
 
 # Create Modal app with minimal image
-app = modal.App(
-    name=f"{env}-server",
-    image=get_server_image(),
-    secrets=[get_secrets()]
-)
+app = modal.App(name=f"{env}-server", image=get_server_image(), secrets=[get_secrets()])
 
 
-@app.cls(cpu=2.0, memory=2048, timeout=120, scaledown_window=180)
+@app.cls(cpu=2.0, memory=2048, timeout=3600, scaledown_window=180)
 class Server(ServerService):
     """Server with ASGI app for production deployment."""
-    
+
     @modal.enter()
     def startup(self):
         """Initialize connectors and create FastAPI app."""

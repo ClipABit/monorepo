@@ -10,4 +10,4 @@ Contains separate Modal app entry points:
 These are entry points, not modules to be imported.
 """
 
-__all__ = []
+__all__: list[str] = []
